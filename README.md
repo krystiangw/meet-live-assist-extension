@@ -4,6 +4,10 @@ Live Google Meet assistant. During a call it captures the transcript, shows it i
 and (Path A) feeds the local transcript server so a Claude Code session with your context can
 advise you in real time.
 
+**Integration guide / landing page:** [`docs/index.html`](docs/index.html) — a self-contained page.
+To host it: push to a (private) GitHub repo and enable **Pages** with source *Deploy from branch* →
+`/docs`. It also opens fine locally (`open docs/index.html`).
+
 **This is a personal / dogfood tool**, distributed unpacked — not a public Chrome Web Store product.
 See `../agent/.../meet-live-assist-BUILD-PLAN.md` for the full plan and why.
 

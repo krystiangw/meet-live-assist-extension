@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Meet Live Assist — live in-call AI assistant</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff; --fg: #1a1a2e; --muted: #5b5b73; --card: #f6f7fb;
+    --line: #e6e7ef; --brand1: #4f7cff; --brand2: #6f4ff0; --code: #f0f1f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1117; --fg: #e8e9f0; --muted: #9aa0b4; --card: #171a22;
+            --line: #262a36; --code: #1b1f29; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.6 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); }
+  a { color: var(--brand1); }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 20px; }
+  header.hero { padding: 64px 20px 40px; text-align: center;
+    background: radial-gradient(1200px 400px at 50% -10%, color-mix(in srgb, var(--brand2) 22%, transparent), transparent); }
+  .logo { width: 76px; height: 76px; border-radius: 18px; box-shadow: 0 8px 30px color-mix(in srgb, var(--brand2) 40%, transparent); }
+  h1 { font-size: 2.2rem; margin: 18px 0 6px; letter-spacing: -0.02em; }
+  .tag { color: var(--muted); font-size: 1.15rem; margin: 0 auto; max-width: 560px; }
+  .pill { display: inline-block; margin-top: 18px; padding: 5px 14px; border-radius: 20px; font-size: .85rem;
+    background: color-mix(in srgb, var(--brand1) 15%, transparent); color: var(--brand1); font-weight: 600; }
+  section { padding: 36px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: 1.4rem; margin: 0 0 18px; letter-spacing: -0.01em; }
+  h3 { font-size: 1.05rem; margin: 24px 0 6px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .card .ico { font-size: 1.4rem; }
+  .card h4 { margin: 8px 0 4px; font-size: 1rem; }
+  .card p { margin: 0; color: var(--muted); font-size: .93rem; }
+  ol.steps { padding-left: 0; list-style: none; counter-reset: s; }
+  ol.steps > li { position: relative; padding: 0 0 20px 46px; counter-increment: s; }
+  ol.steps > li::before { content: counter(s); position: absolute; left: 0; top: 0;
+    width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: .9rem;
+    color: #fff; background: linear-gradient(135deg, var(--brand1), var(--brand2)); }
+  ol.steps > li:not(:last-child)::after { content: ""; position: absolute; left: 14px; top: 34px; bottom: 4px; width: 2px; background: var(--line); }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  code { background: var(--code); padding: 2px 6px; border-radius: 5px; font-size: .9em; }
+  pre { background: var(--code); padding: 14px 16px; border-radius: 10px; overflow-x: auto; border: 1px solid var(--line); }
+  pre code { background: none; padding: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: .93rem; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .marker { font-weight: 700; white-space: nowrap; }
+  .note { background: color-mix(in srgb, var(--brand1) 8%, transparent); border: 1px solid color-mix(in srgb, var(--brand1) 25%, transparent);
+    border-radius: 10px; padding: 12px 16px; color: var(--muted); font-size: .93rem; }
+  footer { padding: 40px 20px 60px; text-align: center; color: var(--muted); font-size: .88rem; }
+</style>
+</head>
+<body>
+<header class="hero">
+  <svg class="logo" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" aria-label="Meet Live Assist">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f7cff"/><stop offset="1" stop-color="#6f4ff0"/></linearGradient></defs>
+    <rect x="6" y="6" width="116" height="116" rx="27" fill="url(#g)"/>
+    <path d="M36 34h56a11 11 0 0 1 11 11v30a11 11 0 0 1-11 11H60l-18 17V86h-6a11 11 0 0 1-11-11V45a11 11 0 0 1 11-11z" fill="#fff"/>
+    <g fill="#5a6bff"><rect x="49" y="54" width="9" height="16" rx="4.5"/><rect x="64" y="45" width="9" height="34" rx="4.5"/><rect x="79" y="58" width="9" height="8" rx="4"/></g>
+  </svg>
+  <h1>Meet Live Assist</h1>
+  <p class="tag">A live AI assistant for Google Meet. It reads the call in real time and — using <em>your</em> context — feeds you advice, visual context, chat, and can even speak into the call on your behalf.</p>
+  <span class="pill">Local-first · your machine, your keys, your context</span>
+</header>
+
+<div class="wrap">
+
+<section>
+  <h2>What it does</h2>
+  <div class="grid">
+    <div class="card"><div class="ico">📝</div><h4>Live transcript</h4><p>Captures the Meet call transcript in real time into a side panel.</p></div>
+    <div class="card"><div class="ico">🟢</div><h4>Colour-coded advice</h4><p>Your assistant pushes what to say, facts, summaries, risks and actions — links & images included.</p></div>
+    <div class="card"><div class="ico">📷</div><h4>Smart snapshots</h4><p>Auto-captures the tab while someone shares their screen; on-demand otherwise — visual context for the assistant.</p></div>
+    <div class="card"><div class="ico">💬</div><h4>In-panel chat</h4><p>A two-way back-channel to ask the assistant things mid-call without speaking.</p></div>
+    <div class="card"><div class="ico">🔊</div><h4>Speak into the call</h4><p>Text-to-speech in the call's language that can be routed straight into the meeting.</p></div>
+    <div class="card"><div class="ico">🔒</div><h4>Local-first</h4><p>Runs against a local server on your machine; nothing is sent to a third-party product.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>How it works</h2>
+  <p>Three pieces, all on your machine:</p>
+  <pre><code>Google Meet tab
+   │  (transcript, snapshots, mic control)
+   ▼
+Chrome extension  ──HTTP──►  Local bridge server (127.0.0.1:8848)
+   ▲  (advice, chat, TTS)          │
+   └───────────────────────────────┤  transcript file + advice/chat channels
+                                    ▼
+                          The "brain" — a Claude Code session with YOUR
+                          context (notes, docs, tools) tails the transcript
+                          and replies with advice / chat / TTS.</code></pre>
+  <p class="note">The extension only captures and displays. The intelligence is the brain — a local agent session that already knows your work. That is the differentiator: advice grounded in <em>your</em> real context, not a generic model.</p>
+</section>
+
+<section>
+  <h2>Integrate it</h2>
+  <ol class="steps">
+    <li>
+      <h3>Run the bridge server</h3>
+      <p>A tiny zero-dependency Node server sinks the transcript and carries advice/chat/TTS. Autostart it with launchd:</p>
+      <pre><code>cp server/com.mla.meet-transcript-server.plist ~/Library/LaunchAgents/
+launchctl load -w ~/Library/LaunchAgents/com.mla.meet-transcript-server.plist
+curl -s http://127.0.0.1:8848/health   # → {"ok":true,...}</code></pre>
+    </li>
+    <li>
+      <h3>Load the extension</h3>
+      <p><code>chrome://extensions</code> → enable <strong>Developer mode</strong> → <strong>Load unpacked</strong> → pick this folder. Pin it and click the icon to open the side panel.</p>
+    </li>
+    <li>
+      <h3>Point the brain at the transcript</h3>
+      <p>In your Claude Code session, load the <code>meet-live-assist</code> skill and ask it to watch your meeting. It tails the transcript, pushes advice to <code>/advice</code>, and answers chat on <code>/chat</code>.</p>
+    </li>
+    <li>
+      <h3>(Optional) Enable "speak into the call"</h3>
+      <p>TTS needs a virtual audio device so synthesized speech reaches Meet as your microphone:</p>
+      <pre><code>brew install blackhole-2ch</code></pre>
+      <p>Then in <strong>Audio MIDI Setup</strong> create an <strong>Aggregate Device</strong> combining your real microphone + <strong>BlackHole 2ch</strong> (drift-correct BlackHole), and set it as your macOS default input. Tick <strong>🎙 into call</strong> in the panel and press 🔊 on a suggestion.</p>
+    </li>
+  </ol>
+</section>
+
+<section>
+  <h2>Advice markers</h2>
+  <table>
+    <tr><th>Marker</th><th>Meaning</th></tr>
+    <tr><td><span class="marker" style="color:#1a7f37">🟢 SAY</span></td><td>Exact words you can say right now (in the call's language). Press 🔊 to voice it.</td></tr>
+    <tr><td><span class="marker" style="color:#2f6feb">🔵 INFO</span></td><td>A fact, number, link or name from your context.</td></tr>
+    <tr><td><span class="marker" style="color:#b8860b">🟡 SUMMARY</span></td><td>Where the discussion is / what was just decided.</td></tr>
+    <tr><td><span class="marker" style="color:#8250df">🟣 EXPLAIN</span></td><td>A short explanation of a term or the <em>why</em> behind something.</td></tr>
+    <tr><td><span class="marker" style="color:#d1242f">🔴 RISK</span></td><td>A risk, a decision to recall, or a contradiction to flag.</td></tr>
+    <tr><td><span class="marker" style="color:#e36209">🟠 ACTION</span></td><td>Something you could do / were asked to do — the assistant can perform it on your confirmation.</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>Server API</h2>
+  <table>
+    <tr><th>Endpoint</th><th>Purpose</th></tr>
+    <tr><td><code>POST /append</code></td><td>Transcript sink (from the extension).</td></tr>
+    <tr><td><code>POST /advice</code> · <code>GET /advice</code></td><td>Brain pushes advice; panel polls it. Supports rich text + <code>image</code>.</td></tr>
+    <tr><td><code>POST /chat</code> · <code>GET /chat</code></td><td>Two-way chat (<code>role: user|agent</code>).</td></tr>
+    <tr><td><code>POST /snapshot</code> · <code>POST /snapshot-request</code></td><td>Store a tab snapshot; brain requests one.</td></tr>
+    <tr><td><code>POST /speak</code> · <code>GET /voices</code></td><td>TTS (per-language voice, optional device routing).</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>Privacy</h2>
+  <p class="note">Everything runs locally: the transcript, snapshots and advice never leave your machine except through the LLM your own brain session uses. Capturing a meeting is recording — get participants' consent, especially on external calls.</p>
+</section>
+
+</div>
+
+<footer>
+  Meet Live Assist · local-first live meeting assistant · internal / private preview
+</footer>
+</body>
+</html>
