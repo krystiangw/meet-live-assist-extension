@@ -65,6 +65,15 @@
     .advice-item.ACTION { border-left-color: var(--action); background: color-mix(in srgb, var(--action) 12%, transparent); }
     .advice-item.ACTION .marker { color: var(--action); }
     .advice-item.SAY .body { font-weight: 600; }
+    .advice-item .body a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+    .advice-item .body code {
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: color-mix(in srgb, CanvasText 12%, transparent); padding: 1px 4px; border-radius: 4px;
+    }
+    .rich-img {
+      display: block; max-width: 100%; margin-top: 6px; border-radius: 6px;
+      border: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+    }
 
     #log { flex: 1; overflow-y: auto; padding: 4px 12px 8px; }
     .line { margin: 0 0 6px; opacity: .85; }

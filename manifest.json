@@ -26,5 +26,8 @@
   "options_page": "src/options.html",
   "action": {
     "default_title": "Meet Live Assist"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: https: http://127.0.0.1:8848"
   }
 }

@@ -48,13 +48,50 @@ function appendLine({ ts, speaker, text }) {
 }
 
 // ---- advice --------------------------------------------------------------
-function appendAdvice({ marker, text }) {
+// Safe inline rich rendering — no innerHTML. Supports bare URLs, [text](url), ![alt](url) images,
+// **bold**, and `code`. Everything else stays literal text.
+const RICH = [
+  { re: /!\[([^\]]*)\]\((https?:\/\/[^\s)]+|data:image\/[^\s)]+)\)/, kind: 'img' },
+  { re: /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/, kind: 'link' },
+  { re: /(https?:\/\/[^\s]+)/, kind: 'url' },
+  { re: /\*\*([^*]+)\*\*/, kind: 'bold' },
+  { re: /`([^`]+)`/, kind: 'code' },
+];
+function renderInline(parent, line) {
+  let rest = line;
+  while (rest) {
+    let best = null;
+    for (const p of RICH) {
+      const m = p.re.exec(rest);
+      if (m && (best === null || m.index < best.m.index)) best = { p, m };
+    }
+    if (!best) { parent.appendChild(document.createTextNode(rest)); break; }
+    if (best.m.index > 0) parent.appendChild(document.createTextNode(rest.slice(0, best.m.index)));
+    const [full, g1, g2] = best.m;
+    if (best.p.kind === 'img') { const i = document.createElement('img'); i.src = g2; i.alt = g1 || ''; i.className = 'rich-img'; parent.appendChild(i); }
+    else if (best.p.kind === 'link') { const a = document.createElement('a'); a.href = g2; a.textContent = g1; a.target = '_blank'; a.rel = 'noreferrer'; parent.appendChild(a); }
+    else if (best.p.kind === 'url') { const a = document.createElement('a'); a.href = g1; a.textContent = g1; a.target = '_blank'; a.rel = 'noreferrer'; parent.appendChild(a); }
+    else if (best.p.kind === 'bold') { const b = document.createElement('strong'); b.textContent = g1; parent.appendChild(b); }
+    else if (best.p.kind === 'code') { const c = document.createElement('code'); c.textContent = g1; parent.appendChild(c); }
+    rest = rest.slice(best.m.index + full.length);
+  }
+}
+function renderRich(parent, text) {
+  const lines = String(text || '').split('\n');
+  lines.forEach((line, i) => { if (i) parent.appendChild(document.createElement('br')); renderInline(parent, line); });
+}
+
+function appendAdvice({ marker, text, image }) {
   if (!hasAdvice) { adviceEl.innerHTML = ''; hasAdvice = true; }
   const m = (marker || 'INFO').toUpperCase();
   const div = document.createElement('div');
   div.className = 'advice-item ' + (MARKER_LABEL[m] ? m : 'INFO');
   const mk = document.createElement('span'); mk.className = 'marker'; mk.textContent = MARKER_LABEL[m] || '🔵 INFO';
-  const bd = document.createElement('span'); bd.className = 'body'; bd.textContent = text || '';
+  const bd = document.createElement('span'); bd.className = 'body';
+  renderRich(bd, text);
+  if (image && /^(https?:|data:image\/)/.test(image)) {
+    const img = document.createElement('img'); img.src = image; img.className = 'rich-img'; bd.appendChild(img);
+  }
   div.append(mk, bd);
   if (m === 'SAY' && text) {
     const sp = document.createElement('button');

@@ -159,11 +159,12 @@ const server = http.createServer((req, res) => {
       const session = safeSession(data.session);
       const marker = String(data.marker || 'INFO').toUpperCase();
       const text = typeof data.text === 'string' ? data.text.trim() : '';
-      if (!text) { res.writeHead(400); return res.end('empty text'); }
+      const image = typeof data.image === 'string' && /^(https?:|data:image\/)/.test(data.image) ? data.image : null;
+      if (!text && !image) { res.writeHead(400); return res.end('empty'); }
       let a = advice.get(session);
       if (!a) { a = { seq: 0, items: [] }; advice.set(session, a); }
       a.seq++;
-      const item = { seq: a.seq, ts: new Date().toISOString(), marker: MARKERS.has(marker) ? marker : 'INFO', text };
+      const item = { seq: a.seq, ts: new Date().toISOString(), marker: MARKERS.has(marker) ? marker : 'INFO', text, image };
       a.items.push(item);
       if (a.items.length > ADVICE_MAX) a.items.splice(0, a.items.length - ADVICE_MAX);
       res.writeHead(200, { 'Content-Type': 'application/json' });
