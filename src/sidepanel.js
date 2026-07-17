@@ -11,6 +11,9 @@ const snapBtn = document.getElementById('snapNow');
 const shareEl = document.getElementById('shareStatus');
 const speakEl = document.getElementById('speakStatus');
 const sessionEl = document.getElementById('session');
+const chatEl = document.getElementById('chat');
+const chatForm = document.getElementById('chatForm');
+const chatInput = document.getElementById('chatInput');
 
 const MARKER_LABEL = { SAY: '🟢 SAY', INFO: '🔵 INFO', SUMMARY: '🟡 SUMMARY', EXPLAIN: '🟣 EXPLAIN', RISK: '🔴 RISK', ACTION: '🟠 ACTION' };
 const DEFAULT_SERVER = 'http://127.0.0.1:8848';
@@ -20,6 +23,7 @@ let hasAdvice = false;
 let currentSession = null;
 let lastAdviceSeq = 0;
 let lastReqSeq = -1; // -1 = baseline unknown for this session (don't fire on first poll)
+let lastChatSeq = 0;
 let sharing = false;
 let serverUrl = DEFAULT_SERVER;
 let ttsVoicePl = null;
@@ -179,6 +183,43 @@ async function pollSnapRequest() {
 
 function requestCapture() { try { port.postMessage({ type: 'snapshot-now' }); } catch (_) {} }
 
+// ---- chat ----------------------------------------------------------------
+function appendChat({ role, text, image }) {
+  const div = document.createElement('div');
+  div.className = 'chat-msg ' + (role === 'agent' ? 'agent' : 'user');
+  renderRich(div, text);
+  if (image && /^(https?:|data:image\/)/.test(image)) {
+    const img = document.createElement('img'); img.src = image; img.className = 'rich-img'; div.appendChild(img);
+  }
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+async function pollChat() {
+  if (!currentSession) return;
+  try {
+    const r = await fetch(`${serverUrl}/chat?session=${encodeURIComponent(currentSession)}&since=${lastChatSeq}`);
+    if (!r.ok) return;
+    const { items, last } = await r.json();
+    (items || []).forEach(appendChat);
+    if (typeof last === 'number') lastChatSeq = Math.max(lastChatSeq, last);
+  } catch (_) { /* server down */ }
+}
+
+chatForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = chatInput.value.trim();
+  if (!text || !currentSession) return;
+  chatInput.value = '';
+  try {
+    await fetch(`${serverUrl}/chat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: currentSession, role: 'user', text }),
+    });
+    pollChat(); // reflect immediately
+  } catch (_) {}
+});
+
 function setSharing(on) {
   sharing = !!on;
   shareEl.hidden = !sharing;
@@ -191,7 +232,7 @@ function setSharing(on) {
 
 function startPolling() {
   clearInterval(pollTimer);
-  pollTimer = setInterval(() => { pollAdvice(); pollSnapRequest(); }, 1500);
+  pollTimer = setInterval(() => { pollAdvice(); pollSnapRequest(); pollChat(); }, 1500);
 }
 
 // ---- SW port (transcript + status) ---------------------------------------
@@ -238,8 +279,9 @@ snapBtn.addEventListener('click', () => { try { port.postMessage({ type: 'snapsh
 
 function setSession(session) {
   if (session && session !== currentSession) {
-    currentSession = session; lastAdviceSeq = 0; lastReqSeq = -1;
-    pollAdvice(); pollSnapRequest();
+    currentSession = session; lastAdviceSeq = 0; lastReqSeq = -1; lastChatSeq = 0;
+    chatEl.innerHTML = '';
+    pollAdvice(); pollSnapRequest(); pollChat();
   }
 }
 

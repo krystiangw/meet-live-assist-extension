@@ -96,6 +96,12 @@ const MARKERS = new Set(['SAY', 'INFO', 'SUMMARY', 'EXPLAIN', 'RISK', 'ACTION'])
 // Agent-requested snapshots: the brain bumps a seq; the side panel polls it and triggers a capture.
 const snapReq = new Map(); // session -> seq
 
+// Two-way chat: panel <-> brain. User messages are also appended to <session>.chat.txt so the
+// brain (Claude Code session) can tail them and reply via POST /chat {role:"agent"}.
+const chat = new Map(); // session -> { seq, items: [{ seq, ts, role, text, image }] }
+const CHAT_MAX = 300;
+function chatFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.chat.txt`); }
+
 // Only allow safe, contained filenames (no path traversal).
 function safeSession(name) {
   const cleaned = String(name || '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120);
@@ -238,6 +244,45 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(voices));
     });
+    return;
+  }
+
+  // Chat write: panel posts role="user", brain posts role="agent".
+  if (req.method === 'POST' && req.url === '/chat') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 2e6) req.destroy(); });
+    req.on('end', () => {
+      let data;
+      try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
+      const session = safeSession(data.session);
+      const role = data.role === 'agent' ? 'agent' : 'user';
+      const text = typeof data.text === 'string' ? data.text.trim() : '';
+      const image = typeof data.image === 'string' && /^(https?:|data:image\/)/.test(data.image) ? data.image : null;
+      if (!text && !image) { res.writeHead(400); return res.end('empty'); }
+      let c = chat.get(session);
+      if (!c) { c = { seq: 0, items: [] }; chat.set(session, c); }
+      c.seq++;
+      const item = { seq: c.seq, ts: new Date().toISOString(), role, text, image };
+      c.items.push(item);
+      if (c.items.length > CHAT_MAX) c.items.splice(0, c.items.length - CHAT_MAX);
+      // Only user messages go to the tailable file (the brain reads those and replies).
+      if (role === 'user' && text) {
+        try { fs.appendFileSync(chatFileFor(session), `[${item.ts}] ${text}\n`); } catch (_) {}
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(item));
+    });
+    return;
+  }
+
+  // Chat read (panel polls).
+  if (req.method === 'GET' && req.url.startsWith('/chat')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const session = safeSession(u.searchParams.get('session'));
+    const since = parseInt(u.searchParams.get('since') || '0', 10) || 0;
+    const c = chat.get(session) || { seq: 0, items: [] };
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ items: c.items.filter((i) => i.seq > since), last: c.seq }));
     return;
   }
 

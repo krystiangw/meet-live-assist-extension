@@ -75,7 +75,19 @@
       border: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
     }
 
-    #log { flex: 1; overflow-y: auto; padding: 4px 12px 8px; }
+    #log { flex: 1; overflow-y: auto; padding: 4px 12px 8px; min-height: 60px; }
+
+    #chat { flex: 0 0 auto; max-height: 26vh; overflow-y: auto; padding: 2px 12px 6px;
+      border-top: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
+    .chat-msg { margin: 6px 0; padding: 6px 9px; border-radius: 8px; max-width: 88%; word-wrap: break-word; }
+    .chat-msg.user { margin-left: auto; background: color-mix(in srgb, #2f6feb 20%, transparent); }
+    .chat-msg.agent { margin-right: auto; background: color-mix(in srgb, CanvasText 10%, transparent); }
+    .chat-msg a { color: inherit; }
+    #chatForm { display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
+    #chatInput { flex: 1; padding: 7px 9px; font: inherit; border-radius: 6px;
+      border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: Field; color: FieldText; }
+    #chatForm button { padding: 7px 12px; font: inherit; border-radius: 6px; cursor: pointer;
+      border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: transparent; color: inherit; }
     .line { margin: 0 0 6px; opacity: .85; }
     .line .ts { opacity: 0.45; font-variant-numeric: tabular-nums; margin-right: 6px; }
     .line .who { font-weight: 600; }
@@ -104,6 +116,13 @@
 
   <div class="section-label">Transcript</div>
   <div id="log"><div class="empty">Waiting for a Google Meet call…</div></div>
+
+  <div class="section-label">Chat</div>
+  <div id="chat"></div>
+  <form id="chatForm">
+    <input id="chatInput" type="text" placeholder="Ask the assistant…" autocomplete="off" />
+    <button type="submit">Send</button>
+  </form>
 
   <script src="sidepanel.js"></script>
 </body>
