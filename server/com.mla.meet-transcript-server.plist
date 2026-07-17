@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Autostart the transcript server at login (macOS launchd).
+
+  SETUP:
+    1. Node path below points at your fnm-managed node (v22.22.3). If you later switch node versions
+       via fnm, update the path (run: readlink -f "$(which node)").
+    2. Copy this file to:        ~/Library/LaunchAgents/com.mla.meet-transcript-server.plist
+    3. Load it:                  launchctl load -w ~/Library/LaunchAgents/com.mla.meet-transcript-server.plist
+       (to stop:                 launchctl unload -w ~/Library/LaunchAgents/com.mla.meet-transcript-server.plist)
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.mla.meet-transcript-server</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/you/.local/share/fnm/node-versions/v22.22.3/installation/bin/node</string>
+    <string>/Users/you/projects/meet-live-assist/meet-transcript/transcript-server.js</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PORT</key>
+    <string>8848</string>
+    <key>TRANSCRIPTS_DIR</key>
+    <string>/Users/you/projects/meet-live-assist/transcripts</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/you/projects/meet-live-assist/meet-transcript/server.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/you/projects/meet-live-assist/meet-transcript/server.log</string>
+</dict>
+</plist>

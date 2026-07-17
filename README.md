@@ -28,6 +28,18 @@ No LLM/advice wiring yet — that is Phase 1.
   `chrome.alarms` heartbeat (30s) wakes the SW even after it was unloaded.
 - **Server POST happens in the SW** (has `127.0.0.1:8848` host permission), not the content script.
 
+## The bridge server
+
+The extension talks to a small local Node server (`127.0.0.1:8848`) that is the "brain" bridge:
+transcript sink (`/append`), advice channel (`/advice`), snapshots (`/snapshot`, `/snapshot-request`),
+and TTS (`/speak`, `/voices`).
+
+`server/transcript-server.js` here is a **version-controlled snapshot**. The **live** copy runs from
+`~/projects/meet-live-assist/meet-transcript/transcript-server.js` via launchd
+(`com.mla.meet-transcript-server`, also snapshotted in `server/`). Keep the two in sync, or repoint launchd
+at this repo copy to make it the single source. Requires `ffmpeg` (Homebrew) for TTS device routing;
+launchd's PATH lacks it, so the server uses an absolute `/opt/homebrew/bin/ffmpeg`.
+
 ## Load it (unpacked)
 
 1. Make sure the transcript server is running (launchd autostart is already installed):
