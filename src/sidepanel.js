@@ -80,9 +80,42 @@ function renderInline(parent, line) {
     rest = rest.slice(best.m.index + full.length);
   }
 }
+// Block-level: fenced ``` code, - / * bullet lists, 1. numbered lists, else inline paragraphs.
 function renderRich(parent, text) {
   const lines = String(text || '').split('\n');
-  lines.forEach((line, i) => { if (i) parent.appendChild(document.createElement('br')); renderInline(parent, line); });
+  let i = 0;
+  const isBullet = (l) => /^\s*[-*]\s+/.test(l);
+  const isNum = (l) => /^\s*\d+\.\s+/.test(l);
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.trim().startsWith('```')) {
+      const buf = []; i++;
+      while (i < lines.length && !lines[i].trim().startsWith('```')) { buf.push(lines[i]); i++; }
+      i++; // skip closing fence
+      const pre = document.createElement('pre'); pre.className = 'rich-pre';
+      const code = document.createElement('code'); code.textContent = buf.join('\n');
+      pre.appendChild(code); parent.appendChild(pre);
+      continue;
+    }
+    if (isBullet(line) || isNum(line)) {
+      const num = isNum(line);
+      const list = document.createElement(num ? 'ol' : 'ul'); list.className = 'rich-list';
+      const match = num ? isNum : isBullet;
+      while (i < lines.length && match(lines[i])) {
+        const li = document.createElement('li');
+        renderInline(li, lines[i].replace(num ? /^\s*\d+\.\s+/ : /^\s*[-*]\s+/, ''));
+        list.appendChild(li); i++;
+      }
+      parent.appendChild(list);
+      continue;
+    }
+    renderInline(parent, line);
+    const next = lines[i + 1];
+    if (next !== undefined && !next.trim().startsWith('```') && !isBullet(next) && !isNum(next)) {
+      parent.appendChild(document.createElement('br'));
+    }
+    i++;
+  }
 }
 
 function appendAdvice({ marker, text, image }) {
