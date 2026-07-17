@@ -1,0 +1,160 @@
+// Side panel — primary live UI. This page persists while open, so it (not the SW) owns any
+// long-lived state/streaming. Renders live transcript (via the SW port) + live advice (polled
+// straight from the transcript server's /advice channel — the "brain" POSTs advice there).
+
+const logEl = document.getElementById('log');
+const adviceEl = document.getElementById('advice');
+const capEl = document.getElementById('capStatus');
+const srvEl = document.getElementById('srvStatus');
+const snapEl = document.getElementById('snapStatus');
+const snapBtn = document.getElementById('snapNow');
+const shareEl = document.getElementById('shareStatus');
+const sessionEl = document.getElementById('session');
+
+const MARKER_LABEL = { SAY: '🟢 SAY', INFO: '🔵 INFO', SUMMARY: '🟡 SUMMARY', EXPLAIN: '🟣 EXPLAIN', RISK: '🔴 RISK', ACTION: '🟠 ACTION' };
+const DEFAULT_SERVER = 'http://127.0.0.1:8848';
+
+let hasLines = false;
+let hasAdvice = false;
+let currentSession = null;
+let lastAdviceSeq = 0;
+let lastReqSeq = -1; // -1 = baseline unknown for this session (don't fire on first poll)
+let sharing = false;
+let serverUrl = DEFAULT_SERVER;
+let port = null;
+let pingTimer = null;
+let pollTimer = null;
+let shareTimer = null;
+
+function setStatus(el, text, cls) { el.textContent = text; el.className = 'status ' + cls; }
+
+// ---- transcript ----------------------------------------------------------
+function clearLog() { logEl.innerHTML = ''; hasLines = false; }
+
+function appendLine({ ts, speaker, text }) {
+  if (!hasLines) { logEl.innerHTML = ''; hasLines = true; }
+  const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+  const div = document.createElement('div');
+  div.className = 'line';
+  const t = document.createElement('span'); t.className = 'ts'; t.textContent = ts || '';
+  const w = document.createElement('span'); w.className = 'who'; w.textContent = (speaker || 'Unknown') + ': ';
+  div.append(t, w, document.createTextNode(text || ''));
+  logEl.appendChild(div);
+  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ---- advice --------------------------------------------------------------
+function appendAdvice({ marker, text }) {
+  if (!hasAdvice) { adviceEl.innerHTML = ''; hasAdvice = true; }
+  const m = (marker || 'INFO').toUpperCase();
+  const div = document.createElement('div');
+  div.className = 'advice-item ' + (MARKER_LABEL[m] ? m : 'INFO');
+  const mk = document.createElement('span'); mk.className = 'marker'; mk.textContent = MARKER_LABEL[m] || '🔵 INFO';
+  const bd = document.createElement('span'); bd.className = 'body'; bd.textContent = text || '';
+  div.append(mk, bd);
+  adviceEl.appendChild(div);
+  adviceEl.scrollTop = adviceEl.scrollHeight;
+}
+
+function resetAdvice() { adviceEl.innerHTML = '<div class="empty small">Advice will appear here live…</div>'; hasAdvice = false; lastAdviceSeq = 0; }
+
+async function pollAdvice() {
+  if (!currentSession) return;
+  try {
+    const r = await fetch(`${serverUrl}/advice?session=${encodeURIComponent(currentSession)}&since=${lastAdviceSeq}`);
+    if (!r.ok) return;
+    const { items, last } = await r.json();
+    (items || []).forEach(appendAdvice);
+    if (typeof last === 'number') lastAdviceSeq = Math.max(lastAdviceSeq, last);
+  } catch (_) { /* server down — transcript-side status already reflects it */ }
+}
+
+async function pollSnapRequest() {
+  if (!currentSession) return;
+  try {
+    const r = await fetch(`${serverUrl}/snapshot-request?session=${encodeURIComponent(currentSession)}`);
+    if (!r.ok) return;
+    const { seq } = await r.json();
+    if (typeof seq !== 'number') return;
+    if (lastReqSeq < 0) { lastReqSeq = seq; return; } // first poll = baseline, don't fire
+    if (seq > lastReqSeq) { lastReqSeq = seq; requestCapture(); } // agent asked for a shot
+  } catch (_) { /* server down */ }
+}
+
+function requestCapture() { try { port.postMessage({ type: 'snapshot-now' }); } catch (_) {} }
+
+function setSharing(on) {
+  sharing = !!on;
+  shareEl.hidden = !sharing;
+  clearInterval(shareTimer);
+  if (sharing) {
+    requestCapture(); // grab one immediately when sharing starts
+    shareTimer = setInterval(requestCapture, 15000); // frequent while presenting
+  }
+}
+
+function startPolling() {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(() => { pollAdvice(); pollSnapRequest(); }, 1500);
+}
+
+// ---- SW port (transcript + status) ---------------------------------------
+function onMessage(msg) {
+  switch (msg.type) {
+    case 'restore':
+      clearLog();
+      if (msg.session) { setStatus(capEl, 'capturing', 'ok'); sessionEl.textContent = msg.session; setSession(msg.session); }
+      (msg.buffer || []).forEach(appendLine);
+      setSharing(!!msg.sharing);
+      break;
+    case 'session':
+      clearLog(); resetAdvice();
+      setStatus(capEl, 'capturing', 'ok');
+      sessionEl.textContent = msg.session || '';
+      setSession(msg.session);
+      break;
+    case 'line':
+      setStatus(capEl, 'capturing', 'ok');
+      appendLine(msg);
+      break;
+    case 'session-end':
+      setStatus(capEl, 'call ended', 'idle');
+      setSharing(false);
+      break;
+    case 'sharing':
+      setSharing(msg.on);
+      break;
+    case 'server':
+      setStatus(srvEl, msg.ok ? 'server ✓' : 'server ✗ (start it)', msg.ok ? 'ok' : 'bad');
+      break;
+    case 'snapshot':
+      if (msg.ok) setStatus(snapEl, `shots ${msg.count ?? '·'}`, 'ok');
+      else setStatus(snapEl, `shot ✗ ${msg.reason || ''}`.trim(), 'bad');
+      break;
+  }
+}
+
+snapBtn.addEventListener('click', () => { try { port.postMessage({ type: 'snapshot-now' }); } catch (_) {} });
+
+function setSession(session) {
+  if (session && session !== currentSession) {
+    currentSession = session; lastAdviceSeq = 0; lastReqSeq = -1;
+    pollAdvice(); pollSnapRequest();
+  }
+}
+
+function connect() {
+  port = chrome.runtime.connect({ name: 'sidepanel' });
+  port.onMessage.addListener(onMessage);
+  port.postMessage({ type: 'hello' });
+  clearInterval(pingTimer);
+  pingTimer = setInterval(() => { try { port.postMessage({ type: 'ping' }); } catch (_) {} }, 20000);
+  port.onDisconnect.addListener(() => {
+    clearInterval(pingTimer);
+    setTimeout(connect, 1000); // SW recycled — reconnect and re-hydrate
+  });
+}
+
+chrome.storage.local.get('serverUrl').then(({ serverUrl: s }) => { if (s) serverUrl = s.replace(/\/+$/, ''); });
+connect();
+startPolling();
