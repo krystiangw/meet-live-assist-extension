@@ -70,7 +70,8 @@
 <section>
   <h2>What it does</h2>
   <div class="grid">
-    <div class="card"><div class="ico">📝</div><h4>Live transcript</h4><p>Captures the Meet call transcript in real time into a side panel.</p></div>
+    <div class="card"><div class="ico">📝</div><h4>Live transcript</h4><p>Captures the Meet call transcript in real time into a side panel — from captions or local speech-to-text.</p></div>
+    <div class="card"><div class="ico">🎧</div><h4>Local STT</h4><p>Optional caption-free transcription of the call audio via whisper.cpp — fully offline, no cloud, no subscription.</p></div>
     <div class="card"><div class="ico">🟢</div><h4>Colour-coded advice</h4><p>Your assistant pushes what to say, facts, summaries, risks and actions — links & images included.</p></div>
     <div class="card"><div class="ico">📷</div><h4>Smart snapshots</h4><p>Auto-captures the tab while someone shares their screen; on-demand otherwise — visual context for the assistant.</p></div>
     <div class="card"><div class="ico">💬</div><h4>In-panel chat</h4><p>A two-way back-channel to ask the assistant things mid-call without speaking.</p></div>
@@ -119,6 +120,14 @@ curl -s http://127.0.0.1:8848/health   # → {"ok":true,...}</code></pre>
       <pre><code>brew install blackhole-2ch</code></pre>
       <p>Then in <strong>Audio MIDI Setup</strong> create an <strong>Aggregate Device</strong> combining your real microphone + <strong>BlackHole 2ch</strong> (drift-correct BlackHole), and set it as your macOS default input. Tick <strong>🎙 into call</strong> in the panel and press 🔊 on a suggestion.</p>
     </li>
+    <li>
+      <h3>(Optional) Local speech-to-text</h3>
+      <p>To transcribe the call's audio instead of scraping captions, install whisper.cpp and a model — then tick <strong>🎧 STT</strong> in the panel:</p>
+      <pre><code>brew install whisper-cpp
+mkdir -p ~/.local/share/whisper
+curl -L -o ~/.local/share/whisper/ggml-base.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin</code></pre>
+    </li>
   </ol>
 </section>
 
@@ -144,6 +153,7 @@ curl -s http://127.0.0.1:8848/health   # → {"ok":true,...}</code></pre>
     <tr><td><code>POST /chat</code> · <code>GET /chat</code></td><td>Two-way chat (<code>role: user|agent</code>).</td></tr>
     <tr><td><code>POST /snapshot</code> · <code>POST /snapshot-request</code></td><td>Store a tab snapshot; brain requests one.</td></tr>
     <tr><td><code>POST /speak</code> · <code>GET /voices</code></td><td>TTS (per-language voice, optional device routing).</td></tr>
+    <tr><td><code>POST /stt</code></td><td>Transcribe an audio chunk locally with whisper.cpp.</td></tr>
   </table>
 </section>
 
