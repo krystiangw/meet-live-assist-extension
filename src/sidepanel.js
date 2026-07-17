@@ -9,6 +9,7 @@ const srvEl = document.getElementById('srvStatus');
 const snapEl = document.getElementById('snapStatus');
 const snapBtn = document.getElementById('snapNow');
 const shareEl = document.getElementById('shareStatus');
+const speakEl = document.getElementById('speakStatus');
 const sessionEl = document.getElementById('session');
 
 const MARKER_LABEL = { SAY: '🟢 SAY', INFO: '🔵 INFO', SUMMARY: '🟡 SUMMARY', EXPLAIN: '🟣 EXPLAIN', RISK: '🔴 RISK', ACTION: '🟠 ACTION' };
@@ -21,6 +22,9 @@ let lastAdviceSeq = 0;
 let lastReqSeq = -1; // -1 = baseline unknown for this session (don't fire on first poll)
 let sharing = false;
 let serverUrl = DEFAULT_SERVER;
+let ttsVoicePl = null;
+let ttsVoiceEn = null;
+let callLang = null; // from Meet's caption-language selector (via content script)
 let port = null;
 let pingTimer = null;
 let pollTimer = null;
@@ -52,8 +56,63 @@ function appendAdvice({ marker, text }) {
   const mk = document.createElement('span'); mk.className = 'marker'; mk.textContent = MARKER_LABEL[m] || '🔵 INFO';
   const bd = document.createElement('span'); bd.className = 'body'; bd.textContent = text || '';
   div.append(mk, bd);
+  if (m === 'SAY' && text) {
+    const sp = document.createElement('button');
+    sp.className = 'speak-btn'; sp.textContent = '🔊'; sp.title = 'Speak this (TTS)';
+    sp.addEventListener('click', () => speak(text, sp));
+    div.append(sp);
+  }
   adviceEl.appendChild(div);
   adviceEl.scrollTop = adviceEl.scrollHeight;
+}
+
+// Pick a voice matching the SAY text's language. SAY phrasing is in the meeting's spoken
+// language (usually English); Polish is detected by its diacritics.
+function pickVoice(text) {
+  if (callLang === 'pl') return ttsVoicePl;
+  if (callLang === 'en') return ttsVoiceEn;
+  // Unknown call language (or a language we don't have a voice for) → fall back to text heuristic.
+  return /[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(text) ? ttsVoicePl : ttsVoiceEn;
+}
+
+async function meetTabId() {
+  const tabs = await chrome.tabs.query({ url: 'https://meet.google.com/*' });
+  const t = tabs.find((x) => x.active) || tabs[0];
+  return t && t.id;
+}
+async function micUnmute() {
+  const id = await meetTabId();
+  if (!id) return null;
+  try {
+    const r = await chrome.tabs.sendMessage(id, { type: 'mic', action: 'unmute' });
+    return r && r.ok ? { id, wasMuted: r.wasMuted } : null;
+  } catch (_) { return null; }
+}
+async function micRestore(info) {
+  if (!info || !info.wasMuted) return;
+  try { await chrome.tabs.sendMessage(info.id, { type: 'mic', action: 'restore', wasMuted: true }); } catch (_) {}
+}
+
+async function speak(text, btn) {
+  if (btn) btn.disabled = true;
+  const intoCall = document.getElementById('ttsCall').checked;
+  let mic = null;
+  let ok = true;
+  setStatus(speakEl, intoCall ? '🔊 speaking → call' : '🔊 speaking', 'ok');
+  speakEl.hidden = false;
+  try {
+    if (intoCall) mic = await micUnmute(); // unmute Meet so the TTS is actually transmitted
+    const r = await fetch(`${serverUrl}/speak`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: currentSession, text, voice: pickVoice(text), device: intoCall ? 'BlackHole' : null }),
+    });
+    ok = r.ok;
+  } catch (_) { ok = false; } finally {
+    await micRestore(mic); // re-mute only if it was muted before
+    setStatus(speakEl, ok ? '🔊 spoke ✓' : '🔊 failed', ok ? 'ok' : 'bad');
+    setTimeout(() => { speakEl.hidden = true; }, 2000);
+    if (btn) setTimeout(() => { btn.disabled = false; }, 300);
+  }
 }
 
 function resetAdvice() { adviceEl.innerHTML = '<div class="empty small">Advice will appear here live…</div>'; hasAdvice = false; lastAdviceSeq = 0; }
@@ -106,6 +165,7 @@ function onMessage(msg) {
       if (msg.session) { setStatus(capEl, 'capturing', 'ok'); sessionEl.textContent = msg.session; setSession(msg.session); }
       (msg.buffer || []).forEach(appendLine);
       setSharing(!!msg.sharing);
+      if (msg.lang) callLang = msg.lang;
       break;
     case 'session':
       clearLog(); resetAdvice();
@@ -123,6 +183,9 @@ function onMessage(msg) {
       break;
     case 'sharing':
       setSharing(msg.on);
+      break;
+    case 'lang':
+      callLang = msg.lang;
       break;
     case 'server':
       setStatus(srvEl, msg.ok ? 'server ✓' : 'server ✗ (start it)', msg.ok ? 'ok' : 'bad');
@@ -155,6 +218,10 @@ function connect() {
   });
 }
 
-chrome.storage.local.get('serverUrl').then(({ serverUrl: s }) => { if (s) serverUrl = s.replace(/\/+$/, ''); });
+chrome.storage.local.get(['serverUrl', 'ttsVoicePl', 'ttsVoiceEn']).then((c) => {
+  if (c.serverUrl) serverUrl = c.serverUrl.replace(/\/+$/, '');
+  ttsVoicePl = c.ttsVoicePl || 'Zosia';
+  ttsVoiceEn = c.ttsVoiceEn || 'Daniel';
+});
 connect();
 startPolling();

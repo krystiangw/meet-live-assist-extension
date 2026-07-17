@@ -21,6 +21,15 @@
   <label for="serverUrl">Transcript server (Path A brain)</label>
   <input id="serverUrl" type="text" placeholder="http://127.0.0.1:8848" />
   <div class="hint">Local transcript-server.js endpoint. Lines are POSTed to <code>/append</code>; the Claude Code session tails the file and advises.</div>
+  <label for="ttsVoiceEn">TTS voice — English</label>
+  <select id="ttsVoiceEn" style="width:100%;padding:8px;font:inherit;border-radius:6px;"></select>
+  <div class="hint">Used when the SAY line is English (most meetings). Plenty of male voices available.</div>
+
+  <label for="ttsVoicePl">TTS voice — Polish</label>
+  <select id="ttsVoicePl" style="width:100%;padding:8px;font:inherit;border-radius:6px;"></select>
+  <div class="hint">Used when the SAY line contains Polish characters. For a male Polish voice: System Settings →
+    Accessibility → Spoken Content → Manage Voices… → Polish → download one, then reopen this page.</div>
+
   <button id="save">Save</button><span id="saved">Saved ✓</span>
   <script src="options.js"></script>
 </body>

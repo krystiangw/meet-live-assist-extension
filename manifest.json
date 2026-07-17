@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Meet Live Assist (dev)",
-  "version": "0.0.1",
-  "description": "Live Google Meet assistant — captures the call transcript and shows it in a side panel. Phase 0 spike.",
+  "version": "0.1.0",
+  "description": "Live Google Meet assistant — live transcript + colour-coded advice, smart screen snapshots, and TTS that can speak into the call.",
   "permissions": ["sidePanel", "storage", "alarms"],
   "host_permissions": [
     "https://meet.google.com/*",

@@ -214,6 +214,58 @@
     if (on !== sharing) { sharing = on; send({ type: 'sharing', on }); }
   }
 
+  // ---- CALL LANGUAGE (from Meet's caption-language selector) ---------------
+  // Drives which TTS voice to use. Meet shows the caption language as a short control label
+  // like "Polish (Poland)" / "English (US)". Best-effort; the panel falls back to text heuristics.
+  const LANG_MAP = [
+    [/^(polski|polish)\b/i, 'pl'], [/^(english|angielski)\b/i, 'en'],
+    [/^(deutsch|german|niemiecki)\b/i, 'de'], [/^(espa[nñ]ol|spanish|hiszpa)\b/i, 'es'],
+    [/^(fran[cç]ais|french|francuski)\b/i, 'fr'], [/^(italiano|italian|w[lł]oski)\b/i, 'it'],
+  ];
+  let callLang = null;
+  function detectCallLang() {
+    for (const el of document.querySelectorAll('button,[role="button"],[role="combobox"]')) {
+      const t = (el.textContent || '').trim();
+      if (!t || t.length > 30) continue;
+      for (const [re, code] of LANG_MAP) if (re.test(t)) return code;
+    }
+    return null;
+  }
+  function checkLang() {
+    const lang = started ? detectCallLang() : null;
+    if (lang && lang !== callLang) { callLang = lang; send({ type: 'lang', lang }); }
+  }
+
+  // ---- MIC CONTROL (auto-unmute while speaking TTS into the call) ----------
+  const MIC_MUTED_HINTS = ['turn on microphone', 'włącz mikrofon', 'wlacz mikrofon']; // currently muted
+  const MIC_LIVE_HINTS = ['turn off microphone', 'wyłącz mikrofon', 'wylacz mikrofon']; // currently live
+  function findMicButton() {
+    for (const b of document.querySelectorAll('button,[role="button"]')) {
+      const label = (b.getAttribute('aria-label') || '').toLowerCase();
+      if (!label.includes('microphone') && !label.includes('mikrofon')) continue;
+      const muted = MIC_MUTED_HINTS.some((h) => label.includes(h));
+      const live = MIC_LIVE_HINTS.some((h) => label.includes(h));
+      if (muted || live) return { el: b, muted };
+    }
+    return null;
+  }
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (!msg || msg.type !== 'mic') return;
+    const b = findMicButton();
+    if (!b) { sendResponse({ ok: false }); return; }
+    if (msg.action === 'unmute') {
+      const wasMuted = b.muted;
+      if (wasMuted) { try { b.el.click(); } catch (_) {} }
+      sendResponse({ ok: true, wasMuted });
+    } else if (msg.action === 'restore') {
+      if (msg.wasMuted && !b.muted) { try { b.el.click(); } catch (_) {} } // re-mute to prior state
+      sendResponse({ ok: true });
+    } else {
+      sendResponse({ ok: true });
+    }
+    return true;
+  });
+
   const boot = setInterval(() => {
     if (!document.body) return;
     clearInterval(boot);
@@ -221,5 +273,6 @@
     tick();
     setInterval(tick, 1500); // handle SPA navigation (lobby -> call -> leave)
     setInterval(checkSharing, 3000);
+    setInterval(checkLang, 3000);
   }, 800);
 })();

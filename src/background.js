@@ -103,6 +103,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     } else if (msg.type === 'sharing') {
       await chrome.storage.session.set({ mla_sharing: !!msg.on });
       broadcast({ type: 'sharing', on: !!msg.on });
+    } else if (msg.type === 'lang') {
+      await chrome.storage.session.set({ mla_lang: msg.lang });
+      broadcast({ type: 'lang', lang: msg.lang });
     }
     sendResponse({ ok: true });
   })();
@@ -117,8 +120,8 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener(async (m) => {
     if (m.type === 'hello') {
       const { session, buffer } = await loadState();
-      const { mla_sharing } = await chrome.storage.session.get('mla_sharing');
-      port.postMessage({ type: 'restore', session, buffer, sharing: !!mla_sharing });
+      const { mla_sharing, mla_lang } = await chrome.storage.session.get(['mla_sharing', 'mla_lang']);
+      port.postMessage({ type: 'restore', session, buffer, sharing: !!mla_sharing, lang: mla_lang || null });
     } else if (m.type === 'snapshot-now') {
       captureSnapshot();
     }

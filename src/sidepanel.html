@@ -46,6 +46,12 @@
     }
     .advice-item .marker { font-size: 11px; font-weight: 700; white-space: nowrap; opacity: .85; }
     .advice-item .body { flex: 1; }
+    .speak-btn {
+      align-self: flex-start; border: none; background: transparent; cursor: pointer;
+      font-size: 14px; padding: 0 2px; opacity: .7; line-height: 1;
+    }
+    .speak-btn:hover { opacity: 1; }
+    .speak-btn:disabled { opacity: .3; cursor: default; }
     .advice-item.SAY { border-left-color: var(--say); background: color-mix(in srgb, var(--say) 12%, transparent); }
     .advice-item.SAY .marker { color: var(--say); }
     .advice-item.INFO { border-left-color: var(--info); background: color-mix(in srgb, var(--info) 10%, transparent); }
@@ -76,6 +82,11 @@
     <button id="snapNow" title="Capture the Meet tab now">📷</button>
     <span id="snapStatus" class="status idle">shots 0</span>
     <span id="shareStatus" class="status bad" hidden>● sharing · 15s</span>
+    <label id="ttsCallWrap" title="Route 🔊 into the meeting (BlackHole) instead of your headphones"
+           style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer;">
+      <input type="checkbox" id="ttsCall" /> 🎙 into call
+    </label>
+    <span id="speakStatus" class="status idle" hidden></span>
     <span id="session"></span>
   </header>
 
