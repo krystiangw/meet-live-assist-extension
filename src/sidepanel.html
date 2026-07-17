@@ -117,6 +117,11 @@
       <input type="checkbox" id="ttsCall" /> 🎙 into call
     </label>
     <span id="speakStatus" class="status idle" hidden></span>
+    <label id="sttWrap" title="Transcribe the call's audio locally (whisper) instead of scraping captions"
+           style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer;">
+      <input type="checkbox" id="sttToggle" /> 🎧 STT
+    </label>
+    <span id="sttStatus" class="status idle" hidden></span>
     <span id="session"></span>
   </header>
 

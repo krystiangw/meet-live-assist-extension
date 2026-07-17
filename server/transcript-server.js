@@ -23,6 +23,28 @@ const { execFile } = require('child_process');
 // ffmpeg lives in Homebrew; launchd's PATH doesn't include it, so use an absolute path.
 const FFMPEG = process.env.FFMPEG || '/opt/homebrew/bin/ffmpeg';
 
+// Local speech-to-text (whisper.cpp) — fully offline, no subscription.
+const WHISPER_CLI = process.env.WHISPER_CLI || '/opt/homebrew/bin/whisper-cli';
+const WHISPER_MODEL = process.env.WHISPER_MODEL || `${os.homedir()}/.local/share/whisper/ggml-base.bin`;
+// whisper emits these for silence/music — drop them.
+const STT_NOISE = /^\s*(\[[^\]]*\]|\([^)]*\)|>>|\.|…)?\s*$/;
+
+// Transcribe one audio chunk (any ffmpeg-decodable format) → text. lang: 'en'|'pl'|'auto'.
+function transcribe(inputFile, lang, done) {
+  const wav = `${inputFile}.16k.wav`;
+  execFile(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-i', inputFile, '-ar', '16000', '-ac', '1', '-y', wav], (e1) => {
+    if (e1) { fs.unlink(inputFile, () => {}); return done(e1); }
+    execFile(WHISPER_CLI, ['-m', WHISPER_MODEL, '-f', wav, '-l', lang || 'auto', '-nt', '-np', '-t', '4'],
+      { maxBuffer: 4 * 1024 * 1024 }, (e2, stdout) => {
+        fs.unlink(inputFile, () => {}); fs.unlink(wav, () => {});
+        if (e2) return done(e2);
+        const text = String(stdout || '').split('\n').map((l) => l.trim())
+          .filter((l) => l && !STT_NOISE.test(l)).join(' ').trim();
+        done(null, text);
+      });
+  });
+}
+
 // TTS (Phase 2a): synthesize with macOS `say` (Polish voice) and play locally.
 // device === null -> default output (you hear it); a CoreAudio device name -> routed there (into Meet, 2b).
 const TTS_VOICE = process.env.TTS_VOICE || 'Zosia';
@@ -230,6 +252,38 @@ const server = http.createServer((req, res) => {
     const session = safeSession(u.searchParams.get('session'));
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ seq: snapReq.get(session) || 0 }));
+    return;
+  }
+
+  // Extension -> server: transcribe a tab-audio chunk locally (whisper.cpp) and append to the transcript.
+  if (req.method === 'POST' && req.url.startsWith('/stt')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const session = safeSession(u.searchParams.get('session'));
+    const lang = (u.searchParams.get('lang') || 'auto').slice(0, 5);
+    const chunks = []; let size = 0;
+    req.on('data', (c) => { chunks.push(c); size += c.length; if (size > 25e6) req.destroy(); });
+    req.on('end', () => {
+      if (!size) { res.writeHead(400); return res.end('empty'); }
+      const tmp = path.join(os.tmpdir(), `mla-stt-${Date.now()}.webm`);
+      try { fs.writeFileSync(tmp, Buffer.concat(chunks)); } catch (_) { res.writeHead(500); return res.end('write'); }
+      transcribe(tmp, lang, (err, text) => {
+        if (err) { res.writeHead(500); return res.end('stt failed'); }
+        if (text) {
+          const d = new Date();
+          const hms = [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
+          try {
+            const file = fileFor(session);
+            if (!seenSessions.has(session)) {
+              seenSessions.add(session);
+              fs.appendFileSync(file, `==== ${session} — started ${new Date().toISOString()} ====\n`);
+            }
+            fs.appendFileSync(file, `[${hms}] ${text}\n`);
+          } catch (_) {}
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ text: text || '' }));
+      });
+    });
     return;
   }
 

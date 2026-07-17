@@ -82,6 +82,33 @@ async function captureSnapshot() {
   } catch (_) { broadcast({ type: 'snapshot', ok: false, reason: 'server' }); }
 }
 
+// ---- local STT (tab audio -> offscreen -> /stt whisper) ------------------
+async function ensureOffscreen() {
+  if (chrome.offscreen.hasDocument && await chrome.offscreen.hasDocument()) return;
+  await chrome.offscreen.createDocument({
+    url: 'src/offscreen.html',
+    reasons: ['USER_MEDIA'],
+    justification: 'Transcribe Meet tab audio locally (whisper).',
+  });
+}
+async function startStt() {
+  const tabs = await chrome.tabs.query({ url: 'https://meet.google.com/*' });
+  const tab = tabs.find((t) => t.active) || tabs[0];
+  if (!tab) { broadcast({ type: 'stt', on: false, reason: 'no meet tab' }); return; }
+  let streamId;
+  try { streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id }); }
+  catch (e) { broadcast({ type: 'stt', on: false, reason: String(e && e.message || e) }); return; }
+  await ensureOffscreen();
+  const { mla_session, mla_lang } = await chrome.storage.session.get(['mla_session', 'mla_lang']);
+  chrome.runtime.sendMessage({ type: 'offscreen-start', streamId, session: mla_session, lang: mla_lang || 'auto', serverUrl: await getServerUrl() });
+  try { chrome.tabs.sendMessage(tab.id, { type: 'capture-mode', captions: false }); } catch (_) {} // avoid dup transcript
+}
+async function stopStt() {
+  chrome.runtime.sendMessage({ type: 'offscreen-stop' });
+  const tabs = await chrome.tabs.query({ url: 'https://meet.google.com/*' });
+  for (const t of tabs) { try { chrome.tabs.sendMessage(t.id, { type: 'capture-mode', captions: true }); } catch (_) {} }
+}
+
 // ---- content script -> SW ------------------------------------------------
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
@@ -106,6 +133,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     } else if (msg.type === 'lang') {
       await chrome.storage.session.set({ mla_lang: msg.lang });
       broadcast({ type: 'lang', lang: msg.lang });
+    } else if (msg.type === 'stt-line') {
+      const d = new Date();
+      const ts = [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
+      broadcast({ type: 'line', ts, speaker: '', text: msg.text });
+    } else if (msg.type === 'stt-status') {
+      broadcast({ type: 'stt', on: !!msg.on });
+    } else if (msg.type === 'stt-error') {
+      broadcast({ type: 'stt', on: false, reason: msg.reason });
     }
     sendResponse({ ok: true });
   })();
@@ -124,6 +159,10 @@ chrome.runtime.onConnect.addListener((port) => {
       port.postMessage({ type: 'restore', session, buffer, sharing: !!mla_sharing, lang: mla_lang || null });
     } else if (m.type === 'snapshot-now') {
       captureSnapshot();
+    } else if (m.type === 'stt-start') {
+      startStt();
+    } else if (m.type === 'stt-stop') {
+      stopStt();
     }
     // 'ping' is a no-op: receiving it resets the SW idle timer (keep-alive).
   });

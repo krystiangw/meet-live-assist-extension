@@ -31,6 +31,7 @@
   let session = null;
   let started = false;
   let userPaused = false;
+  let sttPaused = false; // paused while local STT (tab audio) is the transcript source
   let lineCount = 0;
   let scanning = false;
   let currentCode = null;
@@ -93,7 +94,7 @@
   // ---- SCAN LOOP -----------------------------------------------------------
   function scan() {
     if (!started) { scanning = false; return; }
-    if (!userPaused) {
+    if (!userPaused && !sttPaused) {
       const region = firstRegion();
       if (region) {
         for (const el of blocksIn(region)) {
@@ -250,7 +251,9 @@
     return null;
   }
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (!msg || msg.type !== 'mic') return;
+    if (!msg) return;
+    if (msg.type === 'capture-mode') { sttPaused = (msg.captions === false); sendResponse({ ok: true }); return; }
+    if (msg.type !== 'mic') return;
     const b = findMicButton();
     if (!b) { sendResponse({ ok: false }); return; }
     if (msg.action === 'unmute') {

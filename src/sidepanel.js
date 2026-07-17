@@ -14,6 +14,8 @@ const sessionEl = document.getElementById('session');
 const chatEl = document.getElementById('chat');
 const chatForm = document.getElementById('chatForm');
 const chatInput = document.getElementById('chatInput');
+const sttToggle = document.getElementById('sttToggle');
+const sttEl = document.getElementById('sttStatus');
 
 const MARKER_LABEL = { SAY: '🟢 SAY', INFO: '🔵 INFO', SUMMARY: '🟡 SUMMARY', EXPLAIN: '🟣 EXPLAIN', RISK: '🔴 RISK', ACTION: '🟠 ACTION' };
 const DEFAULT_SERVER = 'http://127.0.0.1:8848';
@@ -45,8 +47,9 @@ function appendLine({ ts, speaker, text }) {
   const div = document.createElement('div');
   div.className = 'line';
   const t = document.createElement('span'); t.className = 'ts'; t.textContent = ts || '';
-  const w = document.createElement('span'); w.className = 'who'; w.textContent = (speaker || 'Unknown') + ': ';
-  div.append(t, w, document.createTextNode(text || ''));
+  div.append(t);
+  if (speaker) { const w = document.createElement('span'); w.className = 'who'; w.textContent = speaker + ': '; div.append(w); }
+  div.append(document.createTextNode(text || ''));
   logEl.appendChild(div);
   if (atBottom) logEl.scrollTop = logEl.scrollHeight;
 }
@@ -305,10 +308,21 @@ function onMessage(msg) {
       if (msg.ok) setStatus(snapEl, `shots ${msg.count ?? '·'}`, 'ok');
       else setStatus(snapEl, `shot ✗ ${msg.reason || ''}`.trim(), 'bad');
       break;
+    case 'stt':
+      sttEl.hidden = false;
+      if (msg.on) setStatus(sttEl, '🎧 listening', 'ok');
+      else if (msg.reason) { setStatus(sttEl, `🎧 ✗ ${msg.reason}`, 'bad'); sttToggle.checked = false; }
+      else { sttEl.hidden = true; sttToggle.checked = false; }
+      break;
   }
 }
 
 snapBtn.addEventListener('click', () => { try { port.postMessage({ type: 'snapshot-now' }); } catch (_) {} });
+
+sttToggle.addEventListener('change', () => {
+  try { port.postMessage({ type: sttToggle.checked ? 'stt-start' : 'stt-stop' }); } catch (_) {}
+  if (sttToggle.checked) { sttEl.hidden = false; setStatus(sttEl, '🎧 starting…', 'idle'); }
+});
 
 function setSession(session) {
   if (session && session !== currentSession) {
