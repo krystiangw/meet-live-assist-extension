@@ -55,6 +55,14 @@ let shareTimer = null;
 function setStatus(el, text, cls) { el.textContent = text; el.className = 'status ' + cls; }
 function hdrs(json) { const h = { 'X-MLA-Token': serverToken }; if (json) h['Content-Type'] = 'application/json'; return h; }
 
+// Optional permissions (debugger + all-sites host) are requested at runtime on a user gesture — kept out
+// of the install-time prompt for a cleaner Web Store listing.
+const ALL_URLS = { origins: ['<all_urls>'] };
+async function ensurePerms(perms) {
+  try { return (await chrome.permissions.contains(perms)) || (await chrome.permissions.request(perms)); }
+  catch (_) { return false; }
+}
+
 // Urgent cue on 🔴 RISK: a short beep + a system notification (the panel may be hidden mid-call).
 let cueArmed = false; // stays off briefly after (re)connect so backfilled advice doesn't blast
 function riskCue(text) {
@@ -501,7 +509,10 @@ async function pollDebugRequest() {
   } catch (_) {}
 }
 
-dbgToggle.addEventListener('change', () => {
+dbgToggle.addEventListener('change', async () => {
+  if (dbgToggle.checked && !(await ensurePerms({ permissions: ['debugger'], origins: ['<all_urls>'] }))) {
+    dbgToggle.checked = false; dbgEl.hidden = false; setStatus(dbgEl, '🐞 needs debugger permission', 'bad'); return;
+  }
   try { port.postMessage({ type: 'debug-toggle', on: dbgToggle.checked }); } catch (_) {}
   dbgEl.hidden = false; setStatus(dbgEl, dbgToggle.checked ? '🐞 attaching…' : '🐞 off', 'idle');
 });
@@ -605,10 +616,15 @@ snapBtn.addEventListener('click', () => { try { port.postMessage({ type: 'snapsh
 // Co-pilot: start/stop a meeting-less session (agent watches this tab + hears your mic).
 const copilotBtn = document.getElementById('copilotBtn');
 let copilotOn = false;
-copilotBtn.addEventListener('click', () => {
-  copilotOn = !copilotOn;
-  copilotBtn.classList.toggle('on', copilotOn);
-  try { port.postMessage({ type: copilotOn ? 'copilot-start' : 'copilot-stop' }); } catch (_) {}
+copilotBtn.addEventListener('click', async () => {
+  if (!copilotOn) {
+    if (!(await ensurePerms(ALL_URLS))) return; // co-pilot watches arbitrary tabs → needs all-sites access
+    copilotOn = true; copilotBtn.classList.add('on');
+    try { port.postMessage({ type: 'copilot-start' }); } catch (_) {}
+  } else {
+    copilotOn = false; copilotBtn.classList.remove('on');
+    try { port.postMessage({ type: 'copilot-stop' }); } catch (_) {}
+  }
 });
 
 const consentEl = document.getElementById('consent');
@@ -623,7 +639,7 @@ function setupRow(ok, label, hint) {
   const t = document.createElement('span'); t.textContent = label + (ok ? '' : ` — ${hint}`);
   d.append(m, t); return d;
 }
-function renderSetup(h) {
+function renderSetup(h, allSites) {
   const t = (h && h.tools) || {};
   setupEl.innerHTML = '';
   setupEl.appendChild(setupRow(!!h, 'Local server running', 'start transcript-server.js (launchd)'));
@@ -631,8 +647,15 @@ function renderSetup(h) {
   setupEl.appendChild(setupRow(!!t.ffmpeg, 'ffmpeg (TTS + STT)', 'brew install ffmpeg'));
   setupEl.appendChild(setupRow(!!(t.whisper && t.whisperModel), 'Local STT (whisper + model)', 'brew install whisper-cpp + ggml model'));
   setupEl.appendChild(setupRow(!!t.blackhole, 'BlackHole (speak into call — optional)', 'install BlackHole 2ch + Aggregate device'));
+  const permRow = setupRow(!!allSites, 'All-sites access (co-pilot / snapshots / edits on any tab)', 'optional');
+  if (!allSites) {
+    const g = document.createElement('button'); g.className = 'setup-grant'; g.textContent = 'Grant';
+    g.addEventListener('click', async () => { if (await ensurePerms(ALL_URLS)) fetchHealth(); });
+    permRow.appendChild(g);
+  }
+  setupEl.appendChild(permRow);
   const note = document.createElement('div'); note.className = 'setup-note';
-  note.textContent = 'Tip: set Meet caption language to the spoken language (⋮ → Settings → Captions).';
+  note.textContent = 'Tip: set the meeting caption language to the spoken language (⋮ → Settings → Captions).';
   setupEl.appendChild(note);
   const missing = !h || !serverToken || !t.ffmpeg;
   if (missing && !autoSetupShown) { autoSetupShown = true; setupEl.hidden = false; } // nudge once on first run
@@ -640,7 +663,9 @@ function renderSetup(h) {
 async function fetchHealth() {
   let h = null;
   try { const r = await fetch(`${serverUrl}/health`); if (r.ok) h = await r.json(); } catch (_) {}
-  renderSetup(h);
+  let allSites = false;
+  try { allSites = await chrome.permissions.contains(ALL_URLS); } catch (_) {}
+  renderSetup(h, allSites);
 }
 document.getElementById('setupBtn').addEventListener('click', () => { setupEl.hidden = !setupEl.hidden; if (!setupEl.hidden) fetchHealth(); });
 

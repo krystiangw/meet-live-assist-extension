@@ -2,15 +2,18 @@
   "manifest_version": 3,
   "name": "Meet Live Assist",
   "version": "0.2.0",
-  "description": "Live Google Meet assistant — live transcript, colour-coded advice, smart screen snapshots, chat, and TTS that can speak into the call.",
+  "description": "Live meeting co-pilot for Google Meet & Zoom — transcript, colour-coded advice, action items, snapshots, chat and TTS, all via your own local assistant.",
+  "minimum_chrome_version": "116",
+  "homepage_url": "https://krystiangw.github.io/meet-live-assist/",
   "icons": { "16": "src/icons/icon16.png", "32": "src/icons/icon32.png", "48": "src/icons/icon48.png", "128": "src/icons/icon128.png" },
-  "permissions": ["sidePanel", "storage", "alarms", "tabCapture", "offscreen", "scripting", "debugger", "clipboardWrite", "notifications"],
+  "permissions": ["sidePanel", "storage", "alarms", "tabCapture", "offscreen", "scripting", "clipboardWrite", "notifications"],
+  "optional_permissions": ["debugger"],
   "host_permissions": [
     "https://meet.google.com/*",
     "https://*.zoom.us/*",
-    "http://127.0.0.1:8848/*",
-    "<all_urls>"
+    "http://127.0.0.1:8848/*"
   ],
+  "optional_host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "src/background.js",
     "type": "module"
@@ -41,7 +44,7 @@
   "commands": {
     "toggle-stt": {
       "suggested_key": { "default": "Ctrl+Shift+U", "mac": "Command+Shift+U" },
-      "description": "Toggle local speech-to-text capture of the Meet tab"
+      "description": "Toggle local speech-to-text capture of the meeting tab"
     }
   }
 }

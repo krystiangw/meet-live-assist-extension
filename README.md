@@ -84,11 +84,15 @@ Brain = a Claude Code session (subscription, no API key) via the `meet-live-assi
   for the brain to Read on demand.
 - Agentic actions (Tier1/Tier2, drafts-only) stay in the session/call per the skill — the panel is display-only.
 
-### Permissions liability
-`<all_urls>` (needed by `captureVisibleTab` + `scripting`/`debugger` on the shared tab) and `debugger`
-together make this **unpacked/dogfood only** — both must be tightened/justified before any Web Store or
-shared distribution (see `STORE.md`). Added in v0.2: `clipboardWrite` (copy advice) and `notifications`
-(RISK cue) — both low-review. The token auth closes the "any website can drive the localhost server" hole.
+### Permissions
+Install-time prompt is limited to **Meet + Zoom + localhost**. The heavy ones — `debugger` and the
+`<all_urls>` host — are **optional**, requested at runtime on a user gesture (turning on 🐞 Debug, starting
+co-pilot, or the setup checklist's *Grant* button), so they stay out of the install prompt and the Web Store
+review. Token auth closes the "any website can drive the localhost server" hole. Build the store zip with
+`./build.sh` (→ `dist/`, extension files only). Full listing + justifications: `STORE.md`.
+
+> Reloading an already-installed copy will drop the now-optional `<all_urls>`/`debugger` grants — re-grant
+> once from the panel (co-pilot / 🐞 / ⚙ setup → Grant).
 
 ## Roadmap
 
