@@ -5,8 +5,8 @@ and (Path A) feeds the local transcript server so a Claude Code session with you
 advise you in real time.
 
 **Integration guide / landing page:** [`docs/index.html`](docs/index.html) — a self-contained page.
-To host it: push to a (private) GitHub repo and enable **Pages** with source *Deploy from branch* →
-`/docs`. It also opens fine locally (`open docs/index.html`).
+Hosted (public docs-only repo, so this code stays private): **https://krystiangw.github.io/meet-live-assist/**
+(source: `github.com/krystiangw/meet-live-assist`). It also opens fine locally (`open docs/index.html`).
 
 **This is a personal / dogfood tool**, distributed unpacked — not a public Chrome Web Store product.
 See `../agent/.../meet-live-assist-BUILD-PLAN.md` for the full plan and why.
