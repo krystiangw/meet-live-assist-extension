@@ -17,8 +17,8 @@
   };
 
   // ---- TUNABLES ------------------------------------------------------------
-  const FLUSH_STABLE_MS = 1200; // write a line once its text stops changing this long (= finalized)
-  const POLL_MS = 350;          // caption scan interval
+  const FLUSH_STABLE_MS = 600; // write a line once its text stops changing this long (= finalized)
+  const POLL_MS = 200;          // caption scan interval
   const AUTO_CAPTIONS = true;   // auto-enable Meet captions on every call
   const MEETING_CODE_RE = /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/; // a real call URL, e.g. ngt-eyri-xso
   const NOISE_RE = /jump to bottom|arrow_downward|arrow_upward/i;
