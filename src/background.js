@@ -149,7 +149,7 @@ async function ensureOffscreen() {
   });
 }
 async function startStt() {
-  const tabs = await chrome.tabs.query({ url: 'https://meet.google.com/*' });
+  const tabs = await chrome.tabs.query({ url: ['https://meet.google.com/*', 'https://*.zoom.us/*'] });
   const tab = tabs.find((t) => t.active) || tabs[0];
   if (!tab) { broadcast({ type: 'stt', on: false, reason: 'no meet tab' }); return; }
   let streamId;
@@ -164,7 +164,7 @@ async function startStt() {
 async function stopStt() {
   chrome.runtime.sendMessage({ type: 'offscreen-stop' });
   await chrome.storage.session.set({ mla_stt_on: false });
-  const tabs = await chrome.tabs.query({ url: 'https://meet.google.com/*' });
+  const tabs = await chrome.tabs.query({ url: ['https://meet.google.com/*', 'https://*.zoom.us/*'] });
   for (const t of tabs) { try { chrome.tabs.sendMessage(t.id, { type: 'capture-mode', captions: true }); } catch (_) {} }
 }
 

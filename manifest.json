@@ -7,6 +7,7 @@
   "permissions": ["sidePanel", "storage", "alarms", "tabCapture", "offscreen", "scripting", "debugger", "clipboardWrite", "notifications"],
   "host_permissions": [
     "https://meet.google.com/*",
+    "https://*.zoom.us/*",
     "http://127.0.0.1:8848/*",
     "<all_urls>"
   ],
@@ -18,6 +19,11 @@
     {
       "matches": ["https://meet.google.com/*"],
       "js": ["src/content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.zoom.us/wc/*"],
+      "js": ["src/content-zoom.js"],
       "run_at": "document_idle"
     }
   ],
