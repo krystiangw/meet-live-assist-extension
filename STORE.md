@@ -25,9 +25,15 @@ Productivity
 - **alarms** — periodic heartbeat that keeps the service worker alive during long calls.
 - **host `https://meet.google.com/*`** — read captions/state and inject the assistant UI on Meet.
 - **host `http://127.0.0.1:8848/*`** — talk to the user's own local bridge server.
-- **host `<all_urls>`** — required by `chrome.tabs.captureVisibleTab` for unattended periodic snapshots
-  of the Meet tab. **Liability**: overly broad for public distribution; tighten (or gate snapshots behind
-  a user gesture using `activeTab`) before a public listing.
+- **tabCapture** — capture the Meet tab's audio for optional local speech-to-text.
+- **offscreen** — the only MV3 surface that can consume the captured audio stream.
+- **scripting** — apply presentation-only, revertable DOM edits + read page storage on the shared tab.
+- **debugger** — read network/console of the shared tab for live debugging (behind the 🐞 toggle; shows the
+  DevTools banner while attached). **Liability**: `debugger` draws heavy Web Store review — keep it strictly
+  user-toggled and consider dropping it for a public listing.
+- **host `<all_urls>`** — required by `chrome.tabs.captureVisibleTab` for unattended periodic snapshots and
+  by `scripting`/`debugger` on the shared app tab. **Liability**: overly broad for public distribution;
+  scope down (e.g. `activeTab` + gesture) before a public listing.
 
 ## Data disclosure (Limited Use)
 Collects meeting transcript text, tab screenshots, and typed chat **only** to provide the single purpose
