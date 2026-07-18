@@ -27,6 +27,8 @@ Productivity
 - **host `http://127.0.0.1:8848/*`** — talk to the user's own local bridge server.
 - **tabCapture** — capture the Meet tab's audio for optional local speech-to-text.
 - **offscreen** — the only MV3 surface that can consume the captured audio stream.
+- **clipboardWrite** — copy an advice line to paste into the Meet chat.
+- **notifications** — fire a system alert on a 🔴 RISK advice item when the panel is hidden mid-call.
 - **scripting** — apply presentation-only, revertable DOM edits + read page storage on the shared tab.
 - **debugger** — read network/console of the shared tab for live debugging (behind the 🐞 toggle; shows the
   DevTools banner while attached). **Liability**: `debugger` draws heavy Web Store review — keep it strictly
@@ -38,7 +40,9 @@ Productivity
 ## Data disclosure (Limited Use)
 Collects meeting transcript text, tab screenshots, and typed chat **only** to provide the single purpose
 (live meeting assistance), transmits them **only** to the user's own local server, and does not sell,
-transfer, or use them for unrelated purposes. Privacy policy: `PRIVACY.md`.
+transfer, or use them for unrelated purposes. The local server is **token-authenticated** (no other site can
+reach it), stored data is **time-purged** (default 14 days) and wipeable per meeting from the panel.
+Privacy policy: `PRIVACY.md`.
 
 ## Pre-publish checklist
 - [ ] Tighten `<all_urls>` → `activeTab`/gesture-gated capture, or justify in review.

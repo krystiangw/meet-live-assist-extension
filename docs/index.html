@@ -78,7 +78,10 @@
     <div class="card"><div class="ico">🔊</div><h4>Speak into the call</h4><p>Text-to-speech in the call's language that can be routed straight into the meeting.</p></div>
     <div class="card"><div class="ico">✏️</div><h4>Live demo edits</h4><p>Ask the assistant to fix a typo or hide a broken element on your shared screen — presentation-only, revertable, never saved.</p></div>
     <div class="card"><div class="ico">🎛️</div><h4>Meeting modes</h4><p>Listener, Lead, or Auto — tune how proactively the assistant suggests based on your role in the call.</p></div>
-    <div class="card"><div class="ico">🔒</div><h4>Local-first</h4><p>Runs against a local server on your machine; nothing is sent to a third-party product.</p></div>
+    <div class="card"><div class="ico">📋</div><h4>Decisions & action items</h4><p>A live board of decisions and owner-tagged action items — one click drafts a Jira ticket.</p></div>
+    <div class="card"><div class="ico">⏮️</div><h4>Recap & alerts</h4><p>Ask "what did I miss?" anytime; get nudged when you're named, look muted, or a risk appears.</p></div>
+    <div class="card"><div class="ico">🎯</div><h4>Meeting-type aware</h4><p>Detects standup / 1:1 / incident / review and adapts what it surfaces; remembers recurring series.</p></div>
+    <div class="card"><div class="ico">🔒</div><h4>Local-first & private</h4><p>Token-authed local server, per-meeting wipe, and time-based retention. Nothing goes to a third-party product.</p></div>
   </div>
 </section>
 
@@ -111,6 +114,12 @@ curl -s http://127.0.0.1:8848/health   # → {"ok":true,...}</code></pre>
     <li>
       <h3>Load the extension</h3>
       <p><code>chrome://extensions</code> → enable <strong>Developer mode</strong> → <strong>Load unpacked</strong> → pick this folder. Pin it and click the icon to open the side panel.</p>
+    </li>
+    <li>
+      <h3>Paste the server token</h3>
+      <p>The server generates an auth token on first start so no other website can reach it. Copy it into the
+      extension <strong>Options</strong> (the panel's ⚙ shows a setup checklist):</p>
+      <pre><code>cat ~/projects/meet-live-assist/transcripts/.mla-token</code></pre>
     </li>
     <li>
       <h3>Point the brain at the transcript</h3>
@@ -158,12 +167,19 @@ curl -L -o ~/.local/share/whisper/ggml-base.bin \
     <tr><td><code>POST /snapshot</code> · <code>POST /snapshot-request</code></td><td>Store a tab snapshot; brain requests one.</td></tr>
     <tr><td><code>POST /speak</code> · <code>GET /voices</code></td><td>TTS (per-language voice, optional device routing).</td></tr>
     <tr><td><code>POST /stt</code></td><td>Transcribe an audio chunk locally with whisper.cpp.</td></tr>
+    <tr><td><code>POST /items</code> · <code>GET /items</code></td><td>Decisions & action-items board.</td></tr>
+    <tr><td><code>POST /mode</code> · <code>GET /mode</code></td><td>Meeting mode (listener / lead / auto).</td></tr>
+    <tr><td><code>POST /summary</code> · <code>GET /summary</code></td><td>Post-call summary artifact (copy / download).</td></tr>
+    <tr><td><code>POST /brain-ping</code></td><td>Liveness heartbeat — the panel shows if a brain is attached.</td></tr>
+    <tr><td><code>POST /clear</code></td><td>Wipe one meeting (transcript, chat, summary, snapshots).</td></tr>
+    <tr><td><code>GET /health</code></td><td>Status + tool checks (ffmpeg / whisper / BlackHole). The only route that needs no token.</td></tr>
   </table>
+  <p class="note">Every route except <code>/health</code> requires an <code>X-MLA-Token</code> header (the token from <code>.mla-token</code>).</p>
 </section>
 
 <section>
   <h2>Privacy</h2>
-  <p class="note">Everything runs locally: the transcript, snapshots and advice never leave your machine except through the LLM your own brain session uses. Capturing a meeting is recording — get participants' consent, especially on external calls.</p>
+  <p class="note">Everything runs locally: the transcript, snapshots and advice never leave your machine except through the LLM your own brain session uses. The local server is token-authenticated, stored data is auto-purged after a retention window, and any meeting can be wiped from the panel. Capturing a meeting is recording — get participants' consent (the panel shows a one-time reminder), especially on external calls.</p>
 </section>
 
 </div>

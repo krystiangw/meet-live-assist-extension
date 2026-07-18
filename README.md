@@ -11,17 +11,20 @@ Hosted (public docs-only repo, so this code stays private): **https://krystiangw
 **This is a personal / dogfood tool**, distributed unpacked — not a public Chrome Web Store product.
 See `../agent/.../meet-live-assist-BUILD-PLAN.md` for the full plan and why.
 
-## Status: Phase 0 (spike)
+## Status (v0.2)
 
-Goal of Phase 0 is to prove the MV3 architecture, not to ship features:
+Working, dogfood. What it does now:
 
-- Content script scrapes Meet captions (ported from the Tampermonkey userscript).
-- Service worker routes lines and keeps the local server (`127.0.0.1:8848`) fed — **so the existing
-  Claude Code flow is unchanged**.
-- Side panel renders the live transcript and, being a persistent page, keeps the SW alive so
-  capture never stalls on a long call.
-
-No LLM/advice wiring yet — that is Phase 1.
+- **Live transcript** — Meet captions scraped, streamed to the panel instantly, de-duplicated + monologue
+  forced-flush before hitting the file/brain, with a conservative ASR glossary.
+- **Colour-coded advice** from the brain (🟢SAY/🔵INFO/🟡SUMMARY/🟣EXPLAIN/🔴RISK/🟠ACTION), rich
+  (links/images/diagrams/lists), each **copyable**; RISK fires an audible + notification cue.
+- **Brain-liveness** pill (is a Claude session actually attached?), **capture watchdog** (warns if captions break).
+- **Decisions & action-items board** with one-click **Draft Jira**; **recap** quick-asks; two-way **chat**.
+- **Snapshots** (auto on screen-share + on demand), **TTS into the call**, **local STT** (whisper),
+  **meeting modes** + type-awareness, **live presentation edits** + **debug** of the shared tab.
+- **Talk-time**, **muted-mic** + **personal-mention** alerts; **post-call summary** export.
+- **Privacy:** token-authed local server, per-meeting **clear**, time-based **retention**, consent nudge.
 
 ## Architecture (why it's shaped this way)
 
@@ -35,8 +38,14 @@ No LLM/advice wiring yet — that is Phase 1.
 ## The bridge server
 
 The extension talks to a small local Node server (`127.0.0.1:8848`) that is the "brain" bridge:
-transcript sink (`/append`), advice channel (`/advice`), snapshots (`/snapshot`, `/snapshot-request`),
-and TTS (`/speak`, `/voices`).
+transcript sink (`/append`), advice (`/advice`), board (`/items`), chat (`/chat`), snapshots
+(`/snapshot`, `/snapshot-request`), TTS (`/speak`, `/voices`), STT (`/stt`), meeting mode (`/mode`),
+presentation edits (`/edit`, `/dom*`), debug (`/debug*`), brain heartbeat (`/brain-ping`), summary
+(`/summary`), per-meeting wipe (`/clear`), and health (`/health`).
+
+**Auth:** every route except `/health` requires an `X-MLA-Token` header. The server generates the token
+into `<transcripts>/.mla-token` on first start; **paste it into the extension Options once** (and the brain
+reads the same file). Without it any website you visit could reach the localhost server.
 
 `server/transcript-server.js` here is a **version-controlled snapshot**. The **live** copy runs from
 `~/projects/meet-live-assist/meet-transcript/transcript-server.js` via launchd
@@ -50,7 +59,8 @@ launchd's PATH lacks it, so the server uses an absolute `/opt/homebrew/bin/ffmpe
    `curl -s http://127.0.0.1:8848/health` → `{"ok":true,...}`
 2. `chrome://extensions` → enable **Developer mode** → **Load unpacked** → pick this folder.
 3. Pin the extension; click its toolbar icon to open the side panel.
-4. (Optional) right-click the icon → **Options** to change the server URL.
+4. Right-click the icon → **Options** → paste the **server token** (`cat ~/projects/meet-live-assist/transcripts/.mla-token`).
+   Optionally set TTS voices and your name(s) (for mention alerts). The panel's ⚙ shows a setup checklist.
 5. Disable the old Tampermonkey userscript to avoid double-capture.
 
 ## Phase 0 acceptance test
@@ -75,9 +85,10 @@ Brain = a Claude Code session (subscription, no API key) via the `meet-live-assi
 - Agentic actions (Tier1/Tier2, drafts-only) stay in the session/call per the skill — the panel is display-only.
 
 ### Permissions liability
-`<all_urls>` host permission is present because `captureVisibleTab` requires it for unattended periodic
-capture (a per-site grant is not enough). Fine for unpacked/dogfood; **must be tightened / justified before
-any Chrome Web Store or shared distribution.**
+`<all_urls>` (needed by `captureVisibleTab` + `scripting`/`debugger` on the shared tab) and `debugger`
+together make this **unpacked/dogfood only** — both must be tightened/justified before any Web Store or
+shared distribution (see `STORE.md`). Added in v0.2: `clipboardWrite` (copy advice) and `notifications`
+(RISK cue) — both low-review. The token auth closes the "any website can drive the localhost server" hole.
 
 ## Roadmap
 

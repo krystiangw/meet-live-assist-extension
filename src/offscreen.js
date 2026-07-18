@@ -30,24 +30,31 @@ async function start(streamId, config) {
   loop();
 }
 
+async function transcribeChunk(blob) {
+  try {
+    const url = `${cfg.serverUrl}/stt?session=${encodeURIComponent(cfg.session)}&lang=${encodeURIComponent(cfg.lang || 'auto')}`;
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-MLA-Token': cfg.token || '' }, body: blob });
+    if (r.ok) { const { text } = await r.json(); if (text) chrome.runtime.sendMessage({ type: 'stt-line', text }); }
+  } catch (_) { /* server down */ }
+}
+
 function loop() {
   if (!active || !stream) return;
   const parts = [];
-  recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-  recorder.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
-  recorder.onstop = async () => {
+  let rec;
+  try { rec = new MediaRecorder(stream, { mimeType: 'audio/webm' }); rec.start(); }
+  catch (e) { active = false; chrome.runtime.sendMessage({ type: 'stt-error', reason: String(e && e.message || e) }); return; }
+  recorder = rec;
+  rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
+  rec.onstop = () => {
     const blob = new Blob(parts, { type: 'audio/webm' });
-    if (blob.size > MIN_BYTES) {
-      try {
-        const url = `${cfg.serverUrl}/stt?session=${encodeURIComponent(cfg.session)}&lang=${encodeURIComponent(cfg.lang || 'auto')}`;
-        const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: blob });
-        if (r.ok) { const { text } = await r.json(); if (text) chrome.runtime.sendMessage({ type: 'stt-line', text }); }
-      } catch (_) { /* server down */ }
-    }
-    if (active) loop();
+    // Restart on a fresh tick (not synchronously inside onstop) so the previous recorder fully releases the
+    // tab stream before we start the next one — starting it synchronously throws NotSupportedError.
+    if (active) setTimeout(loop, 0);
+    if (blob.size > MIN_BYTES) transcribeChunk(blob); // fire-and-forget; runs in parallel with recording
   };
-  recorder.start();
-  setTimeout(() => { try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch (_) {} }, CHUNK_MS);
+  // Reference THIS recorder (not the shared module var, which the next loop reassigns).
+  setTimeout(() => { try { if (rec.state !== 'inactive') rec.stop(); } catch (_) {} }, CHUNK_MS);
 }
 
 function stop() {

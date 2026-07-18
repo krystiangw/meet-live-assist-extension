@@ -1,4 +1,6 @@
 const input = document.getElementById('serverUrl');
+const tokenInput = document.getElementById('serverToken');
+const namesInput = document.getElementById('selfNames');
 const enSel = document.getElementById('ttsVoiceEn');
 const plSel = document.getElementById('ttsVoicePl');
 const saved = document.getElementById('saved');
@@ -23,7 +25,7 @@ function fill(sel, voices, prefix, selected, fallback) {
 
 async function loadVoices(selEn, selPl) {
   try {
-    const voices = await (await fetch(`${serverUrl()}/voices`)).json();
+    const voices = await (await fetch(`${serverUrl()}/voices`, { headers: { 'X-MLA-Token': (tokenInput.value || '').trim() } })).json();
     fill(enSel, voices, 'en', selEn, DEFAULT_EN);
     fill(plSel, voices, 'pl', selPl, DEFAULT_PL);
   } catch (_) {
@@ -31,15 +33,18 @@ async function loadVoices(selEn, selPl) {
   }
 }
 
-chrome.storage.local.get(['serverUrl', 'ttsVoiceEn', 'ttsVoicePl']).then((c) => {
+chrome.storage.local.get(['serverUrl', 'ttsVoiceEn', 'ttsVoicePl', 'mla_token', 'mla_names']).then((c) => {
   input.value = c.serverUrl || DEFAULT_SERVER;
+  tokenInput.value = c.mla_token || '';
+  namesInput.value = c.mla_names || '';
   loadVoices(c.ttsVoiceEn || DEFAULT_EN, c.ttsVoicePl || DEFAULT_PL);
 });
 
 input.addEventListener('change', () => loadVoices(enSel.value, plSel.value));
+tokenInput.addEventListener('change', () => loadVoices(enSel.value, plSel.value));
 
 document.getElementById('save').addEventListener('click', async () => {
-  await chrome.storage.local.set({ serverUrl: serverUrl(), ttsVoiceEn: enSel.value, ttsVoicePl: plSel.value });
+  await chrome.storage.local.set({ serverUrl: serverUrl(), ttsVoiceEn: enSel.value, ttsVoicePl: plSel.value, mla_token: (tokenInput.value || '').trim(), mla_names: (namesInput.value || '').trim() });
   saved.style.opacity = '1';
   setTimeout(() => { saved.style.opacity = '0'; }, 1500);
 });

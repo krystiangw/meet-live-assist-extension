@@ -4,8 +4,13 @@
 
 const logEl = document.getElementById('log');
 const adviceEl = document.getElementById('advice');
+const itemsEl = document.getElementById('items');
 const capEl = document.getElementById('capStatus');
 const srvEl = document.getElementById('srvStatus');
+const brainEl = document.getElementById('brainStatus');
+const talkEl = document.getElementById('talkStatus');
+const muteEl = document.getElementById('muteStatus');
+const mentionEl = document.getElementById('mentionStatus');
 const snapEl = document.getElementById('snapStatus');
 const snapBtn = document.getElementById('snapNow');
 const shareEl = document.getElementById('shareStatus');
@@ -26,8 +31,10 @@ const DEFAULT_SERVER = 'http://127.0.0.1:8848';
 
 let hasLines = false;
 let hasAdvice = false;
+let hasItems = false;
 let currentSession = null;
 let lastAdviceSeq = 0;
+let lastItemsSeq = 0;
 let lastReqSeq = -1; // -1 = baseline unknown for this session (don't fire on first poll)
 let lastChatSeq = 0;
 let lastEditSeq = -1;
@@ -35,15 +42,34 @@ let lastDomReqSeq = -1;
 let lastDbgReqSeq = -1;
 let sharing = false;
 let serverUrl = DEFAULT_SERVER;
+let serverToken = '';
 let ttsVoicePl = null;
 let ttsVoiceEn = null;
 let callLang = null; // from Meet's caption-language selector (via content script)
 let port = null;
 let pingTimer = null;
 let pollTimer = null;
+let brainTimer = null;
 let shareTimer = null;
 
 function setStatus(el, text, cls) { el.textContent = text; el.className = 'status ' + cls; }
+function hdrs(json) { const h = { 'X-MLA-Token': serverToken }; if (json) h['Content-Type'] = 'application/json'; return h; }
+
+// Urgent cue on 🔴 RISK: a short beep + a system notification (the panel may be hidden mid-call).
+let cueArmed = false; // stays off briefly after (re)connect so backfilled advice doesn't blast
+function riskCue(text) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator(); const g = ctx.createGain();
+    o.type = 'sine'; o.frequency.value = 660; o.connect(g); g.connect(ctx.destination);
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.14, ctx.currentTime + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+    o.start(); o.stop(ctx.currentTime + 0.36);
+    setTimeout(() => { try { ctx.close(); } catch (_) {} }, 600);
+  } catch (_) {}
+  try { chrome.notifications.create({ type: 'basic', iconUrl: 'icons/icon48.png', title: 'Meet Live Assist — RISK', message: String(text || '').slice(0, 180) }); } catch (_) {}
+}
 
 // ---- transcript ----------------------------------------------------------
 const liveLines = new Map(); // caption id -> element (interim lines updated in place)
@@ -63,6 +89,45 @@ function upsertCaption(id, { ts, speaker, text }, final) {
   el.append(document.createTextNode(text || ''));
   if (final) liveLines.delete(id);
   if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ---- talk-time + muted nudge ---------------------------------------------
+let talkWords = { you: 0, others: 0 };
+function resetTalk() { talkWords = { you: 0, others: 0 }; talkEl.hidden = true; muteEl.hidden = true; mentionEl.hidden = true; }
+function trackTalk(speaker, text) {
+  const w = (text || '').trim().split(/\s+/).filter(Boolean).length;
+  if (!w) return;
+  if (speaker === 'You') talkWords.you += w;
+  else if (speaker && speaker !== '(unattributed)') talkWords.others += w;
+  const tot = talkWords.you + talkWords.others;
+  if (tot >= 25) { talkEl.hidden = false; setStatus(talkEl, `🗣 you ${Math.round(100 * talkWords.you / tot)}%`, 'idle'); }
+}
+const MUTED_RE = /\byou(?:'|’| a)?re (?:on mute|muted|breaking up)\b|\byou are (?:on mute|muted)\b|can'?t hear you|you broke up|you'?re on mute\b/i;
+let muteNudgeAt = 0;
+function checkMuted(speaker, text) {
+  if (speaker === 'You') return;              // others noticing you, not you saying it
+  if (!MUTED_RE.test(text || '')) return;
+  if (nowMs() - muteNudgeAt < 8000) return;   // debounce
+  muteNudgeAt = nowMs();
+  muteEl.hidden = false; setTimeout(() => { muteEl.hidden = true; }, 6000);
+  if (cueArmed) riskCue('You may be muted');
+}
+function nowMs() { return performance.now(); }
+
+// Personal-mention alert: fire when someone else names you (from your options "Your name(s)" list).
+let nameRe = null;
+let mentionAt = 0;
+function buildNameRe(names) {
+  const parts = (names || 'Krystian, Chris, Christian').split(',').map((s) => s.trim()).filter(Boolean)
+    .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  nameRe = parts.length ? new RegExp(`\\b(${parts.join('|')})\\b`, 'i') : null;
+}
+function checkMention(speaker, text) {
+  if (speaker === 'You' || !nameRe || !nameRe.test(text || '')) return;
+  if (nowMs() - mentionAt < 6000) return;
+  mentionAt = nowMs();
+  mentionEl.hidden = false; setTimeout(() => { mentionEl.hidden = true; }, 6000);
+  if (cueArmed) riskCue('You were mentioned');
 }
 
 function appendLine({ ts, speaker, text }) {
@@ -163,8 +228,16 @@ function appendAdvice({ marker, text, image }) {
     sp.addEventListener('click', () => speak(text, sp));
     div.append(sp);
   }
+  if (text) {
+    const cp = document.createElement('button');
+    cp.className = 'speak-btn'; cp.textContent = '📋'; cp.title = 'Copy (paste into Meet chat)';
+    cp.addEventListener('click', () => navigator.clipboard.writeText(text)
+      .then(() => { cp.textContent = '✓'; setTimeout(() => { cp.textContent = '📋'; }, 900); }).catch(() => {}));
+    div.append(cp);
+  }
   adviceEl.appendChild(div);
   adviceEl.scrollTop = adviceEl.scrollHeight;
+  if (m === 'RISK' && cueArmed) riskCue(text);
 }
 
 // Pick a voice matching the SAY text's language. SAY phrasing is in the meeting's spoken
@@ -204,7 +277,7 @@ async function speak(text, btn) {
   try {
     if (intoCall) mic = await micUnmute(); // unmute Meet so the TTS is actually transmitted
     const r = await fetch(`${serverUrl}/speak`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: hdrs(true),
       body: JSON.stringify({ session: currentSession, text, voice: pickVoice(text), device: intoCall ? 'BlackHole' : null }),
     });
     ok = r.ok;
@@ -218,10 +291,30 @@ async function speak(text, btn) {
 
 function resetAdvice() { adviceEl.innerHTML = '<div class="empty small">Advice will appear here live…</div>'; hasAdvice = false; lastAdviceSeq = 0; }
 
+// Reflect brain liveness in the advice empty-state so "nothing happening" is explained, not silent.
+function setBrainEmpty(live) {
+  if (hasAdvice) return;
+  const e = adviceEl.querySelector('.empty');
+  if (e) e.textContent = live ? 'Advice will appear here live…'
+    : 'No assistant attached — run your Claude session with the meet-live-assist skill.';
+}
+
+async function pollBrain() {
+  if (!currentSession) return;
+  try {
+    const r = await fetch(`${serverUrl}/brain-ping?session=${encodeURIComponent(currentSession)}`, { headers: hdrs() });
+    if (!r.ok) return;
+    const { ageMs } = await r.json();
+    const live = ageMs != null && ageMs < 45000; // heartbeat within 45s = attached
+    setStatus(brainEl, live ? '🧠 assistant on' : '🧠 no assistant', live ? 'ok' : 'bad');
+    setBrainEmpty(live);
+  } catch (_) { /* server down — srv pill already reflects it */ }
+}
+
 async function pollAdvice() {
   if (!currentSession) return;
   try {
-    const r = await fetch(`${serverUrl}/advice?session=${encodeURIComponent(currentSession)}&since=${lastAdviceSeq}`);
+    const r = await fetch(`${serverUrl}/advice?session=${encodeURIComponent(currentSession)}&since=${lastAdviceSeq}`, { headers: hdrs() });
     if (!r.ok) return;
     const { items, last } = await r.json();
     (items || []).forEach(appendAdvice);
@@ -232,7 +325,7 @@ async function pollAdvice() {
 async function pollSnapRequest() {
   if (!currentSession) return;
   try {
-    const r = await fetch(`${serverUrl}/snapshot-request?session=${encodeURIComponent(currentSession)}`);
+    const r = await fetch(`${serverUrl}/snapshot-request?session=${encodeURIComponent(currentSession)}`, { headers: hdrs() });
     if (!r.ok) return;
     const { seq } = await r.json();
     if (typeof seq !== 'number') return;
@@ -242,6 +335,44 @@ async function pollSnapRequest() {
 }
 
 function requestCapture() { try { port.postMessage({ type: 'snapshot-now' }); } catch (_) {} }
+
+// ---- decisions & action items (the board) --------------------------------
+function resetItems() { itemsEl.innerHTML = '<div class="empty small">Decisions and action items will appear here…</div>'; hasItems = false; lastItemsSeq = 0; }
+function appendItem({ kind, text, owner, blockedBy }) {
+  if (!hasItems) { itemsEl.innerHTML = ''; hasItems = true; }
+  const decision = kind === 'decision';
+  const div = document.createElement('div');
+  div.className = 'item ' + (decision ? 'decision' : 'action');
+  const k = document.createElement('span'); k.className = 'kind'; k.textContent = decision ? 'DECISION' : 'ACTION';
+  const body = document.createElement('div'); body.className = 'body';
+  const txt = document.createElement('div'); txt.className = 'txt'; txt.textContent = text;
+  txt.title = 'Click to mark done'; txt.addEventListener('click', () => div.classList.toggle('done'));
+  body.appendChild(txt);
+  if (owner || blockedBy) {
+    const meta = document.createElement('div'); meta.className = 'meta';
+    meta.textContent = [owner ? `owner: ${owner}` : '', blockedBy ? `blocked by: ${blockedBy}` : ''].filter(Boolean).join(' · ');
+    body.appendChild(meta);
+  }
+  div.append(k, body);
+  if (!decision) {
+    const j = document.createElement('button'); j.className = 'jira'; j.textContent = 'Draft Jira';
+    j.title = 'Ask the assistant to draft a Jira ticket for this (draft only)';
+    j.addEventListener('click', () => sendChat(`Draft a Jira ticket (DRAFT only — do not create) for this action item: "${text}"${owner ? ` — owner ${owner}` : ''}. Use the team's Goal / Summary / Test plan sections.`));
+    div.append(j);
+  }
+  itemsEl.appendChild(div);
+  itemsEl.scrollTop = itemsEl.scrollHeight;
+}
+async function pollItems() {
+  if (!currentSession) return;
+  try {
+    const r = await fetch(`${serverUrl}/items?session=${encodeURIComponent(currentSession)}&since=${lastItemsSeq}`, { headers: hdrs() });
+    if (!r.ok) return;
+    const { items, last } = await r.json();
+    (items || []).forEach(appendItem);
+    if (typeof last === 'number') lastItemsSeq = Math.max(lastItemsSeq, last);
+  } catch (_) {}
+}
 
 // ---- chat ----------------------------------------------------------------
 function appendChat({ role, text, image }) {
@@ -258,7 +389,7 @@ function appendChat({ role, text, image }) {
 async function pollChat() {
   if (!currentSession) return;
   try {
-    const r = await fetch(`${serverUrl}/chat?session=${encodeURIComponent(currentSession)}&since=${lastChatSeq}`);
+    const r = await fetch(`${serverUrl}/chat?session=${encodeURIComponent(currentSession)}&since=${lastChatSeq}`, { headers: hdrs() });
     if (!r.ok) return;
     const { items, last } = await r.json();
     (items || []).forEach(appendChat);
@@ -266,18 +397,29 @@ async function pollChat() {
   } catch (_) { /* server down */ }
 }
 
-chatForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const text = chatInput.value.trim();
+async function sendChat(text) {
   if (!text || !currentSession) return;
-  chatInput.value = '';
   try {
     await fetch(`${serverUrl}/chat`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: hdrs(true),
       body: JSON.stringify({ session: currentSession, role: 'user', text }),
     });
     pollChat(); // reflect immediately
   } catch (_) {}
+}
+
+chatForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = chatInput.value.trim();
+  if (!text) return;
+  chatInput.value = '';
+  sendChat(text);
+});
+
+// Quick-ask chips → preset chat prompts (recap / mentioned-me / action-items).
+document.getElementById('quickAsk').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-ask]');
+  if (btn) sendChat(btn.dataset.ask);
 });
 
 function setSharing(on) {
@@ -293,7 +435,7 @@ function setSharing(on) {
 async function pollEdits() {
   if (!currentSession) return;
   try {
-    const r = await fetch(`${serverUrl}/edit?session=${encodeURIComponent(currentSession)}&since=${Math.max(lastEditSeq, 0)}`);
+    const r = await fetch(`${serverUrl}/edit?session=${encodeURIComponent(currentSession)}&since=${Math.max(lastEditSeq, 0)}`, { headers: hdrs() });
     if (!r.ok) return;
     const { items, last } = await r.json();
     if (lastEditSeq < 0) { lastEditSeq = last || 0; return; } // baseline: don't re-apply old edits
@@ -304,7 +446,7 @@ async function pollEdits() {
 async function pollDomRequest() {
   if (!currentSession) return;
   try {
-    const r = await fetch(`${serverUrl}/dom-request?session=${encodeURIComponent(currentSession)}`);
+    const r = await fetch(`${serverUrl}/dom-request?session=${encodeURIComponent(currentSession)}`, { headers: hdrs() });
     if (!r.ok) return;
     const { seq } = await r.json();
     if (lastDomReqSeq < 0) { lastDomReqSeq = seq; return; }
@@ -315,7 +457,7 @@ async function pollDomRequest() {
 async function pollDebugRequest() {
   if (!currentSession) return;
   try {
-    const r = await fetch(`${serverUrl}/debug-request?session=${encodeURIComponent(currentSession)}`);
+    const r = await fetch(`${serverUrl}/debug-request?session=${encodeURIComponent(currentSession)}`, { headers: hdrs() });
     if (!r.ok) return;
     const { seq, kind } = await r.json();
     if (lastDbgReqSeq < 0) { lastDbgReqSeq = seq; return; }
@@ -330,7 +472,9 @@ dbgToggle.addEventListener('change', () => {
 
 function startPolling() {
   clearInterval(pollTimer);
-  pollTimer = setInterval(() => { pollAdvice(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); pollDebugRequest(); }, 1500);
+  pollTimer = setInterval(() => { pollAdvice(); pollItems(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); pollDebugRequest(); }, 1500);
+  clearInterval(brainTimer);
+  brainTimer = setInterval(pollBrain, 5000); // liveness is coarse — no need to poll it fast
 }
 
 // ---- SW port (transcript + status) ---------------------------------------
@@ -344,14 +488,17 @@ function onMessage(msg) {
       if (msg.lang) callLang = msg.lang;
       break;
     case 'session':
-      clearLog(); resetAdvice();
+      clearLog(); resetAdvice(); resetItems();
       setStatus(capEl, 'capturing', 'ok');
       sessionEl.textContent = msg.session || '';
+      document.getElementById('consent').hidden = false; // remind to disclose, once per call
       setSession(msg.session);
       break;
     case 'line': // STT lines (no id)
       setStatus(capEl, 'capturing', 'ok');
       appendLine(msg);
+      checkMuted(msg.speaker, msg.text);
+      checkMention(msg.speaker, msg.text);
       break;
     case 'cap':
       setStatus(capEl, 'capturing', 'ok');
@@ -360,10 +507,17 @@ function onMessage(msg) {
     case 'cap-final':
       setStatus(capEl, 'capturing', 'ok');
       upsertCaption(msg.id, msg, true);
+      trackTalk(msg.speaker, msg.text);
+      checkMuted(msg.speaker, msg.text);
+      checkMention(msg.speaker, msg.text);
       break;
     case 'session-end':
       setStatus(capEl, 'call ended', 'idle');
       setSharing(false);
+      break;
+    case 'capture-health':
+      if (!msg.ok) setStatus(capEl, '⚠ no captions — turn on CC / check language', 'bad');
+      else setStatus(capEl, 'capturing', 'ok');
       break;
     case 'sharing':
       setSharing(msg.on);
@@ -372,7 +526,7 @@ function onMessage(msg) {
       callLang = msg.lang;
       break;
     case 'server':
-      setStatus(srvEl, msg.ok ? 'server ✓' : 'server ✗ (start it)', msg.ok ? 'ok' : 'bad');
+      setStatus(srvEl, msg.ok ? 'server ✓' : (msg.status === 403 ? 'server ✗ (set token in options)' : 'server ✗ (start it)'), msg.ok ? 'ok' : 'bad');
       break;
     case 'snapshot':
       if (msg.ok) setStatus(snapEl, `shots ${msg.count ?? '·'}`, 'ok');
@@ -408,6 +562,65 @@ function onMessage(msg) {
 
 snapBtn.addEventListener('click', () => { try { port.postMessage({ type: 'snapshot-now' }); } catch (_) {} });
 
+const consentEl = document.getElementById('consent');
+document.getElementById('consentDismiss').addEventListener('click', () => { consentEl.hidden = true; });
+
+// ---- setup / health checklist --------------------------------------------
+const setupEl = document.getElementById('setup');
+let autoSetupShown = false;
+function setupRow(ok, label, hint) {
+  const d = document.createElement('div'); d.className = 'setup-row ' + (ok ? 'ok' : 'bad');
+  const m = document.createElement('span'); m.className = 'setup-mark'; m.textContent = ok ? '✓' : '✗';
+  const t = document.createElement('span'); t.textContent = label + (ok ? '' : ` — ${hint}`);
+  d.append(m, t); return d;
+}
+function renderSetup(h) {
+  const t = (h && h.tools) || {};
+  setupEl.innerHTML = '';
+  setupEl.appendChild(setupRow(!!h, 'Local server running', 'start transcript-server.js (launchd)'));
+  setupEl.appendChild(setupRow(!!serverToken, 'Server token set', 'paste .mla-token into extension options'));
+  setupEl.appendChild(setupRow(!!t.ffmpeg, 'ffmpeg (TTS + STT)', 'brew install ffmpeg'));
+  setupEl.appendChild(setupRow(!!(t.whisper && t.whisperModel), 'Local STT (whisper + model)', 'brew install whisper-cpp + ggml model'));
+  setupEl.appendChild(setupRow(!!t.blackhole, 'BlackHole (speak into call — optional)', 'install BlackHole 2ch + Aggregate device'));
+  const note = document.createElement('div'); note.className = 'setup-note';
+  note.textContent = 'Tip: set Meet caption language to the spoken language (⋮ → Settings → Captions).';
+  setupEl.appendChild(note);
+  const missing = !h || !serverToken || !t.ffmpeg;
+  if (missing && !autoSetupShown) { autoSetupShown = true; setupEl.hidden = false; } // nudge once on first run
+}
+async function fetchHealth() {
+  let h = null;
+  try { const r = await fetch(`${serverUrl}/health`); if (r.ok) h = await r.json(); } catch (_) {}
+  renderSetup(h);
+}
+document.getElementById('setupBtn').addEventListener('click', () => { setupEl.hidden = !setupEl.hidden; if (!setupEl.hidden) fetchHealth(); });
+
+function downloadText(name, text) {
+  try {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown' }));
+    const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  } catch (_) {}
+}
+document.getElementById('summaryBtn').addEventListener('click', async () => {
+  if (!currentSession) return;
+  try {
+    const r = await fetch(`${serverUrl}/summary?session=${encodeURIComponent(currentSession)}`, { headers: hdrs() });
+    if (!r.ok) return;
+    const { text } = await r.json();
+    if (text && text.trim()) { appendChat({ role: 'agent', text }); downloadText(`${currentSession}.summary.md`, text); }
+    else { appendChat({ role: 'agent', text: '_No summary yet — ask the assistant to wrap up, or it writes one when the call ends._' }); }
+  } catch (_) {}
+});
+
+document.getElementById('clearBtn').addEventListener('click', async () => {
+  if (!currentSession || !confirm('Delete ALL data for this meeting (transcript, snapshots, chat)? This cannot be undone.')) return;
+  try {
+    const r = await fetch(`${serverUrl}/clear`, { method: 'POST', headers: hdrs(true), body: JSON.stringify({ session: currentSession }) });
+    if (r.ok) { clearLog(); resetAdvice(); resetItems(); chatEl.innerHTML = ''; lastChatSeq = 0; setStatus(capEl, 'cleared', 'idle'); }
+  } catch (_) {}
+});
+
 sttToggle.addEventListener('change', () => {
   try { port.postMessage({ type: sttToggle.checked ? 'stt-start' : 'stt-stop' }); } catch (_) {}
   if (sttToggle.checked) { sttEl.hidden = false; setStatus(sttEl, '🎧 starting…', 'idle'); }
@@ -417,7 +630,7 @@ async function postMode(mode) {
   if (!currentSession) return;
   try {
     await fetch(`${serverUrl}/mode`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: hdrs(true),
       body: JSON.stringify({ session: currentSession, mode }),
     });
   } catch (_) {}
@@ -426,10 +639,12 @@ modeSel.addEventListener('change', () => { chrome.storage.local.set({ mla_mode: 
 
 function setSession(session) {
   if (session && session !== currentSession) {
-    currentSession = session; lastAdviceSeq = 0; lastReqSeq = -1; lastChatSeq = 0; lastEditSeq = -1; lastDomReqSeq = -1; lastDbgReqSeq = -1;
-    chatEl.innerHTML = '';
+    currentSession = session; lastAdviceSeq = 0; lastItemsSeq = 0; lastReqSeq = -1; lastChatSeq = 0; lastEditSeq = -1; lastDomReqSeq = -1; lastDbgReqSeq = -1;
+    chatEl.innerHTML = ''; resetItems(); resetTalk();
+    setStatus(brainEl, '🧠 ?', 'idle');
+    cueArmed = false; setTimeout(() => { cueArmed = true; }, 2500); // don't cue on initial backfill
     postMode(modeSel.value); // register the current mode for the new session
-    pollAdvice(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); pollDebugRequest();
+    pollAdvice(); pollItems(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); pollDebugRequest(); pollBrain();
   }
 }
 
@@ -445,11 +660,20 @@ function connect() {
   });
 }
 
-chrome.storage.local.get(['serverUrl', 'ttsVoicePl', 'ttsVoiceEn', 'mla_mode']).then((c) => {
+chrome.storage.local.get(['serverUrl', 'ttsVoicePl', 'ttsVoiceEn', 'mla_mode', 'mla_token', 'mla_names']).then((c) => {
   if (c.serverUrl) serverUrl = c.serverUrl.replace(/\/+$/, '');
   ttsVoicePl = c.ttsVoicePl || 'Zosia';
   ttsVoiceEn = c.ttsVoiceEn || 'Daniel';
+  serverToken = c.mla_token || '';
+  buildNameRe(c.mla_names);
   if (c.mla_mode) modeSel.value = c.mla_mode;
+  fetchHealth(); // first-run checklist (auto-opens once if something's missing)
+});
+// Pick up token / names edited in options without reopening the panel.
+chrome.storage.onChanged.addListener((ch, area) => {
+  if (area !== 'local') return;
+  if (ch.mla_token) serverToken = ch.mla_token.newValue || '';
+  if (ch.mla_names) buildNameRe(ch.mla_names.newValue);
 });
 connect();
 startPolling();

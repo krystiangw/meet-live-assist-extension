@@ -24,11 +24,24 @@
     .status.ok { background: #1a7f3733; color: #1a7f37; }
     .status.bad { background: #d1242f33; color: #d1242f; }
     .status.idle { background: color-mix(in srgb, CanvasText 12%, transparent); }
-    #snapNow {
+    #snapNow, #clearBtn, #setupBtn, #summaryBtn {
       font-size: 12px; padding: 2px 7px; border-radius: 10px; cursor: pointer; line-height: 1.3;
       border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: transparent; color: inherit;
     }
-    #snapNow:hover { background: color-mix(in srgb, CanvasText 12%, transparent); }
+    #snapNow:hover, #clearBtn:hover, #setupBtn:hover, #summaryBtn:hover { background: color-mix(in srgb, CanvasText 12%, transparent); }
+    #setup { padding: 8px 12px; border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent); font-size: 12px; }
+    .setup-row { padding: 2px 0; }
+    .setup-row.ok .setup-mark { color: var(--say); }
+    .setup-row.bad .setup-mark { color: var(--risk); }
+    .setup-mark { font-weight: 700; display: inline-block; width: 14px; }
+    .setup-note { margin-top: 6px; opacity: .65; }
+    #consent {
+      display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12px;
+      background: color-mix(in srgb, var(--info) 12%, transparent);
+      border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
+    }
+    #consent button { margin-left: auto; font: 11px system-ui; padding: 2px 9px; border-radius: 10px; cursor: pointer;
+      border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: transparent; color: inherit; }
     #session { font-size: 11px; opacity: 0.6; width: 100%; }
 
     .section-label {
@@ -83,6 +96,20 @@
     .rich-list { margin: 4px 0; padding-left: 20px; }
     .rich-list li { margin: 2px 0; }
 
+    #items { flex: 0 0 auto; max-height: 22vh; overflow-y: auto; padding: 2px 12px 8px;
+      border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
+    .item { display: flex; gap: 7px; align-items: flex-start; padding: 5px 0; }
+    .item + .item { border-top: 1px solid color-mix(in srgb, CanvasText 8%, transparent); }
+    .item .kind { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 10px; white-space: nowrap; margin-top: 1px; }
+    .item.action .kind { background: color-mix(in srgb, var(--action) 18%, transparent); color: var(--action); }
+    .item.decision .kind { background: color-mix(in srgb, var(--summary) 18%, transparent); color: var(--summary); }
+    .item .body { flex: 1; }
+    .item .meta { font-size: 11px; opacity: .6; margin-top: 1px; }
+    .item .txt { cursor: pointer; }
+    .item.done .txt { text-decoration: line-through; opacity: .5; }
+    .item .jira { border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: transparent;
+      color: inherit; font: 11px system-ui; padding: 2px 7px; border-radius: 10px; cursor: pointer; white-space: nowrap; }
+    .item .jira:hover { background: color-mix(in srgb, CanvasText 12%, transparent); }
     #log { flex: 1; overflow-y: auto; padding: 4px 12px 8px; min-height: 60px; }
 
     #chat { flex: 0 0 auto; max-height: 26vh; overflow-y: auto; padding: 2px 12px 6px;
@@ -91,6 +118,10 @@
     .chat-msg.user { margin-left: auto; background: color-mix(in srgb, #2f6feb 20%, transparent); }
     .chat-msg.agent { margin-right: auto; background: color-mix(in srgb, CanvasText 10%, transparent); }
     .chat-msg a { color: inherit; }
+    #quickAsk { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 12px 0; }
+    #quickAsk button { font: 11px system-ui; padding: 3px 9px; border-radius: 12px; cursor: pointer;
+      border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: transparent; color: inherit; }
+    #quickAsk button:hover { background: color-mix(in srgb, CanvasText 12%, transparent); }
     #chatForm { display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
     #chatInput { flex: 1; padding: 7px 9px; font: inherit; border-radius: 6px;
       border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); background: Field; color: FieldText; }
@@ -116,6 +147,10 @@
     </select>
     <span id="capStatus" class="status idle">idle</span>
     <span id="srvStatus" class="status idle">server ?</span>
+    <span id="brainStatus" class="status idle" title="Is a Claude assistant attached and watching this meeting?">🧠 ?</span>
+    <span id="talkStatus" class="status idle" title="Your share of talk time this meeting" hidden></span>
+    <span id="muteStatus" class="status bad" title="Someone said you can't be heard" hidden>🔇 you may be muted</span>
+    <span id="mentionStatus" class="status bad" title="You were named in the call" hidden>🙋 mentioned you</span>
     <button id="snapNow" title="Capture the Meet tab now">📷</button>
     <span id="snapStatus" class="status idle">shots 0</span>
     <span id="shareStatus" class="status bad" hidden>● sharing · 15s</span>
@@ -135,17 +170,35 @@
     </label>
     <span id="dbgStatus" class="status idle" hidden></span>
     <span id="editStatus" class="status idle" hidden></span>
+    <button id="summaryBtn" title="Show / download the post-call summary">📄</button>
+    <button id="setupBtn" title="Setup &amp; health check">⚙</button>
+    <button id="clearBtn" title="Delete all data for this meeting (transcript, snapshots, chat)">🗑</button>
     <span id="session"></span>
   </header>
 
+  <div id="setup" hidden></div>
+
+  <div id="consent" hidden>
+    🔔 Let participants know an AI assistant is helping you and transcribing locally.
+    <button id="consentDismiss" type="button">Got it</button>
+  </div>
+
   <div class="section-label">Advice</div>
   <div id="advice"><div class="empty small">Advice will appear here live…</div></div>
+
+  <div class="section-label">Decisions &amp; action items</div>
+  <div id="items"><div class="empty small">Decisions and action items will appear here…</div></div>
 
   <div class="section-label">Transcript</div>
   <div id="log"><div class="empty">Waiting for a Google Meet call…</div></div>
 
   <div class="section-label">Chat</div>
   <div id="chat"></div>
+  <div id="quickAsk">
+    <button type="button" data-ask="What did I miss in the last few minutes? Give me a 3-bullet catch-up.">⏮ Recap</button>
+    <button type="button" data-ask="Was I (Krystian) mentioned or asked anything recently? If so, what and by whom?">🙋 Mentioned me?</button>
+    <button type="button" data-ask="List the action items and decisions so far, with owners.">✅ Action items</button>
+  </div>
   <form id="chatForm">
     <input id="chatInput" type="text" placeholder="Ask the assistant…" autocomplete="off" />
     <button type="submit">Send</button>

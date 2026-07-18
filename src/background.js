@@ -33,6 +33,13 @@ async function getServerUrl() {
   const { serverUrl } = await chrome.storage.local.get('serverUrl');
   return (serverUrl || DEFAULT_SERVER).replace(/\/+$/, '');
 }
+async function getToken() {
+  const { mla_token } = await chrome.storage.local.get('mla_token');
+  return mla_token || '';
+}
+async function authHeaders() {
+  return { 'Content-Type': 'application/json', 'X-MLA-Token': await getToken() };
+}
 
 async function loadState() {
   const { mla_session, mla_buffer } = await chrome.storage.session.get(['mla_session', 'mla_buffer']);
@@ -40,6 +47,43 @@ async function loadState() {
 }
 async function saveState(session, buffer) {
   await chrome.storage.session.set({ mla_session: session, mla_buffer: buffer.slice(-BUFFER_MAX) });
+}
+
+// cap-final persistence is a read-modify-write on chrome.storage.session; MV3 dispatches onMessage
+// concurrently and Meet fires many cap-finals in bursts, so serialize persists to avoid lost updates.
+let capQueue = Promise.resolve();
+function commonPrefixLen(a, b) { const n = Math.min(a.length, b.length); let i = 0; while (i < n && a[i] === b[i]) i++; return i; }
+async function persistCapFinal(msg) {
+  const { session, buffer } = await loadState();
+  const sess = msg.session || session;
+  const { mla_commit, mla_recent } = await chrome.storage.session.get(['mla_commit', 'mla_recent']);
+  const commit = (mla_commit && typeof mla_commit === 'object') ? mla_commit : {};
+  const recent = Array.isArray(mla_recent) ? mla_recent : [];
+  const full = (msg.text || '').trim();
+  const prev = commit[msg.id] || '';
+  // Emit only what's new vs this block's last commit, diffing on the longest common prefix so an ASR
+  // mid-sentence revision re-posts just the changed tail (not the whole line). Back up to a word boundary.
+  let lcp = commonPrefixLen(prev, full);
+  if (lcp > 0 && lcp < full.length && full[lcp] !== ' ') { const sp = full.lastIndexOf(' ', lcp); lcp = sp >= 0 ? sp : 0; }
+  let delta = full.slice(lcp).trim();
+  const spk = msg.speaker || '';
+  // Cross-block replay guard: drop an exact repeat, or a long substring of a very recent delta (a short
+  // utterance like "yes"/"right" is kept even if it appears inside a recent line).
+  if (delta && recent.some((r) => r.speaker === spk && (r.text === delta || (delta.length >= 15 && r.text.includes(delta))))) delta = '';
+  commit[msg.id] = full;
+  const ids = Object.keys(commit);
+  if (ids.length > 60) for (const k of ids.slice(0, ids.length - 60)) delete commit[k];
+  if (delta) {
+    recent.push({ speaker: spk, text: delta });
+    if (recent.length > 12) recent.shift();
+    buffer.push({ ts: msg.ts, speaker: msg.speaker, text: delta });
+    await saveState(sess, buffer);
+    const who = msg.speaker ? `${msg.speaker}: ` : '';
+    await postToServer(sess, `[${msg.ts}] ${who}${delta}\n`);
+  } else {
+    await saveState(sess, buffer);
+  }
+  await chrome.storage.session.set({ mla_commit: commit, mla_recent: recent });
 }
 
 function broadcast(msg) {
@@ -52,11 +96,11 @@ async function postToServer(session, line) {
   try {
     const res = await fetch((await getServerUrl()) + '/append', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await authHeaders(),
       body: JSON.stringify({ session, line }),
       signal: ctrl.signal,
     });
-    broadcast({ type: 'server', ok: res.ok });
+    broadcast({ type: 'server', ok: res.ok, status: res.status });
   } catch (_) {
     broadcast({ type: 'server', ok: false });
   } finally {
@@ -73,15 +117,20 @@ async function findActiveMeetTab() {
 async function captureSnapshot() {
   const { mla_session } = await chrome.storage.session.get('mla_session');
   if (!mla_session) return;
-  const tab = await findActiveMeetTab();
-  if (!tab) { broadcast({ type: 'snapshot', ok: false, reason: 'meet tab not active' }); return; }
+  // Capture what the user is actually looking at: the active tab of the focused window. During a
+  // self-share that's the shared app tab (Meet is inactive then); for a remote share it's usually the
+  // Meet tab (which renders the shared screen). Fall back to any active Meet tab.
+  let tab = null;
+  try { const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); tab = t || null; } catch (_) {}
+  if (!tab || !/^https?:/.test(tab.url || '')) tab = await findActiveMeetTab();
+  if (!tab) { broadcast({ type: 'snapshot', ok: false, reason: 'no capturable tab' }); return; }
   let dataUrl;
   try {
     dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 60 });
   } catch (e) { broadcast({ type: 'snapshot', ok: false, reason: String(e && e.message || e) }); return; }
   try {
     const r = await fetch((await getServerUrl()) + '/snapshot', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: await authHeaders(),
       body: JSON.stringify({ session: mla_session, dataUrl }),
     });
     const j = r.ok ? await r.json() : null;
@@ -108,7 +157,7 @@ async function startStt() {
   catch (e) { broadcast({ type: 'stt', on: false, reason: String(e && e.message || e) }); return; }
   await ensureOffscreen();
   const { mla_session, mla_lang } = await chrome.storage.session.get(['mla_session', 'mla_lang']);
-  chrome.runtime.sendMessage({ type: 'offscreen-start', streamId, session: mla_session, lang: mla_lang || 'auto', serverUrl: await getServerUrl() });
+  chrome.runtime.sendMessage({ type: 'offscreen-start', streamId, session: mla_session, lang: mla_lang || 'auto', serverUrl: await getServerUrl(), token: await getToken() });
   await chrome.storage.session.set({ mla_stt_on: true });
   try { chrome.tabs.sendMessage(tab.id, { type: 'capture-mode', captions: false }); } catch (_) {} // avoid dup transcript
 }
@@ -149,7 +198,7 @@ async function captureDom() {
     const [r] = await chrome.scripting.executeScript({ target: { tabId: id }, func: pageGetDom });
     const { mla_session } = await chrome.storage.session.get('mla_session');
     await fetch((await getServerUrl()) + '/dom', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: await authHeaders(),
       body: JSON.stringify({ session: mla_session, html: (r && r.result) || '' }),
     });
     broadcast({ type: 'edit', ok: true, result: { dom: true } });
@@ -275,7 +324,7 @@ async function handleDebugDo(kind) {
   const { mla_session } = await chrome.storage.session.get('mla_session');
   try {
     await fetch((await getServerUrl()) + '/debug', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: await authHeaders(),
       body: JSON.stringify({ session: mla_session, kind, data }),
     });
   } catch (_) {}
@@ -287,22 +336,23 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     if (msg.type === 'session') {
       await saveState(msg.session, []);
+      // Ordered behind any in-flight persist so it can't be clobbered by a late cap-final from the old call.
+      await (capQueue = capQueue.then(() => chrome.storage.session.set({ mla_commit: {}, mla_recent: [] })).catch(() => {}));
       await postToServer(msg.session, ''); // creates the file + header on the server
       broadcast({ type: 'session', session: msg.session, code: msg.code });
     } else if (msg.type === 'cap') {
       broadcast({ type: 'cap', id: msg.id, ts: msg.ts, speaker: msg.speaker, text: msg.text }); // live, no server
     } else if (msg.type === 'cap-final') {
-      const { session, buffer } = await loadState();
-      const entry = { ts: msg.ts, speaker: msg.speaker, text: msg.text };
-      buffer.push(entry);
-      await saveState(msg.session || session, buffer);
-      broadcast({ type: 'cap-final', ...entry, id: msg.id });
-      const who = msg.speaker ? `${msg.speaker}: ` : '';
-      await postToServer(msg.session || session, `[${msg.ts}] ${who}${msg.text}\n`);
+      // Panel gets FULL text immediately (low latency, upserts by id → one clean line). Persistence to
+      // the file/brain (dedup + delta) is serialized behind capQueue so concurrent cap-finals don't race.
+      broadcast({ type: 'cap-final', ts: msg.ts, speaker: msg.speaker, text: msg.text, id: msg.id });
+      capQueue = capQueue.then(() => persistCapFinal(msg)).catch(() => {});
     } else if (msg.type === 'session-end') {
       await chrome.storage.session.set({ mla_sharing: false });
       broadcast({ type: 'session-end' });
       broadcast({ type: 'sharing', on: false });
+    } else if (msg.type === 'capture-health') {
+      broadcast({ type: 'capture-health', ok: !!msg.ok, reason: msg.reason });
     } else if (msg.type === 'sharing') {
       await chrome.storage.session.set({ mla_sharing: !!msg.on });
       broadcast({ type: 'sharing', on: !!msg.on });
@@ -312,7 +362,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     } else if (msg.type === 'stt-line') {
       const d = new Date();
       const ts = [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
-      broadcast({ type: 'line', ts, speaker: '', text: msg.text });
+      broadcast({ type: 'line', ts, speaker: '(unattributed)', text: msg.text });
     } else if (msg.type === 'stt-status') {
       broadcast({ type: 'stt', on: !!msg.on });
     } else if (msg.type === 'stt-error') {

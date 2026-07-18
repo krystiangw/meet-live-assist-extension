@@ -18,10 +18,27 @@
 
   // ---- TUNABLES ------------------------------------------------------------
   const FLUSH_STABLE_MS = 600; // write a line once its text stops changing this long (= finalized)
+  const MAX_UTTER_MS = 3500;   // force-commit a long, still-growing utterance this often (kills monologue latency)
   const POLL_MS = 200;          // caption scan interval
+  const CAPTURE_WARN_MS = 12000; // in-call but no caption region this long → warn (CC off / Google reshipped the DOM)
   const AUTO_CAPTIONS = true;   // auto-enable Meet captions on every call
   const MEETING_CODE_RE = /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/; // a real call URL, e.g. ngt-eyri-xso
   const NOISE_RE = /jump to bottom|arrow_downward|arrow_upward/i;
+
+  // Conservative ASR fix-ups: Meet/whisper mangle domain nouns. Only high-precision, whole-word
+  // replacements that can't corrupt ordinary English. Extend as new manglings show up in transcripts.
+  const GLOSSARY = [
+    [/\btest[ -]?g(?:orilla|uerrilla|orila)\b/gi, 'Acme'],
+    [/\bacme\b/gi, 'Acme'],
+    [/\bcore[ -]?signal\b/gi, 'Acme'],
+    [/\bfeature[ -]fl(?:ag|ight)\b|\bfuture[ -]flag\b/gi, 'feature flag'], // NOT "future flight" (valid phrase)
+    [/\bgen[ -]?(\d)\b/gi, 'gen$1'],
+  ];
+  function normalizeGlossary(s) {
+    let out = s;
+    for (const [re, to] of GLOSSARY) out = out.replace(re, to);
+    return out;
+  }
 
   const CC_LABEL_HINTS = ['caption', 'subtitle', 'napis', 'untertitel', 'sous-titre', 'subtítulo', 'subtitulo'];
   const CC_ON_HINTS = ['turn off', 'wyłącz', 'wylacz', 'disable', 'stop'];
@@ -35,6 +52,8 @@
   let lineCount = 0;
   let scanning = false;
   let currentCode = null;
+  let regionSeenAt = 0;   // last time the caption region existed (watchdog)
+  let captureWarned = false;
   let trackerId = 0;
   const trackers = []; // [{ el, id, ts, text, lastChange, speaker, finalized }]
 
@@ -64,7 +83,7 @@
       text = (block.textContent || '').trim();
       if (speaker && text.startsWith(speaker)) text = text.slice(speaker.length).trim();
     }
-    return { speaker, text };
+    return { speaker, text: normalizeGlossary(text) };
   }
   function tsLabel() {
     const d = new Date();
@@ -87,6 +106,8 @@
     const text = (tr.text || '').trim();
     if (tr.finalized || !text) return;
     tr.finalized = true;
+    tr.ts = tsLabel();   // stamp the commit moment (matters for forced mid-monologue flushes)
+    tr.lastFinal = now();
     lineCount++;
     send({ type: 'cap-final', session, id: tr.id, ts: tr.ts, speaker: tr.speaker || '', text });
     updateBadge();
@@ -98,19 +119,23 @@
     if (!userPaused && !sttPaused) {
       const region = firstRegion();
       if (region) {
+        regionSeenAt = now();
+        if (captureWarned) { captureWarned = false; send({ type: 'capture-health', ok: true }); updateBadge(); }
         for (const el of blocksIn(region)) {
           const { speaker, text } = readBlock(el);
           if (!text || NOISE_RE.test(text)) continue;
           let tr = trackers.find((t) => t.el === el);
-          if (!tr) { tr = { el, id: ++trackerId, ts: tsLabel(), text: '', lastChange: now(), speaker: '', finalized: false }; trackers.push(tr); }
+          if (!tr) { tr = { el, id: ++trackerId, ts: tsLabel(), text: '', lastChange: now(), lastFinal: now(), speaker: '', finalized: false }; trackers.push(tr); }
           if (speaker) tr.speaker = speaker;
           if (text !== tr.text) { tr.text = text; tr.lastChange = now(); tr.finalized = false; emitInterim(tr); }
         }
         for (let i = trackers.length - 1; i >= 0; i--) {
           const tr = trackers[i];
           if (!document.contains(tr.el)) { finalize(tr); trackers.splice(i, 1); continue; }
-          if (tr.text && !tr.finalized && now() - tr.lastChange >= FLUSH_STABLE_MS) finalize(tr);
+          if (tr.text && !tr.finalized && (now() - tr.lastChange >= FLUSH_STABLE_MS || now() - tr.lastFinal >= MAX_UTTER_MS)) finalize(tr);
         }
+      } else if (started && regionSeenAt && now() - regionSeenAt > CAPTURE_WARN_MS && !captureWarned) {
+        captureWarned = true; send({ type: 'capture-health', ok: false, reason: 'no caption region' }); updateBadge();
       }
     }
     setTimeout(scan, POLL_MS);
@@ -159,6 +184,7 @@
     if (!badge) return;
     if (!started) { badge.textContent = '○ idle'; badge.style.background = '#555'; return; }
     if (userPaused) { badge.textContent = '⏸ paused'; badge.style.background = '#8a6d00'; return; }
+    if (captureWarned) { badge.textContent = '⚠ no captions'; badge.style.background = '#d1242f'; return; }
     badge.textContent = `● rec ${lineCount}`;
     badge.style.background = '#1a7f37';
   }
@@ -189,6 +215,7 @@
       lineCount = 0;
       trackers.length = 0;
       captionsHandled = false;
+      regionSeenAt = now(); captureWarned = false; // grace period before the caption-region watchdog fires
       ensureCaptionsOn();
       send({ type: 'session', session, code });
       startScan();
