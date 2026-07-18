@@ -129,6 +129,10 @@ const edits = new Map();  // session -> { seq, items: [cmd] }
 const domReq = new Map(); // session -> seq (brain asks the extension to capture the page DOM)
 const doms = new Map();   // session -> html (captured DOM for the brain to inspect)
 
+// Live debugging: brain asks for a kind (storage/network/console); extension gathers and posts it back.
+const dbgReq = new Map();  // session -> { seq, kind }
+const dbgData = new Map(); // session -> { kind, data }
+
 // Meeting mode — steers how the brain advises. Panel sets it; brain reads it each turn.
 const modes = new Map(); // session -> mode
 const MODES = new Set(['auto', 'listener', 'lead']);
@@ -374,6 +378,43 @@ const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://127.0.0.1');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(doms.get(safeSession(u.searchParams.get('session'))) || '');
+    return;
+  }
+
+  // Brain -> server: ask the extension for debug data of a given kind.
+  if (req.method === 'POST' && req.url === '/debug-request') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
+      const session = safeSession(d.session);
+      const prev = dbgReq.get(session) || { seq: 0 };
+      dbgReq.set(session, { seq: prev.seq + 1, kind: String(d.kind || 'storage') });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(dbgReq.get(session)));
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/debug-request')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(dbgReq.get(safeSession(u.searchParams.get('session'))) || { seq: 0, kind: null }));
+    return;
+  }
+  if (req.method === 'POST' && req.url === '/debug') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 8e6) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
+      dbgData.set(safeSession(d.session), { kind: d.kind, data: d.data });
+      res.writeHead(200); res.end('ok');
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/debug')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(dbgData.get(safeSession(u.searchParams.get('session'))) || { kind: null, data: null }));
     return;
   }
 

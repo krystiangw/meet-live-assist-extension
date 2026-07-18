@@ -17,6 +17,8 @@ const chatInput = document.getElementById('chatInput');
 const sttToggle = document.getElementById('sttToggle');
 const sttEl = document.getElementById('sttStatus');
 const editEl = document.getElementById('editStatus');
+const dbgToggle = document.getElementById('dbgToggle');
+const dbgEl = document.getElementById('dbgStatus');
 const modeSel = document.getElementById('modeSel');
 
 const MARKER_LABEL = { SAY: '🟢 SAY', INFO: '🔵 INFO', SUMMARY: '🟡 SUMMARY', EXPLAIN: '🟣 EXPLAIN', RISK: '🔴 RISK', ACTION: '🟠 ACTION' };
@@ -30,6 +32,7 @@ let lastReqSeq = -1; // -1 = baseline unknown for this session (don't fire on fi
 let lastChatSeq = 0;
 let lastEditSeq = -1;
 let lastDomReqSeq = -1;
+let lastDbgReqSeq = -1;
 let sharing = false;
 let serverUrl = DEFAULT_SERVER;
 let ttsVoicePl = null;
@@ -309,9 +312,25 @@ async function pollDomRequest() {
   } catch (_) {}
 }
 
+async function pollDebugRequest() {
+  if (!currentSession) return;
+  try {
+    const r = await fetch(`${serverUrl}/debug-request?session=${encodeURIComponent(currentSession)}`);
+    if (!r.ok) return;
+    const { seq, kind } = await r.json();
+    if (lastDbgReqSeq < 0) { lastDbgReqSeq = seq; return; }
+    if (seq > lastDbgReqSeq) { lastDbgReqSeq = seq; try { port.postMessage({ type: 'debug-do', kind }); } catch (_) {} }
+  } catch (_) {}
+}
+
+dbgToggle.addEventListener('change', () => {
+  try { port.postMessage({ type: 'debug-toggle', on: dbgToggle.checked }); } catch (_) {}
+  dbgEl.hidden = false; setStatus(dbgEl, dbgToggle.checked ? '🐞 attaching…' : '🐞 off', 'idle');
+});
+
 function startPolling() {
   clearInterval(pollTimer);
-  pollTimer = setInterval(() => { pollAdvice(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); }, 1500);
+  pollTimer = setInterval(() => { pollAdvice(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); pollDebugRequest(); }, 1500);
 }
 
 // ---- SW port (transcript + status) ---------------------------------------
@@ -359,6 +378,16 @@ function onMessage(msg) {
       if (msg.ok) setStatus(snapEl, `shots ${msg.count ?? '·'}`, 'ok');
       else setStatus(snapEl, `shot ✗ ${msg.reason || ''}`.trim(), 'bad');
       break;
+    case 'debug':
+      dbgEl.hidden = false;
+      if (msg.on) { setStatus(dbgEl, '🐞 debugging', 'ok'); dbgToggle.checked = true; }
+      else if (msg.reason) { setStatus(dbgEl, `🐞 ✗ ${msg.reason}`, 'bad'); dbgToggle.checked = false; }
+      else { setStatus(dbgEl, '🐞 off', 'idle'); dbgToggle.checked = false; setTimeout(() => { dbgEl.hidden = true; }, 2000); }
+      break;
+    case 'debug-done':
+      dbgEl.hidden = false; setStatus(dbgEl, `🐞 ${msg.kind} ✓`, 'ok');
+      setTimeout(() => { if (!dbgToggle.checked) dbgEl.hidden = true; }, 2500);
+      break;
     case 'edit':
       editEl.hidden = false;
       if (msg.ok) {
@@ -397,10 +426,10 @@ modeSel.addEventListener('change', () => { chrome.storage.local.set({ mla_mode: 
 
 function setSession(session) {
   if (session && session !== currentSession) {
-    currentSession = session; lastAdviceSeq = 0; lastReqSeq = -1; lastChatSeq = 0; lastEditSeq = -1; lastDomReqSeq = -1;
+    currentSession = session; lastAdviceSeq = 0; lastReqSeq = -1; lastChatSeq = 0; lastEditSeq = -1; lastDomReqSeq = -1; lastDbgReqSeq = -1;
     chatEl.innerHTML = '';
     postMode(modeSel.value); // register the current mode for the new session
-    pollAdvice(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest();
+    pollAdvice(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); pollDebugRequest();
   }
 }
 

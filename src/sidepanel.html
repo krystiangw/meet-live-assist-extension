@@ -129,6 +129,11 @@
       <input type="checkbox" id="sttToggle" /> 🎧 STT
     </label>
     <span id="sttStatus" class="status idle" hidden></span>
+    <label id="dbgWrap" title="Let the assistant read network/console (attaches the debugger — shows a banner) and storage"
+           style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer;">
+      <input type="checkbox" id="dbgToggle" /> 🐞 Debug
+    </label>
+    <span id="dbgStatus" class="status idle" hidden></span>
     <span id="editStatus" class="status idle" hidden></span>
     <span id="session"></span>
   </header>

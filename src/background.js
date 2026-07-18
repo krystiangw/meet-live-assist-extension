@@ -202,6 +202,86 @@ function pageGetDom() {
   return clone.outerHTML.replace(/\s+/g, ' ').slice(0, 180000);
 }
 
+// ---- live debugging: storage (scripting) + network/console (chrome.debugger) ----
+let dbgTabId = null;
+const netBuf = [];   // { method, url, status, mime, type }
+const conBuf = [];   // { level, text }
+const netReq = new Map(); // requestId -> { method, url }
+
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (source.tabId !== dbgTabId) return;
+  if (method === 'Network.requestWillBeSent') {
+    netReq.set(params.requestId, { method: params.request.method, url: params.request.url });
+  } else if (method === 'Network.responseReceived') {
+    const r = netReq.get(params.requestId) || {};
+    netBuf.push({ method: r.method || params.type, url: params.response.url, status: params.response.status, mime: params.response.mimeType });
+    if (netBuf.length > 250) netBuf.shift();
+  } else if (method === 'Runtime.consoleAPICalled') {
+    conBuf.push({ level: params.type, text: (params.args || []).map((a) => a.value != null ? a.value : (a.description || '')).join(' ').slice(0, 500) });
+    if (conBuf.length > 250) conBuf.shift();
+  } else if (method === 'Runtime.exceptionThrown') {
+    const e = params.exceptionDetails || {};
+    conBuf.push({ level: 'error', text: `${e.text || ''} ${(e.exception && e.exception.description) || ''}`.slice(0, 500) });
+    if (conBuf.length > 250) conBuf.shift();
+  }
+});
+chrome.debugger.onDetach.addListener((source) => { if (source.tabId === dbgTabId) { dbgTabId = null; broadcast({ type: 'debug', on: false }); } });
+
+async function attachDebugger() {
+  const id = await appTabId();
+  if (!id) { broadcast({ type: 'debug', on: false, reason: 'no app tab' }); return; }
+  try {
+    await chrome.debugger.attach({ tabId: id }, '1.3');
+    dbgTabId = id; netBuf.length = 0; conBuf.length = 0; netReq.clear();
+    await chrome.debugger.sendCommand({ tabId: id }, 'Network.enable');
+    await chrome.debugger.sendCommand({ tabId: id }, 'Runtime.enable');
+    broadcast({ type: 'debug', on: true });
+  } catch (e) { broadcast({ type: 'debug', on: false, reason: String(e && e.message || e) }); }
+}
+async function detachDebugger() {
+  if (dbgTabId != null) { try { await chrome.debugger.detach({ tabId: dbgTabId }); } catch (_) {} dbgTabId = null; }
+  broadcast({ type: 'debug', on: false });
+}
+
+function pageGetStorage() {
+  const dump = (s) => { const o = {}; try { for (let i = 0; i < s.length; i++) { const k = s.key(i); o[k] = s.getItem(k); } } catch (_) {} return o; };
+  return { url: location.href, cookies: document.cookie, localStorage: dump(localStorage), sessionStorage: dump(sessionStorage) };
+}
+function pageGetPerf() {
+  return performance.getEntriesByType('resource').slice(-120)
+    .map((e) => ({ url: e.name, type: e.initiatorType, dur: Math.round(e.duration), size: e.transferSize || 0 }));
+}
+
+async function gatherDebug(kind) {
+  if (kind === 'storage') {
+    const id = await appTabId(); if (!id) return { error: 'no app tab' };
+    try { const [r] = await chrome.scripting.executeScript({ target: { tabId: id }, func: pageGetStorage }); return r && r.result; }
+    catch (e) { return { error: String(e && e.message || e) }; }
+  }
+  if (kind === 'network') {
+    if (dbgTabId != null) return { source: 'debugger', requests: netBuf.slice(-120) };
+    const id = await appTabId(); if (!id) return { error: 'no app tab' };
+    try { const [r] = await chrome.scripting.executeScript({ target: { tabId: id }, func: pageGetPerf }); return { source: 'performance (enable 🐞 debug for status/bodies)', requests: r && r.result }; }
+    catch (e) { return { error: String(e && e.message || e) }; }
+  }
+  if (kind === 'console') {
+    if (dbgTabId == null) return { error: 'enable 🐞 debug to capture console' };
+    return { logs: conBuf.slice(-120) };
+  }
+  return { error: 'unknown kind' };
+}
+async function handleDebugDo(kind) {
+  const data = await gatherDebug(kind);
+  const { mla_session } = await chrome.storage.session.get('mla_session');
+  try {
+    await fetch((await getServerUrl()) + '/debug', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: mla_session, kind, data }),
+    });
+  } catch (_) {}
+  broadcast({ type: 'debug-done', kind });
+}
+
 // ---- content script -> SW ------------------------------------------------
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
@@ -263,6 +343,10 @@ chrome.runtime.onConnect.addListener((port) => {
       applyEdit(m.cmd);
     } else if (m.type === 'capture-dom') {
       captureDom();
+    } else if (m.type === 'debug-toggle') {
+      if (m.on) attachDebugger(); else detachDebugger();
+    } else if (m.type === 'debug-do') {
+      handleDebugDo(m.kind);
     }
     // 'ping' is a no-op: receiving it resets the SW idle timer (keep-alive).
   });
