@@ -39,7 +39,24 @@ let shareTimer = null;
 function setStatus(el, text, cls) { el.textContent = text; el.className = 'status ' + cls; }
 
 // ---- transcript ----------------------------------------------------------
-function clearLog() { logEl.innerHTML = ''; hasLines = false; }
+const liveLines = new Map(); // caption id -> element (interim lines updated in place)
+function clearLog() { logEl.innerHTML = ''; hasLines = false; liveLines.clear(); }
+
+// Live captions: create/update a line by id as it grows; on final, lock it (drop from the live map).
+function upsertCaption(id, { ts, speaker, text }, final) {
+  if (!hasLines) { logEl.innerHTML = ''; hasLines = true; }
+  const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 60;
+  let el = liveLines.get(id);
+  if (!el) { el = document.createElement('div'); logEl.appendChild(el); if (!final) liveLines.set(id, el); }
+  el.className = 'line' + (final ? '' : ' live');
+  el.textContent = '';
+  const t = document.createElement('span'); t.className = 'ts'; t.textContent = ts || '';
+  el.append(t);
+  if (speaker) { const w = document.createElement('span'); w.className = 'who'; w.textContent = speaker + ': '; el.append(w); }
+  el.append(document.createTextNode(text || ''));
+  if (final) liveLines.delete(id);
+  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+}
 
 function appendLine({ ts, speaker, text }) {
   if (!hasLines) { logEl.innerHTML = ''; hasLines = true; }
@@ -287,9 +304,17 @@ function onMessage(msg) {
       sessionEl.textContent = msg.session || '';
       setSession(msg.session);
       break;
-    case 'line':
+    case 'line': // STT lines (no id)
       setStatus(capEl, 'capturing', 'ok');
       appendLine(msg);
+      break;
+    case 'cap':
+      setStatus(capEl, 'capturing', 'ok');
+      upsertCaption(msg.id, msg, false);
+      break;
+    case 'cap-final':
+      setStatus(capEl, 'capturing', 'ok');
+      upsertCaption(msg.id, msg, true);
       break;
     case 'session-end':
       setStatus(capEl, 'call ended', 'idle');

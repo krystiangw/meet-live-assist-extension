@@ -35,7 +35,8 @@
   let lineCount = 0;
   let scanning = false;
   let currentCode = null;
-  const trackers = []; // [{ el, text, lastChange, flushed, speaker }]
+  let trackerId = 0;
+  const trackers = []; // [{ el, id, ts, text, lastChange, speaker, finalized }]
 
   const now = () => Date.now();
   const pad = (n) => String(n).padStart(2, '0');
@@ -77,17 +78,17 @@
     } catch (_) { /* extension context invalidated on reload — ignore */ }
   }
 
-  function flush(tr) {
+  // Live: emit the growing caption immediately so the panel shows it in real time.
+  function emitInterim(tr) {
+    send({ type: 'cap', session, id: tr.id, ts: tr.ts, speaker: tr.speaker || '', text: tr.text });
+  }
+  // Finalize: lock the line and hand the full text to the server/brain (once per block).
+  function finalize(tr) {
     const text = (tr.text || '').trim();
-    if (!text || text === tr.flushed) return;
-    // Meet keeps a growing rolling caption per speaker — emit only the NEW part.
-    let out = text;
-    if (tr.flushed && text.startsWith(tr.flushed)) out = text.slice(tr.flushed.length).trim();
-    tr.flushed = text;
-    if (!out) return;
+    if (tr.finalized || !text) return;
+    tr.finalized = true;
     lineCount++;
-    const who = tr.speaker || 'Unknown';
-    send({ type: 'line', session, ts: tsLabel(), speaker: who, text: out });
+    send({ type: 'cap-final', session, id: tr.id, ts: tr.ts, speaker: tr.speaker || '', text });
     updateBadge();
   }
 
@@ -101,14 +102,14 @@
           const { speaker, text } = readBlock(el);
           if (!text || NOISE_RE.test(text)) continue;
           let tr = trackers.find((t) => t.el === el);
-          if (!tr) { tr = { el, text: '', lastChange: now(), flushed: '', speaker: '' }; trackers.push(tr); }
+          if (!tr) { tr = { el, id: ++trackerId, ts: tsLabel(), text: '', lastChange: now(), speaker: '', finalized: false }; trackers.push(tr); }
           if (speaker) tr.speaker = speaker;
-          if (text !== tr.text) { tr.text = text; tr.lastChange = now(); }
+          if (text !== tr.text) { tr.text = text; tr.lastChange = now(); tr.finalized = false; emitInterim(tr); }
         }
         for (let i = trackers.length - 1; i >= 0; i--) {
           const tr = trackers[i];
-          if (!document.contains(tr.el)) { flush(tr); trackers.splice(i, 1); continue; }
-          if (tr.text && tr.text !== tr.flushed && now() - tr.lastChange >= FLUSH_STABLE_MS) flush(tr);
+          if (!document.contains(tr.el)) { finalize(tr); trackers.splice(i, 1); continue; }
+          if (tr.text && !tr.finalized && now() - tr.lastChange >= FLUSH_STABLE_MS) finalize(tr);
         }
       }
     }

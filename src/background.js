@@ -126,13 +126,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       await saveState(msg.session, []);
       await postToServer(msg.session, ''); // creates the file + header on the server
       broadcast({ type: 'session', session: msg.session, code: msg.code });
-    } else if (msg.type === 'line') {
+    } else if (msg.type === 'cap') {
+      broadcast({ type: 'cap', id: msg.id, ts: msg.ts, speaker: msg.speaker, text: msg.text }); // live, no server
+    } else if (msg.type === 'cap-final') {
       const { session, buffer } = await loadState();
       const entry = { ts: msg.ts, speaker: msg.speaker, text: msg.text };
       buffer.push(entry);
       await saveState(msg.session || session, buffer);
-      broadcast({ type: 'line', ...entry });
-      await postToServer(msg.session || session, `[${msg.ts}] ${msg.speaker}: ${msg.text}\n`);
+      broadcast({ type: 'cap-final', ...entry, id: msg.id });
+      const who = msg.speaker ? `${msg.speaker}: ` : '';
+      await postToServer(msg.session || session, `[${msg.ts}] ${who}${msg.text}\n`);
     } else if (msg.type === 'session-end') {
       await chrome.storage.session.set({ mla_sharing: false });
       broadcast({ type: 'session-end' });
