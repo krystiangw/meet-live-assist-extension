@@ -124,6 +124,11 @@ const chat = new Map(); // session -> { seq, items: [{ seq, ts, role, text, imag
 const CHAT_MAX = 300;
 function chatFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.chat.txt`); }
 
+// Presentation-only live DOM edits: brain enqueues an edit; panel polls and applies it to the shared tab.
+const edits = new Map();  // session -> { seq, items: [cmd] }
+const domReq = new Map(); // session -> seq (brain asks the extension to capture the page DOM)
+const doms = new Map();   // session -> html (captured DOM for the brain to inspect)
+
 // Meeting mode — steers how the brain advises. Panel sets it; brain reads it each turn.
 const modes = new Map(); // session -> mode
 const MODES = new Set(['auto', 'listener', 'lead']);
@@ -303,6 +308,72 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(voices));
     });
+    return;
+  }
+
+  // Brain -> server: enqueue a presentation DOM edit; panel polls and applies it to the shared tab.
+  if (req.method === 'POST' && req.url === '/edit') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 2e6) req.destroy(); });
+    req.on('end', () => {
+      let data;
+      try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
+      const session = safeSession(data.session);
+      if (!data.op) { res.writeHead(400); return res.end('no op'); }
+      let e = edits.get(session);
+      if (!e) { e = { seq: 0, items: [] }; edits.set(session, e); }
+      e.seq++;
+      const cmd = { seq: e.seq, op: String(data.op), find: data.find, replace: data.replace, text: data.text, selector: data.selector, value: data.value, css: data.css };
+      e.items.push(cmd);
+      if (e.items.length > 100) e.items.splice(0, e.items.length - 100);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ seq: e.seq }));
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/edit')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const session = safeSession(u.searchParams.get('session'));
+    const since = parseInt(u.searchParams.get('since') || '0', 10) || 0;
+    const e = edits.get(session) || { seq: 0, items: [] };
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ items: e.items.filter((i) => i.seq > since), last: e.seq }));
+    return;
+  }
+
+  // DOM capture: brain requests it, extension posts it, brain reads it (to target selector-based edits).
+  if (req.method === 'POST' && req.url === '/dom-request') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
+      const session = safeSession(d.session);
+      domReq.set(session, (domReq.get(session) || 0) + 1);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ seq: domReq.get(session) }));
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/dom-request')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ seq: domReq.get(safeSession(u.searchParams.get('session'))) || 0 }));
+    return;
+  }
+  if (req.method === 'POST' && req.url === '/dom') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 4e6) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
+      doms.set(safeSession(d.session), String(d.html || ''));
+      res.writeHead(200); res.end('ok');
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/dom')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(doms.get(safeSession(u.searchParams.get('session'))) || '');
     return;
   }
 

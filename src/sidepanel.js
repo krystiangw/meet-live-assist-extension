@@ -16,6 +16,7 @@ const chatForm = document.getElementById('chatForm');
 const chatInput = document.getElementById('chatInput');
 const sttToggle = document.getElementById('sttToggle');
 const sttEl = document.getElementById('sttStatus');
+const editEl = document.getElementById('editStatus');
 const modeSel = document.getElementById('modeSel');
 
 const MARKER_LABEL = { SAY: '🟢 SAY', INFO: '🔵 INFO', SUMMARY: '🟡 SUMMARY', EXPLAIN: '🟣 EXPLAIN', RISK: '🔴 RISK', ACTION: '🟠 ACTION' };
@@ -27,6 +28,8 @@ let currentSession = null;
 let lastAdviceSeq = 0;
 let lastReqSeq = -1; // -1 = baseline unknown for this session (don't fire on first poll)
 let lastChatSeq = 0;
+let lastEditSeq = -1;
+let lastDomReqSeq = -1;
 let sharing = false;
 let serverUrl = DEFAULT_SERVER;
 let ttsVoicePl = null;
@@ -284,9 +287,31 @@ function setSharing(on) {
   }
 }
 
+async function pollEdits() {
+  if (!currentSession) return;
+  try {
+    const r = await fetch(`${serverUrl}/edit?session=${encodeURIComponent(currentSession)}&since=${Math.max(lastEditSeq, 0)}`);
+    if (!r.ok) return;
+    const { items, last } = await r.json();
+    if (lastEditSeq < 0) { lastEditSeq = last || 0; return; } // baseline: don't re-apply old edits
+    for (const cmd of items || []) { try { port.postMessage({ type: 'apply-edit', cmd }); } catch (_) {} }
+    if (typeof last === 'number') lastEditSeq = Math.max(lastEditSeq, last);
+  } catch (_) {}
+}
+async function pollDomRequest() {
+  if (!currentSession) return;
+  try {
+    const r = await fetch(`${serverUrl}/dom-request?session=${encodeURIComponent(currentSession)}`);
+    if (!r.ok) return;
+    const { seq } = await r.json();
+    if (lastDomReqSeq < 0) { lastDomReqSeq = seq; return; }
+    if (seq > lastDomReqSeq) { lastDomReqSeq = seq; try { port.postMessage({ type: 'capture-dom' }); } catch (_) {} }
+  } catch (_) {}
+}
+
 function startPolling() {
   clearInterval(pollTimer);
-  pollTimer = setInterval(() => { pollAdvice(); pollSnapRequest(); pollChat(); }, 1500);
+  pollTimer = setInterval(() => { pollAdvice(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); }, 1500);
 }
 
 // ---- SW port (transcript + status) ---------------------------------------
@@ -334,6 +359,15 @@ function onMessage(msg) {
       if (msg.ok) setStatus(snapEl, `shots ${msg.count ?? '·'}`, 'ok');
       else setStatus(snapEl, `shot ✗ ${msg.reason || ''}`.trim(), 'bad');
       break;
+    case 'edit':
+      editEl.hidden = false;
+      if (msg.ok) {
+        const r = msg.result || {};
+        const label = r.dom ? '✏ page read' : (r.reverted != null ? `✏ reverted ${r.reverted}` : `✏ edited ${r.count ?? ''}`.trim());
+        setStatus(editEl, label, 'ok');
+      } else setStatus(editEl, `✏ ✗ ${msg.reason || 'no match'}`, 'bad');
+      setTimeout(() => { editEl.hidden = true; }, 3000);
+      break;
     case 'stt':
       sttEl.hidden = false;
       if (msg.on) { setStatus(sttEl, '🎧 listening', 'ok'); sttToggle.checked = true; }
@@ -363,10 +397,10 @@ modeSel.addEventListener('change', () => { chrome.storage.local.set({ mla_mode: 
 
 function setSession(session) {
   if (session && session !== currentSession) {
-    currentSession = session; lastAdviceSeq = 0; lastReqSeq = -1; lastChatSeq = 0;
+    currentSession = session; lastAdviceSeq = 0; lastReqSeq = -1; lastChatSeq = 0; lastEditSeq = -1; lastDomReqSeq = -1;
     chatEl.innerHTML = '';
     postMode(modeSel.value); // register the current mode for the new session
-    pollAdvice(); pollSnapRequest(); pollChat();
+    pollAdvice(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest();
   }
 }
 

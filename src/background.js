@@ -119,6 +119,89 @@ async function stopStt() {
   for (const t of tabs) { try { chrome.tabs.sendMessage(t.id, { type: 'capture-mode', captions: true }); } catch (_) {} }
 }
 
+// ---- presentation DOM edits on the shared (non-Meet) tab -----------------
+let lastAppTabId = null; // most recently focused http(s) tab that isn't Meet = the app being shared
+chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+  try {
+    const t = await chrome.tabs.get(tabId);
+    if (t.url && /^https?:/.test(t.url) && !t.url.startsWith('https://meet.google.com')) lastAppTabId = tabId;
+  } catch (_) {}
+});
+async function appTabId() {
+  if (lastAppTabId != null) { try { await chrome.tabs.get(lastAppTabId); return lastAppTabId; } catch (_) { lastAppTabId = null; } }
+  const tabs = await chrome.tabs.query({});
+  const cand = tabs.filter((t) => t.url && /^https?:/.test(t.url) && !t.url.startsWith('https://meet.google.com'))
+    .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+  return cand[0] && cand[0].id;
+}
+async function applyEdit(cmd) {
+  const id = await appTabId();
+  if (!id) { broadcast({ type: 'edit', ok: false, reason: 'no app tab' }); return; }
+  try {
+    const [r] = await chrome.scripting.executeScript({ target: { tabId: id }, func: pageApplyEdit, args: [cmd] });
+    broadcast({ type: 'edit', ok: !!(r && r.result && r.result.ok), result: r && r.result });
+  } catch (e) { broadcast({ type: 'edit', ok: false, reason: String(e && e.message || e) }); }
+}
+async function captureDom() {
+  const id = await appTabId();
+  if (!id) return;
+  try {
+    const [r] = await chrome.scripting.executeScript({ target: { tabId: id }, func: pageGetDom });
+    const { mla_session } = await chrome.storage.session.get('mla_session');
+    await fetch((await getServerUrl()) + '/dom', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: mla_session, html: (r && r.result) || '' }),
+    });
+    broadcast({ type: 'edit', ok: true, result: { dom: true } });
+  } catch (_) {}
+}
+
+// These run in the SHARED page's context (serialized by executeScript — must be self-contained).
+function pageApplyEdit(cmd) {
+  const store = (window.__mlaEdits = window.__mlaEdits || { items: [] });
+  const texts = (root) => {
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => (n.parentElement && !['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(n.parentElement.tagName) && n.nodeValue.trim()) ? 1 : 2,
+    });
+    const out = []; let n; while ((n = w.nextNode())) out.push(n); return out;
+  };
+  try {
+    const o = cmd.op;
+    if (o === 'replaceText') {
+      if (!cmd.find) return { ok: false, msg: 'no find' };
+      let c = 0;
+      for (const n of texts(document.body)) if (n.nodeValue.includes(cmd.find)) {
+        store.items.push({ type: 'text', node: n, original: n.nodeValue });
+        n.nodeValue = n.nodeValue.split(cmd.find).join(cmd.replace == null ? '' : cmd.replace); c++;
+      }
+      return { ok: c > 0, count: c };
+    }
+    if (o === 'hideText') {
+      let c = 0;
+      for (const n of texts(document.body)) if (cmd.text && n.nodeValue.includes(cmd.text)) {
+        const el = n.parentElement; if (el) { store.items.push({ type: 'style', el, prop: 'display', original: el.style.display }); el.style.display = 'none'; c++; }
+      }
+      return { ok: c > 0, count: c };
+    }
+    const els = cmd.selector ? Array.from(document.querySelectorAll(cmd.selector)) : [];
+    if (o === 'setText') { els.forEach((el) => { store.items.push({ type: 'prop', el, prop: 'textContent', original: el.textContent }); el.textContent = cmd.value == null ? '' : cmd.value; }); return { ok: els.length > 0, count: els.length }; }
+    if (o === 'setHtml') { els.forEach((el) => { store.items.push({ type: 'prop', el, prop: 'innerHTML', original: el.innerHTML }); el.innerHTML = cmd.value == null ? '' : cmd.value; }); return { ok: els.length > 0, count: els.length }; }
+    if (o === 'hide') { els.forEach((el) => { store.items.push({ type: 'style', el, prop: 'display', original: el.style.display }); el.style.display = 'none'; }); return { ok: els.length > 0, count: els.length }; }
+    if (o === 'style' && cmd.css) { els.forEach((el) => { for (const k in cmd.css) { store.items.push({ type: 'style', el, prop: k, original: el.style[k] }); el.style[k] = cmd.css[k]; } }); return { ok: els.length > 0, count: els.length }; }
+    if (o === 'revert') {
+      let n = 0;
+      for (let i = store.items.length - 1; i >= 0; i--) { const it = store.items[i]; try { if (it.type === 'text') it.node.nodeValue = it.original; else if (it.type === 'prop') it.el[it.prop] = it.original; else if (it.type === 'style') it.el.style[it.prop] = it.original; n++; } catch (_) {} }
+      store.items.length = 0; return { ok: true, reverted: n };
+    }
+    return { ok: false, msg: 'unknown op' };
+  } catch (e) { return { ok: false, msg: String(e && e.message || e) }; }
+}
+function pageGetDom() {
+  const clone = document.documentElement.cloneNode(true);
+  clone.querySelectorAll('script,style,svg,noscript,link,path').forEach((e) => e.remove());
+  return clone.outerHTML.replace(/\s+/g, ' ').slice(0, 180000);
+}
+
 // ---- content script -> SW ------------------------------------------------
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
@@ -176,6 +259,10 @@ chrome.runtime.onConnect.addListener((port) => {
       startStt();
     } else if (m.type === 'stt-stop') {
       stopStt();
+    } else if (m.type === 'apply-edit') {
+      applyEdit(m.cmd);
+    } else if (m.type === 'capture-dom') {
+      captureDom();
     }
     // 'ping' is a no-op: receiving it resets the SW idle timer (keep-alive).
   });
