@@ -124,6 +124,11 @@ const chat = new Map(); // session -> { seq, items: [{ seq, ts, role, text, imag
 const CHAT_MAX = 300;
 function chatFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.chat.txt`); }
 
+// Meeting mode — steers how the brain advises. Panel sets it; brain reads it each turn.
+const modes = new Map(); // session -> mode
+const MODES = new Set(['auto', 'listener', 'lead']);
+function modeFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.mode.txt`); }
+
 // Only allow safe, contained filenames (no path traversal).
 function safeSession(name) {
   const cleaned = String(name || '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120);
@@ -298,6 +303,30 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(voices));
     });
+    return;
+  }
+
+  // Meeting mode: panel sets it; brain reads it (also written to <session>.mode.txt for a cheap cat).
+  if (req.method === 'POST' && req.url === '/mode') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+    req.on('end', () => {
+      let data;
+      try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
+      const session = safeSession(data.session);
+      const mode = MODES.has(data.mode) ? data.mode : 'auto';
+      modes.set(session, mode);
+      try { fs.writeFileSync(modeFileFor(session), mode); } catch (_) {}
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ mode }));
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/mode')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const session = safeSession(u.searchParams.get('session'));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ mode: modes.get(session) || 'auto' }));
     return;
   }
 

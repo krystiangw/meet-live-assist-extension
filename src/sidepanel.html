@@ -108,6 +108,12 @@
   <header>
     <img src="icons/icon32.png" width="18" height="18" alt="" style="border-radius:5px;flex:0 0 auto;" />
     <h1>Meet Live Assist</h1>
+    <select id="modeSel" title="Meeting mode — how much the assistant proactively suggests"
+      style="font:11px system-ui;padding:2px 4px;border-radius:6px;background:Field;color:FieldText;border:1px solid color-mix(in srgb, CanvasText 25%, transparent);">
+      <option value="auto">🤖 Auto</option>
+      <option value="listener">👂 Listener</option>
+      <option value="lead">🎤 Lead</option>
+    </select>
     <span id="capStatus" class="status idle">idle</span>
     <span id="srvStatus" class="status idle">server ?</span>
     <button id="snapNow" title="Capture the Meet tab now">📷</button>

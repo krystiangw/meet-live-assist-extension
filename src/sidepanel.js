@@ -16,6 +16,7 @@ const chatForm = document.getElementById('chatForm');
 const chatInput = document.getElementById('chatInput');
 const sttToggle = document.getElementById('sttToggle');
 const sttEl = document.getElementById('sttStatus');
+const modeSel = document.getElementById('modeSel');
 
 const MARKER_LABEL = { SAY: '🟢 SAY', INFO: '🔵 INFO', SUMMARY: '🟡 SUMMARY', EXPLAIN: '🟣 EXPLAIN', RISK: '🔴 RISK', ACTION: '🟠 ACTION' };
 const DEFAULT_SERVER = 'http://127.0.0.1:8848';
@@ -349,10 +350,22 @@ sttToggle.addEventListener('change', () => {
   if (sttToggle.checked) { sttEl.hidden = false; setStatus(sttEl, '🎧 starting…', 'idle'); }
 });
 
+async function postMode(mode) {
+  if (!currentSession) return;
+  try {
+    await fetch(`${serverUrl}/mode`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: currentSession, mode }),
+    });
+  } catch (_) {}
+}
+modeSel.addEventListener('change', () => { chrome.storage.local.set({ mla_mode: modeSel.value }); postMode(modeSel.value); });
+
 function setSession(session) {
   if (session && session !== currentSession) {
     currentSession = session; lastAdviceSeq = 0; lastReqSeq = -1; lastChatSeq = 0;
     chatEl.innerHTML = '';
+    postMode(modeSel.value); // register the current mode for the new session
     pollAdvice(); pollSnapRequest(); pollChat();
   }
 }
@@ -369,10 +382,11 @@ function connect() {
   });
 }
 
-chrome.storage.local.get(['serverUrl', 'ttsVoicePl', 'ttsVoiceEn']).then((c) => {
+chrome.storage.local.get(['serverUrl', 'ttsVoicePl', 'ttsVoiceEn', 'mla_mode']).then((c) => {
   if (c.serverUrl) serverUrl = c.serverUrl.replace(/\/+$/, '');
   ttsVoicePl = c.ttsVoicePl || 'Zosia';
   ttsVoiceEn = c.ttsVoiceEn || 'Daniel';
+  if (c.mla_mode) modeSel.value = c.mla_mode;
 });
 connect();
 startPolling();
