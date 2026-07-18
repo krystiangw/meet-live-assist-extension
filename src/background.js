@@ -21,6 +21,14 @@ chrome.runtime.onInstalled.addListener(() => chrome.alarms.create('heartbeat', {
 chrome.runtime.onStartup.addListener(() => chrome.alarms.create('heartbeat', { periodInMinutes: 0.5 }));
 chrome.alarms.onAlarm.addListener(() => { /* wake-only keepalive; snapshots are driven by the panel */ });
 
+// A keyboard command counts as invoking the extension, so it grants activeTab on the Meet tab —
+// which tabCapture requires (a side-panel click does not). This is the reliable way to START STT.
+chrome.commands.onCommand.addListener(async (cmd) => {
+  if (cmd !== 'toggle-stt') return;
+  const { mla_stt_on } = await chrome.storage.session.get('mla_stt_on');
+  if (mla_stt_on) stopStt(); else startStt();
+});
+
 async function getServerUrl() {
   const { serverUrl } = await chrome.storage.local.get('serverUrl');
   return (serverUrl || DEFAULT_SERVER).replace(/\/+$/, '');
@@ -101,10 +109,12 @@ async function startStt() {
   await ensureOffscreen();
   const { mla_session, mla_lang } = await chrome.storage.session.get(['mla_session', 'mla_lang']);
   chrome.runtime.sendMessage({ type: 'offscreen-start', streamId, session: mla_session, lang: mla_lang || 'auto', serverUrl: await getServerUrl() });
+  await chrome.storage.session.set({ mla_stt_on: true });
   try { chrome.tabs.sendMessage(tab.id, { type: 'capture-mode', captions: false }); } catch (_) {} // avoid dup transcript
 }
 async function stopStt() {
   chrome.runtime.sendMessage({ type: 'offscreen-stop' });
+  await chrome.storage.session.set({ mla_stt_on: false });
   const tabs = await chrome.tabs.query({ url: 'https://meet.google.com/*' });
   for (const t of tabs) { try { chrome.tabs.sendMessage(t.id, { type: 'capture-mode', captions: true }); } catch (_) {} }
 }

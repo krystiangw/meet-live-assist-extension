@@ -310,8 +310,8 @@ function onMessage(msg) {
       break;
     case 'stt':
       sttEl.hidden = false;
-      if (msg.on) setStatus(sttEl, '🎧 listening', 'ok');
-      else if (msg.reason) { setStatus(sttEl, `🎧 ✗ ${msg.reason}`, 'bad'); sttToggle.checked = false; }
+      if (msg.on) { setStatus(sttEl, '🎧 listening', 'ok'); sttToggle.checked = true; }
+      else if (msg.reason) { setStatus(sttEl, '🎧 ✗ press ⌘⇧U on the Meet tab', 'bad'); sttToggle.checked = false; }
       else { sttEl.hidden = true; sttToggle.checked = false; }
       break;
   }

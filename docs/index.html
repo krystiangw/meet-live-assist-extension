@@ -122,7 +122,9 @@ curl -s http://127.0.0.1:8848/health   # → {"ok":true,...}</code></pre>
     </li>
     <li>
       <h3>(Optional) Local speech-to-text</h3>
-      <p>To transcribe the call's audio instead of scraping captions, install whisper.cpp and a model — then tick <strong>🎧 STT</strong> in the panel:</p>
+      <p>To transcribe the call's audio instead of scraping captions, install whisper.cpp and a model, then
+      start it with <strong>⌘⇧U</strong> while the Meet tab is focused (a keyboard command is required so Chrome
+      grants tab-capture access; the panel's 🎧 checkbox reflects the state):</p>
       <pre><code>brew install whisper-cpp
 mkdir -p ~/.local/share/whisper
 curl -L -o ~/.local/share/whisper/ggml-base.bin \
