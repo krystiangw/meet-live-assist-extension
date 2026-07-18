@@ -31,6 +31,11 @@
   <input id="selfNames" type="text" placeholder="Krystian, Chris, Christian" autocomplete="off" />
   <div class="hint">Comma-separated. The panel alerts you when one of these is mentioned in the call.</div>
 
+  <label>Microphone (co-pilot mode)</label>
+  <button id="enableMic" type="button" style="margin-top:0;">Enable microphone</button>
+  <span id="micState" style="margin-left:10px;font-size:13px;opacity:.7;"></span>
+  <div class="hint">Grant once so co-pilot can hear you while you debug (no meeting needed). Nothing is recorded until you start co-pilot from the panel.</div>
+
   <label for="ttsVoiceEn">TTS voice — English</label>
   <select id="ttsVoiceEn" style="width:100%;padding:8px;font:inherit;border-radius:6px;"></select>
   <div class="hint">Used when the SAY line is English (most meetings). Plenty of male voices available.</div>

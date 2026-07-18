@@ -58,6 +58,7 @@
       cursor: pointer; font-size: 15px; line-height: 1; padding: 0;
     }
     .iconbtn:hover, .toggle:hover { background: var(--hover); }
+    .iconbtn.on { background: color-mix(in srgb, var(--say) 24%, transparent); border-color: color-mix(in srgb, var(--say) 55%, transparent); }
     .toggle input { display: none; }
     .toggle:has(input:checked) { background: color-mix(in srgb, var(--info) 22%, transparent); border-color: color-mix(in srgb, var(--info) 55%, transparent); }
     .toggle.debug:has(input:checked) { background: color-mix(in srgb, var(--risk) 20%, transparent); border-color: color-mix(in srgb, var(--risk) 55%, transparent); }
@@ -198,6 +199,7 @@
     </div>
 
     <div class="toolbar">
+      <button id="copilotBtn" class="iconbtn" title="Co-pilot: start a session without a meeting — the assistant watches this tab and listens to your mic">🧑‍💻</button>
       <button id="snapNow" class="iconbtn" title="Capture the shared tab now">📷</button>
       <label class="toggle" title="Transcribe the call's audio locally (whisper) — start with ⌘⇧U on the Meet tab">
         <input type="checkbox" id="sttToggle" />🎧

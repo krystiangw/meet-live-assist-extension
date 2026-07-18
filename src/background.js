@@ -168,6 +168,29 @@ async function stopStt() {
   for (const t of tabs) { try { chrome.tabs.sendMessage(t.id, { type: 'capture-mode', captions: true }); } catch (_) {} }
 }
 
+// ---- co-pilot: a session without any meeting (debug your app with the agent watching + listening) ----
+function pad2(n) { return String(n).padStart(2, '0'); }
+function buildCopilotSession() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}_copilot`;
+}
+async function startCoPilot() {
+  const session = buildCopilotSession();
+  await saveState(session, []);
+  await (capQueue = capQueue.then(() => chrome.storage.session.set({ mla_commit: {}, mla_recent: [] })).catch(() => {}));
+  await postToServer(session, ''); // create the file + header
+  broadcast({ type: 'session', session, code: 'copilot' });
+  // Listen to the microphone (the user), transcribed locally — no Meet tab involved.
+  await ensureOffscreen();
+  chrome.runtime.sendMessage({ type: 'offscreen-start', source: 'mic', session, lang: 'auto', serverUrl: await getServerUrl(), token: await getToken() });
+  await chrome.storage.session.set({ mla_stt_on: true });
+}
+async function stopCoPilot() {
+  stopStt();
+  await chrome.storage.session.set({ mla_session: null });
+  broadcast({ type: 'session-end' });
+}
+
 // ---- presentation DOM edits on the shared (non-Meet) tab -----------------
 let lastAppTabId = null; // most recently focused http(s) tab that isn't Meet = the app being shared
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
@@ -362,7 +385,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     } else if (msg.type === 'stt-line') {
       const d = new Date();
       const ts = [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
-      broadcast({ type: 'line', ts, speaker: '(unattributed)', text: msg.text });
+      // Mic STT is the user (Krystian → 'You'); tabCapture STT is remote participants (unattributed).
+      broadcast({ type: 'line', ts, speaker: msg.source === 'mic' ? 'You' : '(unattributed)', text: msg.text });
     } else if (msg.type === 'stt-status') {
       broadcast({ type: 'stt', on: !!msg.on });
     } else if (msg.type === 'stt-error') {
@@ -389,6 +413,10 @@ chrome.runtime.onConnect.addListener((port) => {
       startStt();
     } else if (m.type === 'stt-stop') {
       stopStt();
+    } else if (m.type === 'copilot-start') {
+      startCoPilot();
+    } else if (m.type === 'copilot-stop') {
+      stopCoPilot();
     } else if (m.type === 'apply-edit') {
       applyEdit(m.cmd);
     } else if (m.type === 'capture-dom') {

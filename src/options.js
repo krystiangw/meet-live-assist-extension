@@ -43,6 +43,19 @@ chrome.storage.local.get(['serverUrl', 'ttsVoiceEn', 'ttsVoicePl', 'mla_token', 
 input.addEventListener('change', () => loadVoices(enSel.value, plSel.value));
 tokenInput.addEventListener('change', () => loadVoices(enSel.value, plSel.value));
 
+// One-time mic grant (persists for the extension origin) so the offscreen doc can capture it in co-pilot.
+const micState = document.getElementById('micState');
+document.getElementById('enableMic').addEventListener('click', async () => {
+  micState.textContent = 'requesting…';
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    s.getTracks().forEach((t) => t.stop());
+    micState.textContent = 'granted ✓';
+  } catch (e) {
+    micState.textContent = 'denied — allow the mic prompt / check chrome://settings';
+  }
+});
+
 document.getElementById('save').addEventListener('click', async () => {
   await chrome.storage.local.set({ serverUrl: serverUrl(), ttsVoiceEn: enSel.value, ttsVoicePl: plSel.value, mla_token: (tokenInput.value || '').trim(), mla_names: (namesInput.value || '').trim() });
   saved.style.opacity = '1';

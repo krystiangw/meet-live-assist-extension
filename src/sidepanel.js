@@ -487,13 +487,16 @@ function onMessage(msg) {
       setSharing(!!msg.sharing);
       if (msg.lang) callLang = msg.lang;
       break;
-    case 'session':
+    case 'session': {
       clearLog(); resetAdvice(); resetItems();
-      setStatus(capEl, 'capturing', 'ok');
+      const isCopilot = msg.code === 'copilot';
+      setStatus(capEl, isCopilot ? 'co-pilot' : 'capturing', 'ok');
       sessionEl.textContent = msg.session || '';
-      document.getElementById('consent').hidden = false; // remind to disclose, once per call
+      copilotOn = isCopilot; copilotBtn.classList.toggle('on', isCopilot);
+      document.getElementById('consent').hidden = isCopilot; // no participants to disclose to in co-pilot
       setSession(msg.session);
       break;
+    }
     case 'line': // STT lines (no id)
       setStatus(capEl, 'capturing', 'ok');
       appendLine(msg);
@@ -512,8 +515,9 @@ function onMessage(msg) {
       checkMention(msg.speaker, msg.text);
       break;
     case 'session-end':
-      setStatus(capEl, 'call ended', 'idle');
+      setStatus(capEl, 'ended', 'idle');
       setSharing(false);
+      copilotOn = false; copilotBtn.classList.remove('on');
       break;
     case 'capture-health':
       if (!msg.ok) setStatus(capEl, '⚠ no captions — turn on CC / check language', 'bad');
@@ -561,6 +565,15 @@ function onMessage(msg) {
 }
 
 snapBtn.addEventListener('click', () => { try { port.postMessage({ type: 'snapshot-now' }); } catch (_) {} });
+
+// Co-pilot: start/stop a meeting-less session (agent watches this tab + hears your mic).
+const copilotBtn = document.getElementById('copilotBtn');
+let copilotOn = false;
+copilotBtn.addEventListener('click', () => {
+  copilotOn = !copilotOn;
+  copilotBtn.classList.toggle('on', copilotOn);
+  try { port.postMessage({ type: copilotOn ? 'copilot-start' : 'copilot-stop' }); } catch (_) {}
+});
 
 const consentEl = document.getElementById('consent');
 document.getElementById('consentDismiss').addEventListener('click', () => { consentEl.hidden = true; });

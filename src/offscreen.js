@@ -25,16 +25,18 @@ async function start(streamId, config) {
   if (active) return;
   cfg = config;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId } },
-    });
+    stream = config.source === 'mic'
+      ? await navigator.mediaDevices.getUserMedia({ audio: true }) // co-pilot: hear the user's microphone
+      : await navigator.mediaDevices.getUserMedia({ audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId } } });
   } catch (e) {
-    chrome.runtime.sendMessage({ type: 'stt-error', reason: String(e && e.message || e) });
+    chrome.runtime.sendMessage({ type: 'stt-error', reason: config.source === 'mic' ? 'microphone blocked — enable it in the extension Options' : String(e && e.message || e) });
     return;
   }
-  // tabCapture mutes the tab locally — re-route to speakers so the user still hears the call.
-  audioCtx = new AudioContext();
-  audioCtx.createMediaStreamSource(stream).connect(audioCtx.destination);
+  // tabCapture mutes the tab locally — re-route to speakers so the user still hears the call. Mic needs no reroute.
+  if (config.source !== 'mic') {
+    audioCtx = new AudioContext();
+    audioCtx.createMediaStreamSource(stream).connect(audioCtx.destination);
+  }
   mime = pickMime();
   active = true;
   chrome.runtime.sendMessage({ type: 'stt-status', on: true });
@@ -43,9 +45,9 @@ async function start(streamId, config) {
 
 async function transcribeChunk(blob) {
   try {
-    const url = `${cfg.serverUrl}/stt?session=${encodeURIComponent(cfg.session)}&lang=${encodeURIComponent(cfg.lang || 'auto')}`;
+    const url = `${cfg.serverUrl}/stt?session=${encodeURIComponent(cfg.session)}&lang=${encodeURIComponent(cfg.lang || 'auto')}&src=${cfg.source || 'tab'}`;
     const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-MLA-Token': cfg.token || '' }, body: blob });
-    if (r.ok) { const { text } = await r.json(); if (text) chrome.runtime.sendMessage({ type: 'stt-line', text }); }
+    if (r.ok) { const { text } = await r.json(); if (text) chrome.runtime.sendMessage({ type: 'stt-line', text, source: cfg.source }); }
   } catch (_) { /* server down */ }
 }
 
