@@ -59,7 +59,9 @@ function hdrs(json) { const h = { 'X-MLA-Token': serverToken }; if (json) h['Con
 // of the install-time prompt for a cleaner Web Store listing.
 const ALL_URLS = { origins: ['<all_urls>'] };
 async function ensurePerms(perms) {
-  try { return (await chrome.permissions.contains(perms)) || (await chrome.permissions.request(perms)); }
+  // request() resolves true immediately if already held (no prompt), so no contains() pre-check — that
+  // extra await could otherwise consume the gesture's transient activation before the prompt shows.
+  try { return await chrome.permissions.request(perms); }
   catch (_) { return false; }
 }
 

@@ -33,6 +33,22 @@
   ];
   const normalizeGlossary = (s) => { let o = s; for (const [re, to] of GLOSSARY) o = o.replace(re, to); return o; };
 
+  // "Name: caption" heuristic — only treat the prefix as a speaker if it looks like a display name
+  // (1–4 capitalized words), never for ordinary prose that happens to contain a colon.
+  const NAME_WORD = /^[A-Z][\p{L}.'-]*$/u;
+  const NOT_NAME = new Set(['actually', 'note', 'so', 'well', 'yeah', 'ok', 'okay', 'right', 'yes', 'no',
+    'sorry', 'hmm', 'um', 'uh', 'and', 'but', 'because', 'also', 'anyway', 'basically', 'honestly', 'wait', 'look']);
+  function splitSpeaker(text) {
+    const ci = text.indexOf(':');
+    if (ci <= 0 || ci > 40) return null;
+    const pre = text.slice(0, ci).trim(), rest = text.slice(ci + 1).trim();
+    if (!rest) return null;
+    const words = pre.split(/\s+/);
+    if (words.length < 1 || words.length > 4 || !words.every((w) => NAME_WORD.test(w))) return null;
+    if (words.length === 1 && NOT_NAME.has(words[0].toLowerCase())) return null; // "Actually: …" is prose
+    return { speaker: pre, text: rest };
+  }
+
   let session = null, started = false, userPaused = false, sttPaused = false, scanning = false;
   let currentCode = null, regionSeenAt = 0, captureWarned = false, lineCount = 0, trackerId = 0;
   const trackers = [];
@@ -63,8 +79,7 @@
     if (!text) {
       text = (block.textContent || '').trim();
       if (speaker && text.startsWith(speaker)) text = text.slice(speaker.length).trim();
-      // Zoom often renders "Name: caption" — split on the first colon if no speaker element.
-      if (!speaker) { const m = /^([^:]{1,40}):\s+(.*)$/s.exec(text); if (m) { speaker = m[1].trim(); text = m[2].trim(); } }
+      if (!speaker) { const s = splitSpeaker(text); if (s) { speaker = s.speaker; text = s.text; } }
     }
     return { speaker, text: normalizeGlossary(text) };
   }
@@ -73,12 +88,13 @@
   function send(msg) {
     try { chrome.runtime.sendMessage(msg, () => void chrome.runtime.lastError); } catch (_) {}
   }
-  function emitInterim(tr) { send({ type: 'cap', session, id: tr.id, ts: tr.ts, speaker: tr.speaker || '', text: tr.text }); }
+  // Prefix ids with 'z' so a concurrent Meet tab (numeric ids) can't collide in the SW's dedup map.
+  function emitInterim(tr) { send({ type: 'cap', session, id: 'z' + tr.id, ts: tr.ts, speaker: tr.speaker || '', text: tr.text }); }
   function finalize(tr) {
     const text = (tr.text || '').trim();
     if (tr.finalized || !text) return;
     tr.finalized = true; tr.ts = tsLabel(); tr.lastFinal = now(); lineCount++;
-    send({ type: 'cap-final', session, id: tr.id, ts: tr.ts, speaker: tr.speaker || '', text });
+    send({ type: 'cap-final', session, id: 'z' + tr.id, ts: tr.ts, speaker: tr.speaker || '', text });
     updateBadge();
   }
 

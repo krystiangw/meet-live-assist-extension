@@ -290,7 +290,8 @@ const netBuf = [];   // { method, url, status, mime, type }
 const conBuf = [];   // { level, text }
 const netReq = new Map(); // requestId -> { method, url }
 
-chrome.debugger.onEvent.addListener((source, method, params) => {
+// Guarded: `debugger` is an optional permission — the namespace may be inert until granted.
+if (chrome.debugger) chrome.debugger.onEvent.addListener((source, method, params) => {
   if (source.tabId !== dbgTabId) return;
   if (method === 'Network.requestWillBeSent') {
     netReq.set(params.requestId, { method: params.request.method, url: params.request.url });
@@ -307,7 +308,7 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
     if (conBuf.length > 250) conBuf.shift();
   }
 });
-chrome.debugger.onDetach.addListener((source) => { if (source.tabId === dbgTabId) { dbgTabId = null; broadcast({ type: 'debug', on: false }); } });
+if (chrome.debugger) chrome.debugger.onDetach.addListener((source) => { if (source.tabId === dbgTabId) { dbgTabId = null; broadcast({ type: 'debug', on: false }); } });
 
 async function attachDebugger() {
   const id = await appTabId();
@@ -368,6 +369,10 @@ async function handleDebugDo(kind) {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     if (msg.type === 'session') {
+      // A genuinely new session started (Meet/Zoom join or rejoin). Stop any active STT first so a co-pilot
+      // mic / tab recorder can't keep writing to the previous (now stale) session or keep holding the mic.
+      const { mla_stt_on } = await chrome.storage.session.get('mla_stt_on');
+      if (mla_stt_on) await stopStt();
       await saveState(msg.session, []);
       // Ordered behind any in-flight persist so it can't be clobbered by a late cap-final from the old call.
       await (capQueue = capQueue.then(() => chrome.storage.session.set({ mla_commit: {}, mla_recent: [] })).catch(() => {}));
