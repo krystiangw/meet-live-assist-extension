@@ -374,6 +374,42 @@ async function pollItems() {
   } catch (_) {}
 }
 
+// ---- autopilot (auto-create action items) + post links to the meeting chat ----
+const autoCreateEl = document.getElementById('autoCreate');
+const postChatEl = document.getElementById('postChat');
+let lastCallChatSeq = -1; // baseline so old queued messages aren't replayed on (re)connect
+async function postAutopilot() {
+  if (!currentSession) return;
+  try {
+    await fetch(`${serverUrl}/autopilot`, { method: 'POST', headers: hdrs(true),
+      body: JSON.stringify({ session: currentSession, create: autoCreateEl.checked, postChat: postChatEl.checked }) });
+  } catch (_) {}
+}
+autoCreateEl.addEventListener('change', postAutopilot);
+postChatEl.addEventListener('change', postAutopilot);
+async function loadAutopilot() {
+  if (!currentSession) return;
+  try {
+    const r = await fetch(`${serverUrl}/autopilot?session=${encodeURIComponent(currentSession)}`, { headers: hdrs() });
+    if (!r.ok) return;
+    const a = await r.json();
+    autoCreateEl.checked = !!a.create; postChatEl.checked = !!a.postChat;
+  } catch (_) {}
+}
+async function pollCallChat() {
+  if (!currentSession) return;
+  try {
+    const r = await fetch(`${serverUrl}/callchat?session=${encodeURIComponent(currentSession)}&since=${Math.max(lastCallChatSeq, 0)}`, { headers: hdrs() });
+    if (!r.ok) return;
+    const { items, last } = await r.json();
+    if (lastCallChatSeq < 0) { lastCallChatSeq = last || 0; return; } // baseline: don't replay old
+    for (const it of items || []) {
+      if (postChatEl.checked) { try { port.postMessage({ type: 'send-call-chat', text: it.text }); } catch (_) {} } // double-guard the opt-in
+    }
+    if (typeof last === 'number') lastCallChatSeq = Math.max(lastCallChatSeq, last);
+  } catch (_) {}
+}
+
 // ---- chat ----------------------------------------------------------------
 function appendChat({ role, text, image }) {
   const div = document.createElement('div');
@@ -472,7 +508,7 @@ dbgToggle.addEventListener('change', () => {
 
 function startPolling() {
   clearInterval(pollTimer);
-  pollTimer = setInterval(() => { pollAdvice(); pollItems(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); pollDebugRequest(); }, 1500);
+  pollTimer = setInterval(() => { pollAdvice(); pollItems(); pollCallChat(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); pollDebugRequest(); }, 1500);
   clearInterval(brainTimer);
   brainTimer = setInterval(pollBrain, 5000); // liveness is coarse — no need to poll it fast
 }
@@ -652,12 +688,13 @@ modeSel.addEventListener('change', () => { chrome.storage.local.set({ mla_mode: 
 
 function setSession(session) {
   if (session && session !== currentSession) {
-    currentSession = session; lastAdviceSeq = 0; lastItemsSeq = 0; lastReqSeq = -1; lastChatSeq = 0; lastEditSeq = -1; lastDomReqSeq = -1; lastDbgReqSeq = -1;
+    currentSession = session; lastAdviceSeq = 0; lastItemsSeq = 0; lastReqSeq = -1; lastChatSeq = 0; lastEditSeq = -1; lastDomReqSeq = -1; lastDbgReqSeq = -1; lastCallChatSeq = -1;
     chatEl.innerHTML = ''; resetItems(); resetTalk();
     setStatus(brainEl, '🧠 ?', 'idle');
     cueArmed = false; setTimeout(() => { cueArmed = true; }, 2500); // don't cue on initial backfill
     postMode(modeSel.value); // register the current mode for the new session
-    pollAdvice(); pollItems(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); pollDebugRequest(); pollBrain();
+    loadAutopilot(); // sync the toggles to this session's stored state
+    pollAdvice(); pollItems(); pollCallChat(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); pollDebugRequest(); pollBrain();
   }
 }
 

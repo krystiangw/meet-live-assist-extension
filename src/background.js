@@ -191,6 +191,16 @@ async function stopCoPilot() {
   broadcast({ type: 'session-end' });
 }
 
+// Relay a message into the meeting chat via the active Meet/Zoom tab's content script.
+async function sendToCallChat(text) {
+  if (!text) return;
+  const tabs = await chrome.tabs.query({ url: ['https://meet.google.com/*', 'https://*.zoom.us/wc/*'] });
+  const tab = tabs.find((t) => t.active) || tabs[0];
+  if (!tab) { broadcast({ type: 'callchat', ok: false, reason: 'no meeting tab' }); return; }
+  try { await chrome.tabs.sendMessage(tab.id, { type: 'call-chat', text }); broadcast({ type: 'callchat', ok: true }); }
+  catch (e) { broadcast({ type: 'callchat', ok: false, reason: String(e && e.message || e) }); }
+}
+
 // ---- presentation DOM edits on the shared (non-Meet) tab -----------------
 let lastAppTabId = null; // most recently focused http(s) tab that isn't Meet = the app being shared
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
@@ -417,6 +427,8 @@ chrome.runtime.onConnect.addListener((port) => {
       startCoPilot();
     } else if (m.type === 'copilot-stop') {
       stopCoPilot();
+    } else if (m.type === 'send-call-chat') {
+      sendToCallChat(m.text);
     } else if (m.type === 'apply-edit') {
       applyEdit(m.cmd);
     } else if (m.type === 'capture-dom') {

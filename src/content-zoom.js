@@ -154,8 +154,41 @@
     }
   }
 
+  // Post a message into the Zoom chat (autopilot link-sharing). Best-effort; Zoom's chat DOM varies.
+  function zoomChatInput() {
+    return document.querySelector('textarea[placeholder*="message" i], textarea[aria-label*="message" i], div[contenteditable="true"][aria-label*="message" i], div.tmp-editor-content[contenteditable="true"]');
+  }
+  function openZoomChat() {
+    for (const b of document.querySelectorAll('button,[role="button"],[aria-label]')) {
+      const l = (b.getAttribute('aria-label') || '').toLowerCase();
+      if (/^chat$|open the chat|chat panel|otwórz czat/i.test(l)) { try { b.click(); } catch (_) {} return; }
+    }
+  }
+  function postToZoomChat(text) {
+    if (!text) return;
+    if (!zoomChatInput()) openZoomChat();
+    let tries = 0;
+    const timer = setInterval(() => {
+      const el = zoomChatInput();
+      if (!el) { if (++tries > 12) clearInterval(timer); return; }
+      clearInterval(timer);
+      el.focus();
+      if (el.tagName === 'TEXTAREA') {
+        const d = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+        if (d && d.set) d.set.call(el, text); else el.value = text;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      } else { // contenteditable
+        el.textContent = text;
+        el.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      }
+      setTimeout(() => { el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true })); }, 120);
+    }, 200);
+  }
+
   chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
-    if (msg && msg.type === 'capture-mode') { sttPaused = (msg.captions === false); sendResponse({ ok: true }); }
+    if (!msg) return;
+    if (msg.type === 'capture-mode') { sttPaused = (msg.captions === false); sendResponse({ ok: true }); return; }
+    if (msg.type === 'call-chat') { postToZoomChat(msg.text); sendResponse({ ok: true }); return; }
   });
 
   const boot = setInterval(() => {

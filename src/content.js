@@ -278,9 +278,42 @@
     }
     return null;
   }
+  // ---- Post a message into the Meet chat (for autopilot "share the ticket link with everyone") ----
+  function setNativeValue(el, value) {
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (setter && setter.set) setter.set.call(el, value); else el.value = value;
+  }
+  const CHAT_INPUT_SEL = 'textarea[aria-label*="message" i], textarea[aria-label*="wiadomo" i], textarea[placeholder*="message" i]';
+  function findChatInput() { try { return document.querySelector(CHAT_INPUT_SEL); } catch (_) { return null; } }
+  function openChatPanel() {
+    for (const b of document.querySelectorAll('button,[role="button"]')) {
+      const l = (b.getAttribute('aria-label') || '').toLowerCase();
+      if (/chat with everyone|open chat|otwórz czat|czat z/i.test(l)) { try { b.click(); } catch (_) {} return; }
+    }
+  }
+  function postToCallChat(text) {
+    if (!text) return;
+    if (!findChatInput()) openChatPanel();
+    let tries = 0;
+    const timer = setInterval(() => {
+      const ta = findChatInput();
+      if (!ta) { if (++tries > 12) clearInterval(timer); return; } // ~2.4s to open the panel
+      clearInterval(timer);
+      ta.focus(); setNativeValue(ta, text); ta.dispatchEvent(new Event('input', { bubbles: true }));
+      setTimeout(() => {
+        const send = Array.from(document.querySelectorAll('button,[role="button"]'))
+          .find((b) => /send a message|wyślij wiadomo/i.test((b.getAttribute('aria-label') || '')) && !b.disabled);
+        if (send) { try { send.click(); return; } catch (_) {} }
+        ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+      }, 120);
+    }, 200);
+  }
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!msg) return;
     if (msg.type === 'capture-mode') { sttPaused = (msg.captions === false); sendResponse({ ok: true }); return; }
+    if (msg.type === 'call-chat') { postToCallChat(msg.text); sendResponse({ ok: true }); return; }
     if (msg.type !== 'mic') return;
     const b = findMicButton();
     if (!b) { sendResponse({ ok: false }); return; }
