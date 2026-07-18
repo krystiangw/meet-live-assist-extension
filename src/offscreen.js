@@ -11,6 +11,16 @@ let cfg = null;
 const CHUNK_MS = 6000;
 const MIN_BYTES = 4000; // skip near-silent tiny blobs
 
+// Pick a container the tab-capture stream can actually record; 'audio/webm' alone can be rejected
+// (NotSupportedError on start) depending on the Chrome build. '' = let the browser choose.
+function pickMime() {
+  for (const t of ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']) {
+    try { if (MediaRecorder.isTypeSupported(t)) return t; } catch (_) {}
+  }
+  return '';
+}
+let mime = '';
+
 async function start(streamId, config) {
   if (active) return;
   cfg = config;
@@ -25,6 +35,7 @@ async function start(streamId, config) {
   // tabCapture mutes the tab locally — re-route to speakers so the user still hears the call.
   audioCtx = new AudioContext();
   audioCtx.createMediaStreamSource(stream).connect(audioCtx.destination);
+  mime = pickMime();
   active = true;
   chrome.runtime.sendMessage({ type: 'stt-status', on: true });
   loop();
@@ -42,17 +53,22 @@ function loop() {
   if (!active || !stream) return;
   const parts = [];
   let rec;
-  try { rec = new MediaRecorder(stream, { mimeType: 'audio/webm' }); rec.start(); }
+  try { rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream); }
   catch (e) { active = false; chrome.runtime.sendMessage({ type: 'stt-error', reason: String(e && e.message || e) }); return; }
   recorder = rec;
   rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
+  rec.onerror = (e) => { const err = (e && e.error) || {}; chrome.runtime.sendMessage({ type: 'stt-error', reason: String(err.message || err.name || 'recorder error') }); };
   rec.onstop = () => {
-    const blob = new Blob(parts, { type: 'audio/webm' });
+    const blob = new Blob(parts, { type: mime || 'audio/webm' });
     // Restart on a fresh tick (not synchronously inside onstop) so the previous recorder fully releases the
     // tab stream before we start the next one — starting it synchronously throws NotSupportedError.
     if (active) setTimeout(loop, 0);
     if (blob.size > MIN_BYTES) transcribeChunk(blob); // fire-and-forget; runs in parallel with recording
   };
+  // Start after handlers are attached (so onerror catches start failures too), guarded so a throw
+  // becomes a reported stt-error instead of an uncaught rejection.
+  try { rec.start(); }
+  catch (e) { active = false; chrome.runtime.sendMessage({ type: 'stt-error', reason: String(e && e.message || e) }); return; }
   // Reference THIS recorder (not the shared module var, which the next loop reassigns).
   setTimeout(() => { try { if (rec.state !== 'inactive') rec.stop(); } catch (_) {} }, CHUNK_MS);
 }
