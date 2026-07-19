@@ -85,14 +85,15 @@ Brain = a Claude Code session (subscription, no API key) via the `meet-live-assi
 - Agentic actions (Tier1/Tier2, drafts-only) stay in the session/call per the skill — the panel is display-only.
 
 ### Permissions
-Install-time prompt is limited to **Meet + Zoom + localhost**. The heavy ones — `debugger` and the
-`<all_urls>` host — are **optional**, requested at runtime on a user gesture (turning on 🐞 Debug, starting
-co-pilot, or the setup checklist's *Grant* button), so they stay out of the install prompt and the Web Store
-review. Token auth closes the "any website can drive the localhost server" hole. Build the store zip with
-`./build.sh` (→ `dist/`, extension files only). Full listing + justifications: `STORE.md`.
+The `<all_urls>` host is **optional**, requested at runtime on a user gesture (starting co-pilot, turning on
+🐞 Debug, or the setup checklist's *Grant* button), so the host prompt stays limited to **Meet + Zoom +
+localhost**. `debugger` stays a **required** permission — Chrome forbids listing it as optional — so it's in
+the install prompt (heavier review; a public build can drop it, the code degrades gracefully). Token auth
+closes the "any website can drive the localhost server" hole. Build the store zip with `./build.sh`
+(→ `dist/`, extension files only). Full listing + justifications: `STORE.md`.
 
-> Reloading an already-installed copy will drop the now-optional `<all_urls>`/`debugger` grants — re-grant
-> once from the panel (co-pilot / 🐞 / ⚙ setup → Grant).
+> Reloading an already-installed copy will drop the now-optional `<all_urls>` grant — re-grant once from the
+> panel (co-pilot / 🐞 / ⚙ setup → Grant).
 
 ## Roadmap
 

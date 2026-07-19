@@ -31,14 +31,17 @@ Productivity
 - **clipboardWrite** — copy an advice line to paste into the meeting chat.
 - **notifications** — fire a system alert on a 🔴 RISK advice item when the panel is hidden mid-call.
 - **scripting** — apply presentation-only, revertable DOM edits + read page storage on the shared tab.
+- **debugger** — read network/console of the shared tab for live debugging (behind the 🐞 toggle; shows the
+  DevTools banner while attached). **Must be a required permission** — Chrome forbids `debugger` in
+  `optional_permissions` ("cannot be listed as optional"). **Liability**: it draws heavier Web Store review and
+  a scarier install warning; for a fully public listing, consider a build that drops `debugger` (the code
+  degrades gracefully — storage debug via `scripting` + a performance-timing network fallback still work).
 
 **Optional (requested at runtime, on a user gesture — not at install):**
-- **optional `debugger`** — read network/console of the shared tab for live debugging. Requested only when the
-  user turns on the 🐞 toggle (shows the DevTools banner while attached). Keeping it optional avoids the heavy
-  install-time review flag.
-- **optional host `<all_urls>`** — needed by `captureVisibleTab` for snapshots and by `scripting`/`debugger` on
-  an arbitrary app tab (co-pilot mode, live edits/debug). Requested only when the user starts co-pilot, enables
-  debug, or grants it from the setup checklist — so the install prompt stays limited to Meet/Zoom + localhost.
+- **optional host `<all_urls>`** — needed by `captureVisibleTab` for snapshots and by `scripting` on an
+  arbitrary app tab (co-pilot mode, live edits, storage/perf debug). Requested only when the user starts
+  co-pilot, enables debug, or grants it from the setup checklist — so the host prompt stays limited to
+  Meet/Zoom + localhost at install.
 
 ## Data disclosure (Limited Use)
 Collects meeting transcript text, tab screenshots, and typed chat **only** to provide the single purpose
@@ -48,7 +51,7 @@ reach it), stored data is **time-purged** (default 14 days) and wipeable per mee
 Privacy policy: `PRIVACY.md`.
 
 ## Pre-publish checklist
-- [x] Move `debugger` + `<all_urls>` to optional, requested at runtime on a gesture (install prompt = Meet/Zoom + localhost).
+- [x] `<all_urls>` optional, requested at runtime on a gesture (host prompt = Meet/Zoom + localhost). `debugger` stays required (Chrome forbids optional).
 - [x] Build the upload zip (`./build.sh` → `dist/`).
 - [x] Privacy policy hosted publicly (https://krystiangw.github.io/meet-live-assist/) — link it in the listing.
 - [ ] Screenshots (1280×800): panel in a Meet call + co-pilot mode.

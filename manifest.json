@@ -6,8 +6,7 @@
   "minimum_chrome_version": "116",
   "homepage_url": "https://krystiangw.github.io/meet-live-assist/",
   "icons": { "16": "src/icons/icon16.png", "32": "src/icons/icon32.png", "48": "src/icons/icon48.png", "128": "src/icons/icon128.png" },
-  "permissions": ["sidePanel", "storage", "alarms", "tabCapture", "offscreen", "scripting", "clipboardWrite", "notifications"],
-  "optional_permissions": ["debugger"],
+  "permissions": ["sidePanel", "storage", "alarms", "tabCapture", "offscreen", "scripting", "clipboardWrite", "notifications", "debugger"],
   "host_permissions": [
     "https://meet.google.com/*",
     "https://*.zoom.us/*",

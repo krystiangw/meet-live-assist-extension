@@ -512,8 +512,9 @@ async function pollDebugRequest() {
 }
 
 dbgToggle.addEventListener('change', async () => {
-  if (dbgToggle.checked && !(await ensurePerms({ permissions: ['debugger'], origins: ['<all_urls>'] }))) {
-    dbgToggle.checked = false; dbgEl.hidden = false; setStatus(dbgEl, '🐞 needs debugger permission', 'bad'); return;
+  // `debugger` is a required permission; the scripting-based debug kinds (storage/perf) still need all-sites.
+  if (dbgToggle.checked && !(await ensurePerms(ALL_URLS))) {
+    dbgToggle.checked = false; dbgEl.hidden = false; setStatus(dbgEl, '🐞 needs all-sites access', 'bad'); return;
   }
   try { port.postMessage({ type: 'debug-toggle', on: dbgToggle.checked }); } catch (_) {}
   dbgEl.hidden = false; setStatus(dbgEl, dbgToggle.checked ? '🐞 attaching…' : '🐞 off', 'idle');
