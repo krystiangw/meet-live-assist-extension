@@ -27,6 +27,14 @@ const dbgEl = document.getElementById('dbgStatus');
 const modeSel = document.getElementById('modeSel');
 
 const MARKER_LABEL = { SAY: '🟢 SAY', INFO: '🔵 INFO', SUMMARY: '🟡 SUMMARY', EXPLAIN: '🟣 EXPLAIN', RISK: '🔴 RISK', ACTION: '🟠 ACTION' };
+const MARKER_TIP = {
+  SAY: 'Say this out loud now — ready-to-speak words (🔊 voice it, 📋 copy)',
+  INFO: 'A fact, number, link or name from your context',
+  SUMMARY: 'Where the discussion is / what was just decided',
+  EXPLAIN: 'A short explanation of a term or the “why”',
+  RISK: 'A risk, a contradiction, or a decision to recall',
+  ACTION: 'Something to do / you were asked to do',
+};
 const DEFAULT_SERVER = 'http://127.0.0.1:8848';
 
 let hasLines = false;
@@ -226,6 +234,7 @@ function appendAdvice({ marker, text, image }) {
   const div = document.createElement('div');
   div.className = 'advice-item ' + (MARKER_LABEL[m] ? m : 'INFO');
   const mk = document.createElement('span'); mk.className = 'marker'; mk.textContent = MARKER_LABEL[m] || '🔵 INFO';
+  mk.title = MARKER_TIP[m] || MARKER_TIP.INFO;
   const bd = document.createElement('span'); bd.className = 'body';
   renderRich(bd, text);
   if (image && /^(https?:|data:image\/)/.test(image)) {
@@ -354,6 +363,7 @@ function appendItem({ kind, text, owner, blockedBy }) {
   const div = document.createElement('div');
   div.className = 'item ' + (decision ? 'decision' : 'action');
   const k = document.createElement('span'); k.className = 'kind'; k.textContent = decision ? 'DECISION' : 'ACTION';
+  k.title = decision ? 'A decision reached in the meeting' : 'An action item / to-do (click text to mark done)';
   const body = document.createElement('div'); body.className = 'body';
   const txt = document.createElement('div'); txt.className = 'txt'; txt.textContent = text;
   txt.title = 'Click to mark done'; txt.addEventListener('click', () => div.classList.toggle('done'));
@@ -755,3 +765,31 @@ chrome.storage.onChanged.addListener((ch, area) => {
 });
 connect();
 startPolling();
+
+// ---- tooltips: instant, styled, from any element's title (moved to data-tip so the native one doesn't
+// double up). Fixed-positioned so it never clips inside a scrolling section. ----
+(function initTips() {
+  const tip = document.createElement('div'); tip.id = 'tip'; document.body.appendChild(tip);
+  let cur = null;
+  function show(el, text) {
+    tip.textContent = text; tip.classList.add('show');
+    const r = el.getBoundingClientRect();
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    const left = Math.min(Math.max(6, r.left + r.width / 2 - tw / 2), window.innerWidth - tw - 6);
+    let top = r.bottom + 6;
+    if (top + th > window.innerHeight - 6) top = r.top - th - 6; // flip above if no room below
+    tip.style.left = `${left}px`; tip.style.top = `${Math.max(6, top)}px`;
+  }
+  function hide() { tip.classList.remove('show'); cur = null; }
+  document.addEventListener('mouseover', (e) => {
+    const el = e.target.closest('[data-tip],[title]');
+    if (!el || el === cur) return;
+    let text = el.getAttribute('data-tip');
+    if (text == null) { text = el.getAttribute('title'); if (text != null) { el.setAttribute('data-tip', text); el.removeAttribute('title'); } }
+    if (!text) return;
+    cur = el; show(el, text);
+  });
+  document.addEventListener('mouseout', (e) => { if (cur && (!e.relatedTarget || !cur.contains(e.relatedTarget))) hide(); });
+  document.addEventListener('mousedown', hide);
+  window.addEventListener('scroll', hide, true);
+})();

@@ -183,14 +183,20 @@
 
     .empty { opacity: 0.5; padding: 16px 12px; text-align: center; }
     .empty.small { padding: 10px 12px; font-size: 12px; }
+
+    /* Instant, styled tooltip (fixed-position so it never clips inside a scrolling section). */
+    #tip { position: fixed; z-index: 2147483647; max-width: 260px; padding: 6px 9px; border-radius: 7px;
+      font: 11px/1.4 system-ui, sans-serif; background: #1f2430; color: #f2f4f8;
+      box-shadow: 0 4px 14px rgba(0,0,0,.35); pointer-events: none; opacity: 0; transition: opacity .1s; }
+    #tip.show { opacity: 1; }
   </style>
 </head>
 <body>
   <header>
     <div class="h-title">
-      <img src="icons/icon32.png" width="18" height="18" alt="" />
+      <img src="icons/icon32.png" width="18" height="18" alt="Meet Live Assist" title="Meet Live Assist" />
       <h1>Meet Live Assist</h1>
-      <select id="modeSel" title="Meeting mode — how much the assistant proactively suggests">
+      <select id="modeSel" title="Agent mode — how proactive it is (Auto / Listener / Lead) or its job: Explain (define terms + cite sources) · Produce (turn talk into tickets, docs, plans)">
         <option value="auto">🤖 Auto</option>
         <option value="listener">👂 Listener</option>
         <option value="lead">🎤 Lead</option>
@@ -200,12 +206,12 @@
     </div>
 
     <div class="statusrow">
-      <span id="capStatus" class="status idle">idle</span>
-      <span id="srvStatus" class="status idle">server ?</span>
+      <span id="capStatus" class="status idle" title="Capture state — idle / capturing (Meet or Zoom captions) / co-pilot / ⚠ no captions">idle</span>
+      <span id="srvStatus" class="status idle" title="Local bridge server — ✓ connected, ✗ down (start it), or ✗ token missing (set it in Options)">server ?</span>
       <span id="brainStatus" class="status idle" title="Is a Claude assistant attached and watching this meeting?">🧠 ?</span>
-      <span id="talkStatus" class="status idle" title="Your share of talk time this meeting" hidden></span>
-      <span id="snapStatus" class="status idle" title="Snapshots captured this meeting">shots 0</span>
-      <span id="session" title="Session"></span>
+      <span id="talkStatus" class="status idle" title="Your share of talk time this meeting (rough, by words)" hidden></span>
+      <span id="snapStatus" class="status idle" title="Screen snapshots captured this meeting (kept for the assistant's visual context)">shots 0</span>
+      <span id="session" title="This meeting's session id (date_time_code)"></span>
     </div>
 
     <div class="toolbar">
@@ -237,13 +243,13 @@
 
   <!-- Transient alerts: shown only while active (the strip collapses when all are hidden). -->
   <div id="alerts">
-    <span id="shareStatus" class="status bad" hidden>● sharing · 15s</span>
-    <span id="muteStatus" class="status bad" title="Someone said you can't be heard" hidden>🔇 you may be muted</span>
-    <span id="mentionStatus" class="status bad" title="You were named in the call" hidden>🙋 mentioned you</span>
-    <span id="speakStatus" class="status idle" hidden></span>
-    <span id="sttStatus" class="status idle" hidden></span>
-    <span id="dbgStatus" class="status idle" hidden></span>
-    <span id="editStatus" class="status idle" hidden></span>
+    <span id="shareStatus" class="status bad" title="Someone is screen-sharing — auto-snapshotting every 15s" hidden>● sharing · 15s</span>
+    <span id="muteStatus" class="status bad" title="Someone said you can't be heard — check your mic" hidden>🔇 you may be muted</span>
+    <span id="mentionStatus" class="status bad" title="Your name was just said in the call" hidden>🙋 mentioned you</span>
+    <span id="speakStatus" class="status idle" title="Text-to-speech (🔊) status" hidden></span>
+    <span id="sttStatus" class="status idle" title="Local speech-to-text (🎧) status" hidden></span>
+    <span id="dbgStatus" class="status idle" title="Live debugging (🐞) status" hidden></span>
+    <span id="editStatus" class="status idle" title="Presentation edit (✏) status" hidden></span>
   </div>
 
   <div class="section-label">Advice</div>
@@ -266,13 +272,14 @@
   <div class="section-label">Chat</div>
   <div id="chat"></div>
   <div id="quickAsk">
-    <button type="button" data-ask="What did I miss in the last few minutes? Give me a 3-bullet catch-up.">⏮ Recap</button>
-    <button type="button" data-ask="Was I (Krystian) mentioned or asked anything recently? If so, what and by whom?">🙋 Mentioned me?</button>
-    <button type="button" data-ask="List the action items and decisions so far, with owners.">✅ Action items</button>
+    <button type="button" title="Quick catch-up on the last few minutes" data-ask="What did I miss in the last few minutes? Give me a 3-bullet catch-up.">⏮ Recap</button>
+    <button type="button" title="Check if you were mentioned or asked anything" data-ask="Was I (Krystian) mentioned or asked anything recently? If so, what and by whom?">🙋 Mentioned me?</button>
+    <button type="button" title="List action items & decisions so far, with owners" data-ask="List the action items and decisions so far, with owners.">✅ Action items</button>
   </div>
   <form id="chatForm">
-    <input id="chatInput" type="text" placeholder="Ask the assistant…" autocomplete="off" />
-    <button type="submit">Send</button>
+    <input id="chatInput" type="text" placeholder="Ask the assistant…" autocomplete="off"
+      title="Ask the assistant privately — it replies here, not in the meeting chat" />
+    <button type="submit" title="Send to the assistant (private back-channel, not the meeting)">Send</button>
   </form>
 
   <script src="sidepanel.js"></script>
