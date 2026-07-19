@@ -284,6 +284,68 @@ function pageGetDom() {
   return clone.outerHTML.replace(/\s+/g, ' ').slice(0, 180000);
 }
 
+// ---- agent-driven page actions (flow testing / debugging) ----------------
+// Runs in the app tab's context (self-contained). Real interaction, so it is NOT reversible like /edit.
+async function pageAct(cmd) {
+  const q = (s) => { try { return s ? document.querySelector(s) : null; } catch (_) { return null; } };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const setVal = (el, v) => {
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const d = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (d && d.set) d.set.call(el, v == null ? '' : v); else el.value = v == null ? '' : v;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  try {
+    const o = cmd.op;
+    if (o === 'waitFor' || o === 'exists') {
+      const to = Math.min(cmd.timeout || 8000, 20000); const t0 = Date.now();
+      let el = q(cmd.selector);
+      while (o === 'waitFor' && !el && Date.now() - t0 < to) { await wait(150); el = q(cmd.selector); }
+      return { ok: !!el, value: !!el };
+    }
+    if (o === 'getText') { const el = q(cmd.selector); return el ? { ok: true, value: (el.innerText || el.textContent || '').trim().slice(0, 2000) } : { ok: false, error: 'not found' }; }
+    const el = q(cmd.selector);
+    if (o === 'scroll') { if (!el) return { ok: false, error: 'not found' }; el.scrollIntoView({ block: 'center' }); return { ok: true }; }
+    if (o === 'click') { if (!el) return { ok: false, error: 'not found' }; el.scrollIntoView({ block: 'center' }); el.click(); return { ok: true }; }
+    if (o === 'type') {
+      if (!el) return { ok: false, error: 'not found' };
+      el.focus();
+      if (el.isContentEditable) { el.textContent = cmd.text || ''; el.dispatchEvent(new InputEvent('input', { bubbles: true })); }
+      else setVal(el, cmd.text);
+      return { ok: true };
+    }
+    if (o === 'press') {
+      const target = el || document.activeElement || document.body;
+      const key = cmd.key || 'Enter';
+      for (const type of ['keydown', 'keyup']) target.dispatchEvent(new KeyboardEvent(type, { key, code: key, keyCode: key === 'Enter' ? 13 : 0, bubbles: true }));
+      return { ok: true };
+    }
+    if (o === 'select') { if (!el) return { ok: false, error: 'not found' }; el.value = cmd.value; el.dispatchEvent(new Event('change', { bubbles: true })); return { ok: true }; }
+    return { ok: false, error: 'unknown op' };
+  } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+}
+async function handleAct(cmd) {
+  const { mla_session } = await chrome.storage.session.get('mla_session');
+  let result;
+  const id = await appTabId();
+  if (!id) result = { ok: false, error: 'no app tab' };
+  else if (cmd.op === 'navigate') {
+    try { await chrome.tabs.update(id, { url: cmd.url }); result = { ok: true }; }
+    catch (e) { result = { ok: false, error: String(e && e.message || e) }; }
+  } else {
+    try { const [r] = await chrome.scripting.executeScript({ target: { tabId: id }, func: pageAct, args: [cmd] }); result = (r && r.result) || { ok: false, error: 'no result' }; }
+    catch (e) { result = { ok: false, error: String(e && e.message || e) }; }
+  }
+  broadcast({ type: 'act', ok: result.ok, op: cmd.op, reason: result.error });
+  try {
+    await fetch((await getServerUrl()) + '/act-result', {
+      method: 'POST', headers: await authHeaders(),
+      body: JSON.stringify({ session: mla_session, seq: cmd.seq, ok: result.ok, value: result.value, error: result.error }),
+    });
+  } catch (_) {}
+}
+
 // ---- live debugging: storage (scripting) + network/console (chrome.debugger) ----
 let dbgTabId = null;
 const netBuf = [];   // { method, url, status, mime, type }
@@ -434,6 +496,8 @@ chrome.runtime.onConnect.addListener((port) => {
       stopCoPilot();
     } else if (m.type === 'send-call-chat') {
       sendToCallChat(m.text);
+    } else if (m.type === 'do-act') {
+      handleAct(m.cmd);
     } else if (m.type === 'apply-edit') {
       applyEdit(m.cmd);
     } else if (m.type === 'capture-dom') {

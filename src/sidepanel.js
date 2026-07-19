@@ -430,6 +430,41 @@ async function pollCallChat() {
   } catch (_) {}
 }
 
+// ---- agent-driven page actions (flow testing) — opt-in "drive" ----
+const driveBtn = document.getElementById('driveBtn');
+const driveBar = document.getElementById('driveBar');
+let driveOn = false;
+let lastActSeq = -1;
+async function postDrive(on) {
+  if (!currentSession) return;
+  try { await fetch(`${serverUrl}/drive`, { method: 'POST', headers: hdrs(true), body: JSON.stringify({ session: currentSession, on }) }); } catch (_) {}
+}
+function setDrive(on) { driveOn = on; driveBtn.classList.toggle('on', on); driveBar.hidden = !on; }
+driveBtn.addEventListener('click', async () => {
+  if (!driveOn) {
+    if (!(await ensurePerms(ALL_URLS))) return; // acting on arbitrary tabs needs all-sites access
+    setDrive(true); postDrive(true);
+  } else { setDrive(false); postDrive(false); }
+});
+document.getElementById('driveStop').addEventListener('click', () => { setDrive(false); postDrive(false); });
+async function loadDrive() {
+  if (!currentSession) return;
+  try { const r = await fetch(`${serverUrl}/drive?session=${encodeURIComponent(currentSession)}`, { headers: hdrs() }); if (r.ok) setDrive(!!(await r.json()).on); } catch (_) {}
+}
+async function pollActs() {
+  if (!currentSession) return;
+  try {
+    const r = await fetch(`${serverUrl}/act?session=${encodeURIComponent(currentSession)}&since=${Math.max(lastActSeq, 0)}`, { headers: hdrs() });
+    if (!r.ok) return;
+    const { items, last } = await r.json();
+    if (lastActSeq < 0) { lastActSeq = last || 0; return; } // baseline: don't replay old actions
+    for (const cmd of items || []) {
+      if (driveOn) { try { port.postMessage({ type: 'do-act', cmd }); } catch (_) {} } // double-guard the opt-in
+    }
+    if (typeof last === 'number') lastActSeq = Math.max(lastActSeq, last);
+  } catch (_) {}
+}
+
 // ---- chat ----------------------------------------------------------------
 function appendChat({ role, text, image }) {
   const div = document.createElement('div');
@@ -532,7 +567,7 @@ dbgToggle.addEventListener('change', async () => {
 
 function startPolling() {
   clearInterval(pollTimer);
-  pollTimer = setInterval(() => { pollAdvice(); pollItems(); pollCallChat(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); pollDebugRequest(); }, 1500);
+  pollTimer = setInterval(() => { pollAdvice(); pollItems(); pollCallChat(); pollActs(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); pollDebugRequest(); }, 1500);
   clearInterval(brainTimer);
   brainTimer = setInterval(pollBrain, 5000); // liveness is coarse — no need to poll it fast
 }
@@ -578,7 +613,14 @@ function onMessage(msg) {
       setStatus(capEl, 'ended', 'idle');
       setSharing(false);
       copilotOn = false; copilotBtn.classList.remove('on');
+      setDrive(false);
       break;
+    case 'act': {
+      const el = document.getElementById('actStatus'); el.hidden = false;
+      setStatus(el, msg.ok ? `🕹 ${msg.op} ✓` : `🕹 ${msg.op} ✗ ${msg.reason || ''}`.trim(), msg.ok ? 'ok' : 'bad');
+      setTimeout(() => { el.hidden = true; }, 3000);
+      break;
+    }
     case 'capture-health':
       if (!msg.ok) setStatus(capEl, '⚠ no captions — turn on CC / check language', 'bad');
       else setStatus(capEl, 'capturing', 'ok');
@@ -726,13 +768,13 @@ modeSel.addEventListener('change', () => { chrome.storage.local.set({ mla_mode: 
 
 function setSession(session) {
   if (session && session !== currentSession) {
-    currentSession = session; lastAdviceSeq = 0; lastItemsSeq = 0; lastReqSeq = -1; lastChatSeq = 0; lastEditSeq = -1; lastDomReqSeq = -1; lastDbgReqSeq = -1; lastCallChatSeq = -1;
-    chatEl.innerHTML = ''; resetItems(); resetTalk();
+    currentSession = session; lastAdviceSeq = 0; lastItemsSeq = 0; lastReqSeq = -1; lastChatSeq = 0; lastEditSeq = -1; lastDomReqSeq = -1; lastDbgReqSeq = -1; lastCallChatSeq = -1; lastActSeq = -1;
+    chatEl.innerHTML = ''; resetItems(); resetTalk(); setDrive(false);
     setStatus(brainEl, '🧠 ?', 'idle');
     cueArmed = false; setTimeout(() => { cueArmed = true; }, 2500); // don't cue on initial backfill
     postMode(modeSel.value); // register the current mode for the new session
-    loadAutopilot(); // sync the toggles to this session's stored state
-    pollAdvice(); pollItems(); pollCallChat(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); pollDebugRequest(); pollBrain();
+    loadAutopilot(); loadDrive(); // sync toggles to this session's stored state
+    pollAdvice(); pollItems(); pollCallChat(); pollActs(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); pollDebugRequest(); pollBrain();
   }
 }
 

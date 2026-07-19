@@ -89,6 +89,12 @@
     }
     #consent button { margin-left: auto; font: 11px system-ui; padding: 3px 10px; border-radius: 8px; cursor: pointer;
       border: 1px solid var(--line); background: transparent; color: inherit; }
+    #driveBar {
+      display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: 12px; font-weight: 500;
+      background: color-mix(in srgb, var(--risk) 18%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--risk) 45%, transparent);
+    }
+    #driveBar button { margin-left: auto; font: 11px system-ui; padding: 3px 10px; border-radius: 8px; cursor: pointer;
+      border: 1px solid color-mix(in srgb, var(--risk) 55%, transparent); background: transparent; color: inherit; }
 
     /* ---- Section labels ---- */
     .section-label {
@@ -229,6 +235,7 @@
       <label class="toggle debug" title="Let the assistant read network/console (attaches the debugger — shows a banner) and storage">
         <input type="checkbox" id="dbgToggle" />🐞
       </label>
+      <button id="driveBtn" class="iconbtn" title="Let the agent control this tab — click / type / navigate to walk or test a flow. Opt-in; a banner shows while active and it acts in your real logged-in session.">🕹️</button>
       <span class="tb-spacer"></span>
       <button id="summaryBtn" class="iconbtn" title="Show / download the post-call summary">📄</button>
       <button id="setupBtn" class="iconbtn" title="Setup &amp; health check">⚙</button>
@@ -244,6 +251,11 @@
     <button id="consentDismiss" type="button">Got it</button>
   </div>
 
+  <div id="driveBar" hidden>
+    🤖 The assistant can control this tab (click / type / navigate) — acting in your real session.
+    <button id="driveStop" type="button">Stop</button>
+  </div>
+
   <!-- Transient alerts: shown only while active (the strip collapses when all are hidden). -->
   <div id="alerts">
     <span id="shareStatus" class="status bad" title="Someone is screen-sharing — auto-snapshotting every 15s" hidden>● sharing · 15s</span>
@@ -253,6 +265,7 @@
     <span id="sttStatus" class="status idle" title="Local speech-to-text (🎧) status" hidden></span>
     <span id="dbgStatus" class="status idle" title="Live debugging (🐞) status" hidden></span>
     <span id="editStatus" class="status idle" title="Presentation edit (✏) status" hidden></span>
+    <span id="actStatus" class="status idle" title="Agent page-action (🕹) status" hidden></span>
   </div>
 
   <div class="section-label">Advice</div>
