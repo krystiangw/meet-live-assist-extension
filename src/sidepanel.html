@@ -13,6 +13,9 @@
       --chip: color-mix(in srgb, CanvasText 7%, transparent);
     }
     * { box-sizing: border-box; }
+    /* The `hidden` attribute must always win — otherwise id/class display rules (e.g. #consent{display:flex},
+       .status{display:inline-flex}) override it and elements toggled via el.hidden never actually hide. */
+    [hidden] { display: none !important; }
     body {
       margin: 0; font: 13px/1.5 system-ui, sans-serif;
       display: flex; flex-direction: column; height: 100vh;
