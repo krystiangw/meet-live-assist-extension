@@ -1,6 +1,7 @@
 const input = document.getElementById('serverUrl');
 const tokenInput = document.getElementById('serverToken');
 const namesInput = document.getElementById('selfNames');
+const jiraInput = document.getElementById('jiraBase');
 const enSel = document.getElementById('ttsVoiceEn');
 const plSel = document.getElementById('ttsVoicePl');
 const saved = document.getElementById('saved');
@@ -33,10 +34,11 @@ async function loadVoices(selEn, selPl) {
   }
 }
 
-chrome.storage.local.get(['serverUrl', 'ttsVoiceEn', 'ttsVoicePl', 'mla_token', 'mla_names']).then((c) => {
+chrome.storage.local.get(['serverUrl', 'ttsVoiceEn', 'ttsVoicePl', 'mla_token', 'mla_names', 'mla_jira_base']).then((c) => {
   input.value = c.serverUrl || DEFAULT_SERVER;
   tokenInput.value = c.mla_token || '';
   namesInput.value = c.mla_names || '';
+  jiraInput.value = c.mla_jira_base !== undefined ? c.mla_jira_base : 'https://your-team.atlassian.net';
   loadVoices(c.ttsVoiceEn || DEFAULT_EN, c.ttsVoicePl || DEFAULT_PL);
 });
 
@@ -57,7 +59,7 @@ document.getElementById('enableMic').addEventListener('click', async () => {
 });
 
 document.getElementById('save').addEventListener('click', async () => {
-  await chrome.storage.local.set({ serverUrl: serverUrl(), ttsVoiceEn: enSel.value, ttsVoicePl: plSel.value, mla_token: (tokenInput.value || '').trim(), mla_names: (namesInput.value || '').trim() });
+  await chrome.storage.local.set({ serverUrl: serverUrl(), ttsVoiceEn: enSel.value, ttsVoicePl: plSel.value, mla_token: (tokenInput.value || '').trim(), mla_names: (namesInput.value || '').trim(), mla_jira_base: (jiraInput.value || '').trim() });
   saved.style.opacity = '1';
   setTimeout(() => { saved.style.opacity = '0'; }, 1500);
 });

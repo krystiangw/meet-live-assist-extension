@@ -100,7 +100,7 @@ function renderLine(el, ts, speaker, text, final) {
   el.textContent = '';
   const t = document.createElement('span'); t.className = 'ts'; t.textContent = ts || ''; el.append(t);
   if (speaker) { const w = document.createElement('span'); w.className = 'who'; w.textContent = speaker + ': '; el.append(w); }
-  el.append(document.createTextNode(text || ''));
+  linkify(el, text);
 }
 // Same utterance if the two texts share a substantial leading chunk — tolerant of ASR revising later words
 // (e.g. "…TG site cream" → "…TG site. Creamier"), which a strict prefix check would wrongly split.
@@ -171,7 +171,7 @@ function appendLine({ ts, speaker, text }) {
   const t = document.createElement('span'); t.className = 'ts'; t.textContent = ts || '';
   div.append(t);
   if (speaker) { const w = document.createElement('span'); w.className = 'who'; w.textContent = speaker + ': '; div.append(w); }
-  div.append(document.createTextNode(text || ''));
+  linkify(div, text);
   logEl.appendChild(div);
   if (atBottom) logEl.scrollTop = logEl.scrollHeight;
 }
@@ -179,10 +179,35 @@ function appendLine({ ts, speaker, text }) {
 // ---- advice --------------------------------------------------------------
 // Safe inline rich rendering — no innerHTML. Supports bare URLs, [text](url), ![alt](url) images,
 // **bold**, and `code`. Everything else stays literal text.
+// Jira ticket keys (e.g. PROJ-529) become links to the configured Jira. Deny common non-Jira tokens
+// that look like keys (UTF-8, GPT-4, SHA-256, …) so they aren't wrongly linked.
+let jiraBase = 'https://your-team.atlassian.net';
+const JIRA_DENY = /^(UTF|GPT|SHA|ISO|RFC|CVE|AES|IPV|MP|ID|PR|CI|HTTP|HTTPS|COVID|IE|MS|H)$/;
+function jiraLink(key) {
+  if (!jiraBase || JIRA_DENY.test(key.split('-')[0])) return null;
+  const a = document.createElement('a');
+  a.href = `${jiraBase.replace(/\/+$/, '')}/browse/${key}`;
+  a.textContent = key; a.target = '_blank'; a.rel = 'noreferrer'; a.title = `Open ${key} in Jira`;
+  return a;
+}
+// Linkify PLAIN text (transcript, item text): URLs + Jira keys → <a>, everything else stays text.
+const LINKIFY_RE = /(https?:\/\/[^\s]+)|(\b[A-Z][A-Z0-9]{1,5}-\d+\b)/g;
+function linkify(parent, text) {
+  const s = String(text || ''); let last = 0; let m; LINKIFY_RE.lastIndex = 0;
+  while ((m = LINKIFY_RE.exec(s))) {
+    if (m.index > last) parent.appendChild(document.createTextNode(s.slice(last, m.index)));
+    if (m[1]) { const a = document.createElement('a'); a.href = m[1]; a.textContent = m[1]; a.target = '_blank'; a.rel = 'noreferrer'; parent.appendChild(a); }
+    else parent.appendChild(jiraLink(m[2]) || document.createTextNode(m[2]));
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) parent.appendChild(document.createTextNode(s.slice(last)));
+}
+
 const RICH = [
   { re: /!\[([^\]]*)\]\((https?:\/\/[^\s)]+|data:image\/[^\s)]+)\)/, kind: 'img' },
   { re: /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/, kind: 'link' },
   { re: /(https?:\/\/[^\s]+)/, kind: 'url' },
+  { re: /\b[A-Z][A-Z0-9]{1,5}-\d+\b/, kind: 'jira' },
   { re: /\*\*([^*]+)\*\*/, kind: 'bold' },
   { re: /`([^`]+)`/, kind: 'code' },
 ];
@@ -200,6 +225,7 @@ function renderInline(parent, line) {
     if (best.p.kind === 'img') { const i = document.createElement('img'); i.src = g2; i.alt = g1 || ''; i.className = 'rich-img'; parent.appendChild(i); }
     else if (best.p.kind === 'link') { const a = document.createElement('a'); a.href = g2; a.textContent = g1; a.target = '_blank'; a.rel = 'noreferrer'; parent.appendChild(a); }
     else if (best.p.kind === 'url') { const a = document.createElement('a'); a.href = g1; a.textContent = g1; a.target = '_blank'; a.rel = 'noreferrer'; parent.appendChild(a); }
+    else if (best.p.kind === 'jira') { parent.appendChild(jiraLink(full) || document.createTextNode(full)); }
     else if (best.p.kind === 'bold') { const b = document.createElement('strong'); b.textContent = g1; parent.appendChild(b); }
     else if (best.p.kind === 'code') { const c = document.createElement('code'); c.textContent = g1; parent.appendChild(c); }
     rest = rest.slice(best.m.index + full.length);
@@ -398,8 +424,8 @@ function appendItem({ kind, text, owner, blockedBy }) {
   const k = document.createElement('span'); k.className = 'kind'; k.textContent = decision ? 'DECISION' : 'ACTION';
   k.title = decision ? 'A decision reached in the meeting' : 'An action item / to-do (click text to mark done)';
   const body = document.createElement('div'); body.className = 'body';
-  const txt = document.createElement('div'); txt.className = 'txt'; txt.textContent = text;
-  txt.title = 'Click to mark done'; txt.addEventListener('click', () => div.classList.toggle('done'));
+  const txt = document.createElement('div'); txt.className = 'txt'; linkify(txt, text);
+  txt.title = 'Click to mark done'; txt.addEventListener('click', (e) => { if (e.target.tagName === 'A') return; div.classList.toggle('done'); });
   body.appendChild(txt);
   if (owner || blockedBy) {
     const meta = document.createElement('div'); meta.className = 'meta';
@@ -852,11 +878,12 @@ function connect() {
   });
 }
 
-chrome.storage.local.get(['serverUrl', 'ttsVoicePl', 'ttsVoiceEn', 'mla_mode', 'mla_token', 'mla_names']).then((c) => {
+chrome.storage.local.get(['serverUrl', 'ttsVoicePl', 'ttsVoiceEn', 'mla_mode', 'mla_token', 'mla_names', 'mla_jira_base']).then((c) => {
   if (c.serverUrl) serverUrl = c.serverUrl.replace(/\/+$/, '');
   ttsVoicePl = c.ttsVoicePl || 'Zosia';
   ttsVoiceEn = c.ttsVoiceEn || 'Daniel';
   serverToken = c.mla_token || '';
+  if (c.mla_jira_base !== undefined) jiraBase = (c.mla_jira_base || '').trim();
   buildNameRe(c.mla_names);
   if (c.mla_mode) modeSel.value = c.mla_mode;
   fetchHealth(); // first-run checklist (auto-opens once if something's missing)

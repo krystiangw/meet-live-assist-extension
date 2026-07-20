@@ -31,6 +31,11 @@
   <input id="selfNames" type="text" placeholder="Krystian, Chris, Christian" autocomplete="off" />
   <div class="hint">Comma-separated. The panel alerts you when one of these is mentioned in the call.</div>
 
+  <label for="jiraBase">Jira base URL</label>
+  <input id="jiraBase" type="text" placeholder="https://your-team.atlassian.net" autocomplete="off" />
+  <div class="hint">Ticket keys like <code>PROJ-529</code> in advice / chat / transcript become links to
+    <code>&lt;base&gt;/browse/…</code>. Leave blank to disable Jira linking.</div>
+
   <label>Microphone (co-pilot mode)</label>
   <button id="enableMic" type="button" style="margin-top:0;">Enable microphone</button>
   <span id="micState" style="margin-left:10px;font-size:13px;opacity:.7;"></span>
