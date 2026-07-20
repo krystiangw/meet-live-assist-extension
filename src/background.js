@@ -114,7 +114,41 @@ async function findActiveMeetTab() {
   return tabs.find((t) => t.active) || null; // captureVisibleTab needs the tab active in its window
 }
 
-async function captureSnapshot() {
+const SNAP_HASH_THRESHOLD = 6;    // dHash bits changed that count as a material visual change
+const SNAP_FLOOR_MS = 5000;       // never auto-send faster than this (kills video/animation spam)
+const SNAP_HEARTBEAT_MS = 60000;  // …but land at least one frame/min even if the slide is static
+
+// 9x8 grayscale difference-hash → 64-bit fingerprint (hex). Tolerant of compression noise / cursor jitter.
+async function frameHash(dataUrl) {
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    const bmp = await createImageBitmap(blob);
+    const w = 9; const h = 8;
+    const ctx = new OffscreenCanvas(w, h).getContext('2d');
+    ctx.drawImage(bmp, 0, 0, w, h);
+    const { data } = ctx.getImageData(0, 0, w, h);
+    let bits = '';
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w - 1; x++) {
+        const i = (y * w + x) * 4; const j = (y * w + x + 1) * 4;
+        const g1 = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+        const g2 = data[j] * 0.299 + data[j + 1] * 0.587 + data[j + 2] * 0.114;
+        bits += g1 > g2 ? '1' : '0';
+      }
+    }
+    let hex = '';
+    for (let k = 0; k < bits.length; k += 4) hex += parseInt(bits.slice(k, k + 4), 2).toString(16);
+    return hex;
+  } catch (_) { return null; }
+}
+function hammingHex(a, b) {
+  if (!a || !b || a.length !== b.length) return 999;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) { let x = parseInt(a[i], 16) ^ parseInt(b[i], 16); while (x) { d += x & 1; x >>= 1; } }
+  return d;
+}
+
+async function captureSnapshot(auto = false) {
   const { mla_session } = await chrome.storage.session.get('mla_session');
   if (!mla_session) return;
   // Capture what the user is actually looking at: the active tab of the focused window. During a
@@ -123,18 +157,31 @@ async function captureSnapshot() {
   let tab = null;
   try { const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); tab = t || null; } catch (_) {}
   if (!tab || !/^https?:/.test(tab.url || '')) tab = await findActiveMeetTab();
-  if (!tab) { broadcast({ type: 'snapshot', ok: false, reason: 'no capturable tab' }); return; }
+  if (!tab) { if (!auto) broadcast({ type: 'snapshot', ok: false, reason: 'no capturable tab' }); return; }
   let dataUrl;
   try {
     dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 60 });
-  } catch (e) { broadcast({ type: 'snapshot', ok: false, reason: String(e && e.message || e) }); return; }
+  } catch (e) { if (!auto) broadcast({ type: 'snapshot', ok: false, reason: String(e && e.message || e) }); return; }
+
+  const hash = await frameHash(dataUrl);
+  // Auto (presentation) sampling: forward only when the screen actually changed, so a static slide
+  // doesn't flood the brain with identical frames. Manual button / agent request always send.
+  if (auto) {
+    const { mla_snapHash, mla_snapSentTs } = await chrome.storage.session.get(['mla_snapHash', 'mla_snapSentTs']);
+    const now = Date.now();
+    const changed = !mla_snapHash || !hash || hammingHex(hash, mla_snapHash) > SNAP_HASH_THRESHOLD;
+    const floorOk = !mla_snapSentTs || (now - mla_snapSentTs) >= SNAP_FLOOR_MS;
+    const heartbeat = !mla_snapSentTs || (now - mla_snapSentTs) > SNAP_HEARTBEAT_MS;
+    if (!((changed && floorOk) || heartbeat)) return; // unchanged → skip silently
+  }
+
   try {
     const r = await fetch((await getServerUrl()) + '/snapshot', {
       method: 'POST', headers: await authHeaders(),
       body: JSON.stringify({ session: mla_session, dataUrl }),
     });
     const j = r.ok ? await r.json() : null;
-    await chrome.storage.session.set({ mla_lastSnap: Date.now() });
+    if (r.ok) await chrome.storage.session.set({ mla_lastSnap: Date.now(), mla_snapHash: hash, mla_snapSentTs: Date.now() });
     broadcast({ type: 'snapshot', ok: r.ok, count: j && j.count });
   } catch (_) { broadcast({ type: 'snapshot', ok: false, reason: 'server' }); }
 }
@@ -485,7 +532,7 @@ chrome.runtime.onConnect.addListener((port) => {
       const { mla_sharing, mla_lang } = await chrome.storage.session.get(['mla_sharing', 'mla_lang']);
       port.postMessage({ type: 'restore', session, buffer, sharing: !!mla_sharing, lang: mla_lang || null });
     } else if (m.type === 'snapshot-now') {
-      captureSnapshot();
+      captureSnapshot(!!m.auto);
     } else if (m.type === 'stt-start') {
       startStt();
     } else if (m.type === 'stt-stop') {

@@ -459,7 +459,7 @@ async function pollSnapRequest() {
   } catch (_) { /* server down */ }
 }
 
-function requestCapture() { try { port.postMessage({ type: 'snapshot-now' }); } catch (_) {} }
+function requestCapture(auto) { try { port.postMessage({ type: 'snapshot-now', auto: !!auto }); } catch (_) {} }
 
 // ---- decisions & action items (the board) --------------------------------
 function resetItems() { itemsEl.innerHTML = '<div class="empty small">Decisions and action items will appear here…</div>'; hasItems = false; lastItemsSeq = 0; syncSearchVisibility(); }
@@ -633,8 +633,8 @@ function setSharing(on) {
   shareEl.hidden = !sharing;
   clearInterval(shareTimer);
   if (sharing) {
-    requestCapture(); // grab one immediately when sharing starts
-    shareTimer = setInterval(requestCapture, 15000); // frequent while presenting
+    requestCapture(false); // grab one immediately (force) when sharing starts
+    shareTimer = setInterval(() => requestCapture(true), 4000); // sample often; SW forwards only on visual change
   }
 }
 
