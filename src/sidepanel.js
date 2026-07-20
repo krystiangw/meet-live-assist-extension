@@ -313,6 +313,17 @@ function updatedBadge(n) {
   u.title = `Refined during the call${n > 1 ? ` (${n}×)` : ''} — replaces an earlier, similar suggestion`;
   return u;
 }
+// Filtering a single card is pointless — only surface the search box once there's something to sift.
+function toggleSearch(inputId, container, sel, clearFilter) {
+  const el = document.getElementById(inputId);
+  const show = container.querySelectorAll(sel).length > 1;
+  el.hidden = !show;
+  if (!show && el.value) { el.value = ''; clearFilter(); applyFilter(container, sel, ''); }
+}
+function syncSearchVisibility() {
+  toggleSearch('adviceSearch', adviceEl, '.advice-item', () => { adviceFilter = ''; });
+  toggleSearch('itemSearch', itemsEl, '.item', () => { itemFilter = ''; });
+}
 
 function appendAdvice({ marker, text, image }) {
   if (!hasAdvice) { adviceEl.innerHTML = ''; hasAdvice = true; }
@@ -344,12 +355,13 @@ function appendAdvice({ marker, text, image }) {
       .then(() => { cp.textContent = '✓'; setTimeout(() => { cp.textContent = '📋'; }, 900); }).catch(() => {}));
     div.append(cp);
   }
-  div.append(iconBtn('✕', 'Remove this advice', () => div.remove()));
-  if (text) div.append(iconBtn('🚫', 'Remove & stop suggesting similar', () => { div.remove(); suppressTopic(text, 'advice'); }));
+  div.append(iconBtn('✕', 'Remove this advice', () => { div.remove(); syncSearchVisibility(); }));
+  if (text) div.append(iconBtn('🚫', 'Remove & stop suggesting similar', () => { div.remove(); syncSearchVisibility(); suppressTopic(text, 'advice'); }));
   div.dataset.text = (text || '').toLowerCase();
   if (adviceFilter && !div.dataset.text.includes(adviceFilter)) div.hidden = true;
   adviceEl.appendChild(div);
   adviceEl.scrollTop = adviceEl.scrollHeight;
+  syncSearchVisibility();
   if (m === 'RISK' && cueArmed) riskCue(text);
 }
 
@@ -402,7 +414,7 @@ async function speak(text, btn) {
   }
 }
 
-function resetAdvice() { adviceEl.innerHTML = '<div class="empty small">Advice will appear here live…</div>'; hasAdvice = false; lastAdviceSeq = 0; }
+function resetAdvice() { adviceEl.innerHTML = '<div class="empty small">Advice will appear here live…</div>'; hasAdvice = false; lastAdviceSeq = 0; syncSearchVisibility(); }
 
 // Reflect brain liveness in the advice empty-state so "nothing happening" is explained, not silent.
 function setBrainEmpty(live) {
@@ -450,7 +462,7 @@ async function pollSnapRequest() {
 function requestCapture() { try { port.postMessage({ type: 'snapshot-now' }); } catch (_) {} }
 
 // ---- decisions & action items (the board) --------------------------------
-function resetItems() { itemsEl.innerHTML = '<div class="empty small">Decisions and action items will appear here…</div>'; hasItems = false; lastItemsSeq = 0; }
+function resetItems() { itemsEl.innerHTML = '<div class="empty small">Decisions and action items will appear here…</div>'; hasItems = false; lastItemsSeq = 0; syncSearchVisibility(); }
 function appendItem({ kind, text, owner, blockedBy }) {
   if (!hasItems) { itemsEl.innerHTML = ''; hasItems = true; }
   const decision = kind === 'decision';
@@ -478,12 +490,13 @@ function appendItem({ kind, text, owner, blockedBy }) {
     j.addEventListener('click', () => sendChat(`Draft a Jira ticket (DRAFT only — do not create) for this action item: "${text}"${owner ? ` — owner ${owner}` : ''}. Use the team's Goal / Summary / Test plan sections.`));
     div.append(j);
   }
-  div.append(iconBtn('✕', 'Remove this item', () => div.remove()));
-  if (!decision) div.append(iconBtn('🚫', 'Remove & stop suggesting similar', () => { div.remove(); suppressTopic(text, 'action'); }));
+  div.append(iconBtn('✕', 'Remove this item', () => { div.remove(); syncSearchVisibility(); }));
+  if (!decision) div.append(iconBtn('🚫', 'Remove & stop suggesting similar', () => { div.remove(); syncSearchVisibility(); suppressTopic(text, 'action'); }));
   div.dataset.text = (text || '').toLowerCase();
   if (itemFilter && !div.dataset.text.includes(itemFilter)) div.hidden = true;
   itemsEl.appendChild(div);
   itemsEl.scrollTop = itemsEl.scrollHeight;
+  syncSearchVisibility();
 }
 async function pollItems() {
   if (!currentSession) return;
