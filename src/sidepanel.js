@@ -700,6 +700,23 @@ copilotBtn.addEventListener('click', async () => {
 const consentEl = document.getElementById('consent');
 document.getElementById('consentDismiss').addEventListener('click', () => { consentEl.hidden = true; });
 
+// Import pre-join context (a Gemini / AI "summarize so far", or highlighted text) into the transcript.
+document.getElementById('ctxBtn').addEventListener('click', async () => {
+  const ctxEl = document.getElementById('ctxStatus'); ctxEl.hidden = false;
+  if (!currentSession) { setStatus(ctxEl, '📥 no active session', 'bad'); setTimeout(() => { ctxEl.hidden = true; }, 3000); return; }
+  let tab = null;
+  try { const tabs = await chrome.tabs.query({ url: ['https://meet.google.com/*', 'https://*.zoom.us/*'] }); tab = tabs.find((t) => t.active) || tabs[0]; } catch (_) {}
+  if (!tab) { setStatus(ctxEl, '📥 no meeting tab', 'bad'); setTimeout(() => { ctxEl.hidden = true; }, 3000); return; }
+  let text = '';
+  try { const r = await chrome.tabs.sendMessage(tab.id, { type: 'grab-context' }); text = (r && r.text) || ''; } catch (_) {}
+  if (!text) { setStatus(ctxEl, '📥 highlight the summary first', 'bad'); setTimeout(() => { ctxEl.hidden = true; }, 3500); return; }
+  try {
+    const res = await fetch(`${serverUrl}/context`, { method: 'POST', headers: hdrs(true), body: JSON.stringify({ session: currentSession, text }) });
+    setStatus(ctxEl, res.ok ? `📥 imported ${(await res.json()).chars} chars` : '📥 failed', res.ok ? 'ok' : 'bad');
+  } catch (_) { setStatus(ctxEl, '📥 failed', 'bad'); }
+  setTimeout(() => { ctxEl.hidden = true; }, 3500);
+});
+
 // ---- setup / health checklist --------------------------------------------
 const setupEl = document.getElementById('setup');
 let autoSetupShown = false;

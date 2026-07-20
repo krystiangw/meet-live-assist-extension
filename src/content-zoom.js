@@ -201,9 +201,18 @@
     }, 200);
   }
 
+  function grabContext() {
+    const sel = (window.getSelection && String(window.getSelection() || '')).trim();
+    if (sel.length > 20) return sel.slice(0, 8000);
+    const hints = ['[aria-label*="companion" i]', '[aria-label*="summary" i]', '[class*="summary" i]', '[aria-label*="meeting summary" i]'];
+    for (const h of hints) { try { const el = document.querySelector(h); if (el) { const t = (el.innerText || '').trim(); if (t.length > 60) return t.slice(0, 8000); } } catch (_) {} }
+    return '';
+  }
+
   chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
     if (!msg) return;
     if (msg.type === 'capture-mode') { sttPaused = (msg.captions === false); sendResponse({ ok: true }); return; }
+    if (msg.type === 'grab-context') { sendResponse({ text: grabContext() }); return; }
     if (msg.type === 'call-chat') { postToZoomChat(msg.text); sendResponse({ ok: true }); return; }
   });
 

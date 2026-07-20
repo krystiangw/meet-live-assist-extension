@@ -310,9 +310,20 @@
     }, 200);
   }
 
+  // Grab pre-join context to import: prefer the user's current selection (highlight the Gemini summary),
+  // else best-effort the Gemini/notes side-panel text. Selectors are heuristic (Google's DOM rotates).
+  function grabContext() {
+    const sel = (window.getSelection && String(window.getSelection() || '')).trim();
+    if (sel.length > 20) return sel.slice(0, 8000);
+    const hints = ['[aria-label*="Gemini" i]', '[aria-label*="summary" i]', '[aria-label*="notes" i]', '[aria-label*="took notes" i]'];
+    for (const h of hints) { try { const el = document.querySelector(h); if (el) { const t = (el.innerText || '').trim(); if (t.length > 60) return t.slice(0, 8000); } } catch (_) {} }
+    return '';
+  }
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!msg) return;
     if (msg.type === 'capture-mode') { sttPaused = (msg.captions === false); sendResponse({ ok: true }); return; }
+    if (msg.type === 'grab-context') { sendResponse({ text: grabContext() }); return; }
     if (msg.type === 'call-chat') { postToCallChat(msg.text); sendResponse({ ok: true }); return; }
     if (msg.type !== 'mic') return;
     const b = findMicButton();
