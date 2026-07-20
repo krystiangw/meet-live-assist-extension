@@ -90,22 +90,37 @@ function riskCue(text) {
 }
 
 // ---- transcript ----------------------------------------------------------
-const liveLines = new Map(); // caption id -> element (interim lines updated in place)
-function clearLog() { logEl.innerHTML = ''; hasLines = false; liveLines.clear(); }
-
-// Live captions: create/update a line by id as it grows; on final, lock it (drop from the live map).
+// One utterance = one line that grows in place. A caption block (id) keeps emitting the FULL growing text
+// (interim + on each finalize), so we UPDATE the same element while the text is a continuation, and only
+// start a new line when the same id begins a genuinely new utterance (text no longer extends the last one).
+const liveById = new Map(); // caption id -> { el, text }
+function clearLog() { logEl.innerHTML = ''; hasLines = false; liveById.clear(); }
+function renderLine(el, ts, speaker, text, final) {
+  el.className = 'line' + (final ? '' : ' live');
+  el.textContent = '';
+  const t = document.createElement('span'); t.className = 'ts'; t.textContent = ts || ''; el.append(t);
+  if (speaker) { const w = document.createElement('span'); w.className = 'who'; w.textContent = speaker + ': '; el.append(w); }
+  el.append(document.createTextNode(text || ''));
+}
+// Same utterance if the two texts share a substantial leading chunk — tolerant of ASR revising later words
+// (e.g. "…TG site cream" → "…TG site. Creamier"), which a strict prefix check would wrongly split.
+function sameUtterance(a, b) {
+  a = (a || '').trim(); b = (b || '').trim();
+  if (!a) return true;
+  let i = 0; const n = Math.min(a.length, b.length);
+  while (i < n && a[i] === b[i]) i++;
+  return i >= Math.min(18, Math.floor(a.length * 0.5));
+}
 function upsertCaption(id, { ts, speaker, text }, final) {
   if (!hasLines) { logEl.innerHTML = ''; hasLines = true; }
   const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 60;
-  let el = liveLines.get(id);
-  if (!el) { el = document.createElement('div'); logEl.appendChild(el); if (!final) liveLines.set(id, el); }
-  el.className = 'line' + (final ? '' : ' live');
-  el.textContent = '';
-  const t = document.createElement('span'); t.className = 'ts'; t.textContent = ts || '';
-  el.append(t);
-  if (speaker) { const w = document.createElement('span'); w.className = 'who'; w.textContent = speaker + ': '; el.append(w); }
-  el.append(document.createTextNode(text || ''));
-  if (final) liveLines.delete(id);
+  const cur = (text || '').trim();
+  const prev = liveById.get(id);
+  let el;
+  if (prev && sameUtterance(prev.text, cur)) el = prev.el; // same utterance (still growing / ASR-revised) → in place
+  else { el = document.createElement('div'); logEl.appendChild(el); } // first, or a genuinely new utterance on this id
+  renderLine(el, ts, speaker, text, final);
+  liveById.set(id, { el, text: cur });
   if (atBottom) logEl.scrollTop = logEl.scrollHeight;
 }
 
