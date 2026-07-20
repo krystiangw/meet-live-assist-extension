@@ -6,11 +6,18 @@
   <title>Meet Live Assist</title>
   <style>
     :root {
-      color-scheme: light dark;
-      --say: #1a7f37; --info: #2f6feb; --summary: #b8860b; --explain: #8250df; --risk: #d1242f; --action: #e36209;
-      --line: color-mix(in srgb, CanvasText 14%, transparent);
-      --hover: color-mix(in srgb, CanvasText 10%, transparent);
-      --chip: color-mix(in srgb, CanvasText 7%, transparent);
+      color-scheme: light; /* committed light — Whispr-style soft surface */
+      --ink: #1b2138;    /* base dark for text + all translucent tints */
+      --text: #1c2338;
+      --muted: #6b7488;
+      --field: #ffffff;
+      --surface: #ffffff;
+      --say: #17935a; --info: #3b6ef0; --summary: #b07a12; --explain: #7c53e6; --risk: #e0415a; --action: #ef7a3d;
+      --line: color-mix(in srgb, var(--ink) 11%, transparent);
+      --hover: color-mix(in srgb, var(--ink) 7%, transparent);
+      --chip: color-mix(in srgb, var(--ink) 6%, transparent);
+      --shadow-sm: 0 1px 2px rgba(24,33,72,.06), 0 1px 3px rgba(24,33,72,.05);
+      --shadow-md: 0 2px 6px rgba(24,33,72,.06), 0 8px 24px rgba(24,33,72,.07);
     }
     * { box-sizing: border-box; }
     /* The `hidden` attribute must always win — otherwise id/class display rules (e.g. #consent{display:flex},
@@ -19,13 +26,18 @@
     body {
       margin: 0; font: 13px/1.5 system-ui, sans-serif;
       display: flex; flex-direction: column; height: 100vh;
-      background: Canvas; color: CanvasText;
+      color: var(--text);
+      background:
+        radial-gradient(120% 80% at 100% 0%, color-mix(in srgb, var(--explain) 10%, transparent) 0%, transparent 55%),
+        radial-gradient(110% 70% at 0% 100%, color-mix(in srgb, var(--info) 9%, transparent) 0%, transparent 50%),
+        linear-gradient(168deg, #fdfdff 0%, #f5f7fe 45%, #eef1fc 100%);
+      background-attachment: fixed;
     }
     /* Thin, unobtrusive scrollbars for the scrolling sections. */
-    #advice, #items, #log, #chat { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, CanvasText 25%, transparent) transparent; }
+    #advice, #items, #log, #chat { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--ink) 25%, transparent) transparent; }
     #advice::-webkit-scrollbar, #items::-webkit-scrollbar, #log::-webkit-scrollbar, #chat::-webkit-scrollbar { width: 8px; }
     #advice::-webkit-scrollbar-thumb, #items::-webkit-scrollbar-thumb, #log::-webkit-scrollbar-thumb, #chat::-webkit-scrollbar-thumb {
-      background: color-mix(in srgb, CanvasText 20%, transparent); border-radius: 8px; }
+      background: color-mix(in srgb, var(--ink) 20%, transparent); border-radius: 8px; }
     .iconbtn, .toggle, #quickAsk button, .item .jira, #chatForm button, #modeSel { transition: background .12s, border-color .12s; }
     .advice-item, .chat-msg { animation: mla-in .16s ease-out; }
     @keyframes mla-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
@@ -34,25 +46,26 @@
     @media (prefers-reduced-motion: reduce) { .advice-item, .chat-msg, .flash { animation: none; } }
 
     /* ---- Header: title row, status row, toolbar row ---- */
-    header { padding: 8px 12px 6px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 7px; }
+    header { padding: 8px 12px 6px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 7px;
+      background: color-mix(in srgb, #ffffff 66%, transparent); backdrop-filter: saturate(1.1) blur(10px); position: relative; z-index: 5; }
     .h-title { display: flex; align-items: center; gap: 8px; }
     .h-title img { border-radius: 5px; flex: 0 0 auto; }
     .h-title h1 { font-size: 13px; margin: 0; font-weight: 600; flex: 1; }
     #modeSel {
       font: 12px system-ui; padding: 3px 6px; border-radius: 7px;
-      background: Field; color: FieldText; border: 1px solid var(--line); cursor: pointer;
+      background: var(--field); color: var(--text); border: 1px solid var(--line); cursor: pointer;
     }
 
     .statusrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .status {
       display: inline-flex; align-items: center; gap: 5px; font-size: 11px;
-      padding: 2px 9px; border-radius: 999px; background: var(--chip); color: CanvasText;
+      padding: 2px 9px; border-radius: 999px; background: var(--chip); color: var(--text);
     }
     .status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto;
-      background: color-mix(in srgb, CanvasText 35%, transparent); }
+      background: color-mix(in srgb, var(--ink) 35%, transparent); }
     .status.ok::before { background: var(--say); }
     .status.bad::before { background: var(--risk); }
-    .status.idle::before { background: color-mix(in srgb, CanvasText 30%, transparent); }
+    .status.idle::before { background: color-mix(in srgb, var(--ink) 30%, transparent); }
     #session { font-size: 10px; opacity: .45; margin-left: auto; max-width: 45%;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -106,13 +119,14 @@
     }
     .section-label::after { content: ''; flex: 1; height: 1px; background: var(--line); order: 3; }
     .sec-search { order: 2; flex: 0 0 auto; width: 120px; font: 11px system-ui; text-transform: none; letter-spacing: 0;
-      padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: Field; color: FieldText; }
+      padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--field); color: var(--text); }
 
     /* ---- Advice ---- */
     #advice { flex: 0 0 auto; max-height: 46vh; overflow-y: auto; padding: 0 12px 6px; }
     .advice-item {
-      display: flex; gap: 8px; padding: 8px 10px; margin: 6px 0; border-radius: 9px;
-      border-left: 3px solid var(--info); background: color-mix(in srgb, var(--info) 10%, transparent);
+      display: flex; gap: 8px; padding: 9px 11px; margin: 7px 0; border-radius: 12px;
+      border: 1px solid var(--line); border-left: 3px solid var(--info);
+      background: color-mix(in srgb, var(--info) 6%, var(--surface)); box-shadow: var(--shadow-sm);
     }
     .advice-item .marker { font-size: 11px; font-weight: 700; white-space: nowrap; opacity: .9; }
     .advice-item .body { flex: 1; }
@@ -122,17 +136,17 @@
     }
     .speak-btn:hover { opacity: 1; }
     .speak-btn:disabled { opacity: .3; cursor: default; }
-    .advice-item.SAY { border-left-color: var(--say); background: color-mix(in srgb, var(--say) 12%, transparent); }
+    .advice-item.SAY { border-left-color: var(--say); background: color-mix(in srgb, var(--say) 7%, var(--surface)); }
     .advice-item.SAY .marker { color: var(--say); }
-    .advice-item.INFO { border-left-color: var(--info); background: color-mix(in srgb, var(--info) 10%, transparent); }
+    .advice-item.INFO { border-left-color: var(--info); background: color-mix(in srgb, var(--info) 6%, var(--surface)); }
     .advice-item.INFO .marker { color: var(--info); }
-    .advice-item.SUMMARY { border-left-color: var(--summary); background: color-mix(in srgb, var(--summary) 12%, transparent); }
+    .advice-item.SUMMARY { border-left-color: var(--summary); background: color-mix(in srgb, var(--summary) 8%, var(--surface)); }
     .advice-item.SUMMARY .marker { color: var(--summary); }
-    .advice-item.EXPLAIN { border-left-color: var(--explain); background: color-mix(in srgb, var(--explain) 12%, transparent); }
+    .advice-item.EXPLAIN { border-left-color: var(--explain); background: color-mix(in srgb, var(--explain) 7%, var(--surface)); }
     .advice-item.EXPLAIN .marker { color: var(--explain); }
-    .advice-item.RISK { border-left-color: var(--risk); background: color-mix(in srgb, var(--risk) 12%, transparent); }
+    .advice-item.RISK { border-left-color: var(--risk); background: color-mix(in srgb, var(--risk) 8%, var(--surface)); }
     .advice-item.RISK .marker { color: var(--risk); }
-    .advice-item.ACTION { border-left-color: var(--action); background: color-mix(in srgb, var(--action) 12%, transparent); }
+    .advice-item.ACTION { border-left-color: var(--action); background: color-mix(in srgb, var(--action) 8%, var(--surface)); }
     .advice-item.ACTION .marker { color: var(--action); }
     .advice-item.SAY .body { font-weight: 600; }
     .advice-item .body a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
@@ -141,12 +155,12 @@
       color: var(--action); opacity: .9; }
     .advice-item .body code {
       font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
-      background: color-mix(in srgb, CanvasText 12%, transparent); padding: 1px 4px; border-radius: 4px;
+      background: color-mix(in srgb, var(--ink) 12%, transparent); padding: 1px 4px; border-radius: 4px;
     }
     .rich-img { display: block; max-width: 100%; margin-top: 6px; border-radius: 6px; border: 1px solid var(--line); }
     .rich-pre {
       margin: 6px 0 2px; padding: 8px 10px; border-radius: 6px; overflow-x: auto;
-      background: color-mix(in srgb, CanvasText 12%, transparent);
+      background: color-mix(in srgb, var(--ink) 12%, transparent);
       font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
     }
     .rich-pre code { background: none; padding: 0; }
@@ -161,7 +175,7 @@
     .chip-toggle:has(input:checked) { background: color-mix(in srgb, var(--action) 20%, transparent); border-color: color-mix(in srgb, var(--action) 55%, transparent); }
     #items { flex: 0 0 auto; max-height: 22vh; overflow-y: auto; padding: 0 12px 6px; }
     .item { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; }
-    .item + .item { border-top: 1px solid color-mix(in srgb, CanvasText 8%, transparent); }
+    .item + .item { border-top: 1px solid color-mix(in srgb, var(--ink) 8%, transparent); }
     .item .kind { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; white-space: nowrap; margin-top: 1px; }
     .item.action .kind { background: color-mix(in srgb, var(--action) 18%, transparent); color: var(--action); }
     .item.decision .kind { background: color-mix(in srgb, var(--summary) 18%, transparent); color: var(--summary); }
@@ -182,9 +196,9 @@
 
     /* ---- Chat ---- */
     #chat { flex: 0 0 auto; max-height: 26vh; overflow-y: auto; padding: 2px 12px 6px; }
-    .chat-msg { margin: 6px 0; padding: 7px 10px; border-radius: 10px; max-width: 88%; word-wrap: break-word; }
-    .chat-msg.user { margin-left: auto; background: color-mix(in srgb, var(--info) 20%, transparent); }
-    .chat-msg.agent { margin-right: auto; background: color-mix(in srgb, CanvasText 10%, transparent); }
+    .chat-msg { margin: 6px 0; padding: 8px 11px; border-radius: 14px; max-width: 88%; word-wrap: break-word; box-shadow: var(--shadow-sm); }
+    .chat-msg.user { margin-left: auto; background: color-mix(in srgb, var(--info) 14%, var(--surface)); border-bottom-right-radius: 5px; }
+    .chat-msg.agent { margin-right: auto; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 5px; }
     .chat-msg a { color: inherit; }
     #quickAsk { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 12px 0; }
     #quickAsk button { font: 11px system-ui; padding: 4px 10px; border-radius: 999px; cursor: pointer;
@@ -192,7 +206,7 @@
     #quickAsk button:hover { background: var(--hover); }
     #chatForm { display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--line); }
     #chatInput { flex: 1; padding: 8px 10px; font: inherit; border-radius: 8px;
-      border: 1px solid var(--line); background: Field; color: FieldText; }
+      border: 1px solid var(--line); background: var(--field); color: var(--text); }
     #chatForm button { padding: 8px 14px; font: inherit; border-radius: 8px; cursor: pointer;
       border: 1px solid var(--line); background: color-mix(in srgb, var(--info) 16%, transparent); color: inherit; }
     #chatForm button:hover { background: color-mix(in srgb, var(--info) 26%, transparent); }
