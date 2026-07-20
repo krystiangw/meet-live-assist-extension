@@ -41,6 +41,9 @@ let hasLines = false;
 let hasAdvice = false;
 let hasItems = false;
 let currentSession = null;
+let lastSnapAt = 0;        // when the last snapshot actually reached the assistant (ms)
+let lastSnapCount = null;  // running count this meeting (from server)
+let snapErrUntil = 0;      // keep a fresh capture error visible instead of ticking over it
 let lastAdviceSeq = 0;
 let lastItemsSeq = 0;
 let lastReqSeq = -1; // -1 = baseline unknown for this session (don't fire on first poll)
@@ -61,6 +64,18 @@ let brainTimer = null;
 let shareTimer = null;
 
 function setStatus(el, text, cls) { el.textContent = text; el.className = 'status ' + cls; }
+
+// Live "Ns ago" next to 📷 so you can see at a glance how stale the assistant's visual context is.
+function renderSnapAge() {
+  if (Date.now() < snapErrUntil) return; // don't tick over a fresh error
+  if (!lastSnapAt) return;               // nothing sent yet → leave the initial "shots 0"
+  const secs = Math.round((Date.now() - lastSnapAt) / 1000);
+  const age = secs <= 0 ? 'now' : secs < 90 ? `${secs}s ago` : `${Math.round(secs / 60)}m ago`;
+  setStatus(snapEl, `📷 ${age}`, 'ok');
+  snapEl.title = `Last snapshot sent to the assistant ${age}${lastSnapCount != null ? ` · ${lastSnapCount} this meeting` : ''}`;
+}
+function resetSnap() { lastSnapAt = 0; lastSnapCount = null; snapErrUntil = 0; setStatus(snapEl, 'shots 0', 'idle'); }
+setInterval(renderSnapAge, 1000);
 function hdrs(json) { const h = { 'X-MLA-Token': serverToken }; if (json) h['Content-Type'] = 'application/json'; return h; }
 
 // Optional permissions (debugger + all-sites host) are requested at runtime on a user gesture — kept out
@@ -698,7 +713,7 @@ function onMessage(msg) {
       if (msg.lang) callLang = msg.lang;
       break;
     case 'session': {
-      clearLog(); resetAdvice(); resetItems();
+      clearLog(); resetAdvice(); resetItems(); resetSnap();
       const isCopilot = msg.code === 'copilot';
       setStatus(capEl, isCopilot ? 'co-pilot' : 'capturing', 'ok');
       sessionEl.textContent = msg.session || '';
@@ -750,8 +765,8 @@ function onMessage(msg) {
       setStatus(srvEl, msg.ok ? 'server ✓' : (msg.status === 403 ? 'server ✗ (set token in options)' : 'server ✗ (start it)'), msg.ok ? 'ok' : 'bad');
       break;
     case 'snapshot':
-      if (msg.ok) setStatus(snapEl, `shots ${msg.count ?? '·'}`, 'ok');
-      else setStatus(snapEl, `shot ✗ ${msg.reason || ''}`.trim(), 'bad');
+      if (msg.ok) { lastSnapAt = Date.now(); if (msg.count != null) lastSnapCount = msg.count; renderSnapAge(); }
+      else { snapErrUntil = Date.now() + 4000; setStatus(snapEl, `shot ✗ ${msg.reason || ''}`.trim(), 'bad'); }
       break;
     case 'debug':
       dbgEl.hidden = false;
@@ -886,7 +901,7 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
   if (!currentSession || !confirm('Delete ALL data for this meeting (transcript, snapshots, chat)? This cannot be undone.')) return;
   try {
     const r = await fetch(`${serverUrl}/clear`, { method: 'POST', headers: hdrs(true), body: JSON.stringify({ session: currentSession }) });
-    if (r.ok) { clearLog(); resetAdvice(); resetItems(); chatEl.innerHTML = ''; lastChatSeq = 0; setStatus(capEl, 'cleared', 'idle'); }
+    if (r.ok) { clearLog(); resetAdvice(); resetItems(); resetSnap(); chatEl.innerHTML = ''; lastChatSeq = 0; setStatus(capEl, 'cleared', 'idle'); }
   } catch (_) {}
 });
 
@@ -909,7 +924,7 @@ modeSel.addEventListener('change', () => { chrome.storage.local.set({ mla_mode: 
 function setSession(session) {
   if (session && session !== currentSession) {
     currentSession = session; lastAdviceSeq = 0; lastItemsSeq = 0; lastReqSeq = -1; lastChatSeq = 0; lastEditSeq = -1; lastDomReqSeq = -1; lastDbgReqSeq = -1; lastCallChatSeq = -1; lastActSeq = -1;
-    chatEl.innerHTML = ''; resetItems(); resetTalk(); setDrive(false);
+    chatEl.innerHTML = ''; resetItems(); resetTalk(); resetSnap(); setDrive(false);
     setStatus(brainEl, '🧠 ?', 'idle');
     cueArmed = false; setTimeout(() => { cueArmed = true; }, 2500); // don't cue on initial backfill
     postMode(modeSel.value); // register the current mode for the new session
