@@ -75,10 +75,10 @@
 
     /* ---- Setup / consent ---- */
     #setup { padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
-    .setup-row { padding: 2px 0; }
-    .setup-row.ok .setup-mark { color: var(--say); }
-    .setup-row.bad .setup-mark { color: var(--risk); }
-    .setup-mark { font-weight: 700; display: inline-block; width: 14px; }
+    .setup-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .chk { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--chip); white-space: nowrap; cursor: default; }
+    .chk.ok { color: var(--say); }
+    .chk.bad { color: var(--risk); }
     .setup-note { margin-top: 6px; opacity: .65; }
     .setup-grant { margin-left: 8px; font: 11px system-ui; padding: 1px 8px; border-radius: 8px; cursor: pointer;
       border: 1px solid var(--line); background: transparent; color: inherit; }
@@ -102,7 +102,9 @@
       font-size: 10px; text-transform: uppercase; letter-spacing: .07em; font-weight: 700; opacity: .55;
       padding: 9px 12px 3px;
     }
-    .section-label::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+    .section-label::after { content: ''; flex: 1; height: 1px; background: var(--line); order: 3; }
+    .sec-search { order: 2; flex: 0 0 auto; width: 120px; font: 11px system-ui; text-transform: none; letter-spacing: 0;
+      padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: Field; color: FieldText; }
 
     /* ---- Advice ---- */
     #advice { flex: 0 0 auto; max-height: 46vh; overflow-y: auto; padding: 0 12px 6px; }
@@ -270,10 +272,14 @@
     <span id="ctxStatus" class="status idle" title="Pre-join context import (📥) status" hidden></span>
   </div>
 
-  <div class="section-label">Advice</div>
+  <div class="section-label">Advice
+    <input class="sec-search" id="adviceSearch" type="search" placeholder="filter…" title="Filter advice by keyword" />
+  </div>
   <div id="advice"><div class="empty small">Advice will appear here live…</div></div>
 
-  <div class="section-label">Decisions &amp; action items</div>
+  <div class="section-label">Decisions &amp; action items
+    <input class="sec-search" id="itemSearch" type="search" placeholder="filter…" title="Filter decisions &amp; action items by keyword" />
+  </div>
   <div id="itemCtl">
     <label class="chip-toggle" title="Let the assistant create tickets/docs for action items without asking each time — you authorize once (this IS the 'don't ask again').">
       <input type="checkbox" id="autoCreate" /> 🤖 Auto-create

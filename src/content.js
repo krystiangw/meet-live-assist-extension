@@ -166,6 +166,14 @@
     }
     if (attempt < 25) setTimeout(() => ensureCaptionsOn(attempt + 1), 2000);
   }
+  // Watchdog: Meet captions sometimes switch off mid-call — re-enable them if the region disappears
+  // (only click the CC button when it's actually OFF, so we never toggle captions off ourselves).
+  function keepCaptionsOn() {
+    if (!AUTO_CAPTIONS || !started || userPaused || sttPaused) return;
+    if (firstRegion()) return; // captions visible → nothing to do
+    const btn = findCaptionButton();
+    if (btn && btn.off) { try { btn.el.click(); } catch (_) {} }
+  }
 
   // ---- SESSION NAME (date_time_meeting) ------------------------------------
   function meetingCode() {
@@ -349,5 +357,6 @@
     setInterval(tick, 1500); // handle SPA navigation (lobby -> call -> leave)
     setInterval(checkSharing, 3000);
     setInterval(checkLang, 3000);
+    setInterval(keepCaptionsOn, 5000); // re-enable captions if they turn off mid-call
   }, 800);
 })();

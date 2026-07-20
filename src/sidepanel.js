@@ -243,6 +243,20 @@ function renderRich(parent, text) {
   }
 }
 
+// ---- list controls: keyword filter + per-item delete / suppress-similar ----
+let adviceFilter = '', itemFilter = '';
+async function suppressTopic(text, kind) {
+  if (!currentSession || !text) return;
+  try { await fetch(`${serverUrl}/suppress`, { method: 'POST', headers: hdrs(true), body: JSON.stringify({ session: currentSession, text, kind }) }); } catch (_) {}
+}
+function iconBtn(label, title, onClick) {
+  const b = document.createElement('button'); b.className = 'speak-btn'; b.textContent = label; b.title = title;
+  b.addEventListener('click', onClick); return b;
+}
+function applyFilter(container, sel, filter) {
+  for (const el of container.querySelectorAll(sel)) el.hidden = !!filter && !(el.dataset.text || '').includes(filter);
+}
+
 function appendAdvice({ marker, text, image }) {
   if (!hasAdvice) { adviceEl.innerHTML = ''; hasAdvice = true; }
   const m = (marker || 'INFO').toUpperCase();
@@ -269,6 +283,10 @@ function appendAdvice({ marker, text, image }) {
       .then(() => { cp.textContent = '✓'; setTimeout(() => { cp.textContent = '📋'; }, 900); }).catch(() => {}));
     div.append(cp);
   }
+  div.append(iconBtn('✕', 'Remove this advice', () => div.remove()));
+  if (text) div.append(iconBtn('🚫', 'Remove & stop suggesting similar', () => { div.remove(); suppressTopic(text, 'advice'); }));
+  div.dataset.text = (text || '').toLowerCase();
+  if (adviceFilter && !div.dataset.text.includes(adviceFilter)) div.hidden = true;
   adviceEl.appendChild(div);
   adviceEl.scrollTop = adviceEl.scrollHeight;
   if (m === 'RISK' && cueArmed) riskCue(text);
@@ -395,6 +413,10 @@ function appendItem({ kind, text, owner, blockedBy }) {
     j.addEventListener('click', () => sendChat(`Draft a Jira ticket (DRAFT only — do not create) for this action item: "${text}"${owner ? ` — owner ${owner}` : ''}. Use the team's Goal / Summary / Test plan sections.`));
     div.append(j);
   }
+  div.append(iconBtn('✕', 'Remove this item', () => div.remove()));
+  if (!decision) div.append(iconBtn('🚫', 'Remove & stop suggesting similar', () => { div.remove(); suppressTopic(text, 'action'); }));
+  div.dataset.text = (text || '').toLowerCase();
+  if (itemFilter && !div.dataset.text.includes(itemFilter)) div.hidden = true;
   itemsEl.appendChild(div);
   itemsEl.scrollTop = itemsEl.scrollHeight;
 }
@@ -720,27 +742,32 @@ document.getElementById('ctxBtn').addEventListener('click', async () => {
 // ---- setup / health checklist --------------------------------------------
 const setupEl = document.getElementById('setup');
 let autoSetupShown = false;
-function setupRow(ok, label, hint) {
-  const d = document.createElement('div'); d.className = 'setup-row ' + (ok ? 'ok' : 'bad');
-  const m = document.createElement('span'); m.className = 'setup-mark'; m.textContent = ok ? '✓' : '✗';
-  const t = document.createElement('span'); t.textContent = label + (ok ? '' : ` — ${hint}`);
-  d.append(m, t); return d;
-}
+// One compact row of status chips (icon + ✓/✗), full text in the tooltip — instead of six full lines.
 function renderSetup(h, allSites) {
   const t = (h && h.tools) || {};
+  const checks = [
+    ['🖥', 'Local server', !!h, 'start transcript-server.js (launchd)'],
+    ['🔑', 'Server token', !!serverToken, 'paste .mla-token into extension Options'],
+    ['🎬', 'ffmpeg', !!t.ffmpeg, 'brew install ffmpeg (needed for TTS + STT)'],
+    ['🎧', 'Local STT', !!(t.whisper && t.whisperModel), 'brew install whisper-cpp + ggml model'],
+    ['🔊', 'BlackHole', !!t.blackhole, 'optional: BlackHole 2ch + Aggregate device (speak into call)'],
+    ['🌐', 'All-sites', !!allSites, 'optional: co-pilot / snapshots / edits on any tab'],
+  ];
   setupEl.innerHTML = '';
-  setupEl.appendChild(setupRow(!!h, 'Local server running', 'start transcript-server.js (launchd)'));
-  setupEl.appendChild(setupRow(!!serverToken, 'Server token set', 'paste .mla-token into extension options'));
-  setupEl.appendChild(setupRow(!!t.ffmpeg, 'ffmpeg (TTS + STT)', 'brew install ffmpeg'));
-  setupEl.appendChild(setupRow(!!(t.whisper && t.whisperModel), 'Local STT (whisper + model)', 'brew install whisper-cpp + ggml model'));
-  setupEl.appendChild(setupRow(!!t.blackhole, 'BlackHole (speak into call — optional)', 'install BlackHole 2ch + Aggregate device'));
-  const permRow = setupRow(!!allSites, 'All-sites access (co-pilot / snapshots / edits on any tab)', 'optional');
+  const row = document.createElement('div'); row.className = 'setup-chips';
+  for (const [icon, name, ok, hint] of checks) {
+    const c = document.createElement('span'); c.className = 'chk ' + (ok ? 'ok' : 'bad');
+    c.textContent = `${icon} ${ok ? '✓' : '✗'}`;
+    c.title = ok ? name : `${name} — ${hint}`;
+    row.appendChild(c);
+  }
   if (!allSites) {
     const g = document.createElement('button'); g.className = 'setup-grant'; g.textContent = 'Grant';
+    g.title = 'Grant all-sites access (co-pilot / snapshots / edits)';
     g.addEventListener('click', async () => { if (await ensurePerms(ALL_URLS)) fetchHealth(); });
-    permRow.appendChild(g);
+    row.appendChild(g);
   }
-  setupEl.appendChild(permRow);
+  setupEl.appendChild(row);
   const note = document.createElement('div'); note.className = 'setup-note';
   note.textContent = 'Tip: set the meeting caption language to the spoken language (⋮ → Settings → Captions).';
   setupEl.appendChild(note);
@@ -755,6 +782,9 @@ async function fetchHealth() {
   renderSetup(h, allSites);
 }
 document.getElementById('setupBtn').addEventListener('click', () => { setupEl.hidden = !setupEl.hidden; if (!setupEl.hidden) fetchHealth(); });
+
+document.getElementById('adviceSearch').addEventListener('input', (e) => { adviceFilter = e.target.value.trim().toLowerCase(); applyFilter(adviceEl, '.advice-item', adviceFilter); });
+document.getElementById('itemSearch').addEventListener('input', (e) => { itemFilter = e.target.value.trim().toLowerCase(); applyFilter(itemsEl, '.item', itemFilter); });
 
 function downloadText(name, text) {
   try {
