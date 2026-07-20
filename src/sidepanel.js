@@ -283,9 +283,43 @@ function applyFilter(container, sel, filter) {
   for (const el of container.querySelectorAll(sel)) el.hidden = !!filter && !(el.dataset.text || '').includes(filter);
 }
 
+// A brain refining the same thought mid-call otherwise piles up near-duplicate cards (noise).
+// Detect the refined version, replace the earlier card, resurface it with an "updated" badge.
+// Crude singularize (credits→credit, limits→limit) so plural rewording still matches; skip -ss (class, access).
+function normTokens(s) {
+  return (s || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/)
+    .filter((w) => w.length > 2).map((w) => (w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w));
+}
+function similarity(a, b) {
+  const A = new Set(normTokens(a)); const B = new Set(normTokens(b));
+  if (A.size < 2 || B.size < 2) return 0;
+  let inter = 0; A.forEach((w) => { if (B.has(w)) inter++; });
+  const jaccard = inter / (A.size + B.size - inter);
+  const an = [...A].join(' '); const bn = [...B].join(' ');
+  const contained = an.includes(bn) || bn.includes(an) ? 0.15 : 0; // brain expanded/tightened same point
+  return Math.min(1, jaccard + contained);
+}
+function findSimilarCard(container, sel, text, min = 0.5) {
+  let best = null; let bestScore = 0;
+  for (const el of container.querySelectorAll(sel)) {
+    const s = similarity(text, el.dataset.text || '');
+    if (s > bestScore) { bestScore = s; best = el; }
+  }
+  return bestScore >= min ? best : null;
+}
+function updatedBadge(n) {
+  const u = document.createElement('span'); u.className = 'upd-badge';
+  u.textContent = n > 1 ? `✎ updated ×${n}` : '✎ updated';
+  u.title = `Refined during the call${n > 1 ? ` (${n}×)` : ''} — replaces an earlier, similar suggestion`;
+  return u;
+}
+
 function appendAdvice({ marker, text, image }) {
   if (!hasAdvice) { adviceEl.innerHTML = ''; hasAdvice = true; }
   const m = (marker || 'INFO').toUpperCase();
+  const dup = text ? findSimilarCard(adviceEl, '.advice-item', text) : null;
+  const upd = dup ? Number(dup.dataset.uc || 0) + 1 : 0;
+  if (dup) dup.remove();
   const div = document.createElement('div');
   div.className = 'advice-item ' + (MARKER_LABEL[m] ? m : 'INFO');
   const mk = document.createElement('span'); mk.className = 'marker'; mk.textContent = MARKER_LABEL[m] || '🔵 INFO';
@@ -296,6 +330,7 @@ function appendAdvice({ marker, text, image }) {
     const img = document.createElement('img'); img.src = image; img.className = 'rich-img'; bd.appendChild(img);
   }
   div.append(mk, bd);
+  if (upd) { div.dataset.uc = String(upd); div.append(updatedBadge(upd)); div.classList.add('flash'); }
   if (m === 'SAY' && text) {
     const sp = document.createElement('button');
     sp.className = 'speak-btn'; sp.textContent = '🔊'; sp.title = 'Speak this (TTS)';
@@ -419,6 +454,9 @@ function resetItems() { itemsEl.innerHTML = '<div class="empty small">Decisions 
 function appendItem({ kind, text, owner, blockedBy }) {
   if (!hasItems) { itemsEl.innerHTML = ''; hasItems = true; }
   const decision = kind === 'decision';
+  const dup = text ? findSimilarCard(itemsEl, '.item.' + (decision ? 'decision' : 'action'), text) : null;
+  const upd = dup ? Number(dup.dataset.uc || 0) + 1 : 0;
+  if (dup) dup.remove();
   const div = document.createElement('div');
   div.className = 'item ' + (decision ? 'decision' : 'action');
   const k = document.createElement('span'); k.className = 'kind'; k.textContent = decision ? 'DECISION' : 'ACTION';
@@ -433,6 +471,7 @@ function appendItem({ kind, text, owner, blockedBy }) {
     body.appendChild(meta);
   }
   div.append(k, body);
+  if (upd) { div.dataset.uc = String(upd); div.append(updatedBadge(upd)); div.classList.add('flash'); }
   if (!decision) {
     const j = document.createElement('button'); j.className = 'jira'; j.textContent = 'Draft Jira';
     j.title = 'Ask the assistant to draft a Jira ticket for this (draft only)';
