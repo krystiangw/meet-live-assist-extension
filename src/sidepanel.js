@@ -44,6 +44,7 @@ let currentSession = null;
 let lastSnapAt = 0;        // when the last snapshot actually reached the assistant (ms)
 let lastSnapCount = null;  // running count this meeting (from server)
 let snapErrUntil = 0;      // keep a fresh capture error visible instead of ticking over it
+let shareFlashUntil = 0;   // brief "📸 shot" pulse on the sharing pill when a frame is captured
 let lastAdviceSeq = 0;
 let lastItemsSeq = 0;
 let lastReqSeq = -1; // -1 = baseline unknown for this session (don't fire on first poll)
@@ -67,12 +68,20 @@ function setStatus(el, text, cls) { el.textContent = text; el.className = 'statu
 
 // Live "Ns ago" next to 📷 so you can see at a glance how stale the assistant's visual context is.
 function renderSnapAge() {
-  if (Date.now() < snapErrUntil) return; // don't tick over a fresh error
-  if (!lastSnapAt) return;               // nothing sent yet → leave the initial "shots 0"
-  const secs = Math.round((Date.now() - lastSnapAt) / 1000);
-  const age = secs <= 0 ? 'now' : secs < 90 ? `${secs}s ago` : `${Math.round(secs / 60)}m ago`;
-  setStatus(snapEl, `📷 ${age}`, 'ok');
-  snapEl.title = `Last snapshot sent to the assistant ${age}${lastSnapCount != null ? ` · ${lastSnapCount} this meeting` : ''}`;
+  const now = Date.now();
+  const secs = lastSnapAt ? Math.round((now - lastSnapAt) / 1000) : null;
+  const long = secs == null ? null : (secs <= 0 ? 'now' : secs < 90 ? `${secs}s ago` : `${Math.round(secs / 60)}m ago`);
+  const short = secs == null ? null : (secs <= 0 ? 'now' : secs < 90 ? `${secs}s` : `${Math.round(secs / 60)}m`);
+  // Snapshot status pill (top row): freshness of the assistant's visual context.
+  if (now >= snapErrUntil && long) {
+    setStatus(snapEl, `📷 ${long}`, 'ok');
+    snapEl.title = `Last snapshot sent to the assistant ${long}${lastSnapCount != null ? ` · ${lastSnapCount} this meeting` : ''}`;
+  }
+  // Sharing pill: flash when a frame is grabbed, otherwise show how long since the last one.
+  if (sharing && !shareEl.hidden) {
+    if (now < shareFlashUntil) setStatus(shareEl, '● 📸 shot', 'bad');
+    else setStatus(shareEl, short ? `● sharing · 📷 ${short}` : '● sharing', 'bad');
+  }
 }
 function resetSnap() { lastSnapAt = 0; lastSnapCount = null; snapErrUntil = 0; snapEl.onclick = null; snapEl.style.cursor = ''; setStatus(snapEl, 'shots 0', 'idle'); }
 setInterval(renderSnapAge, 1000);
@@ -769,7 +778,7 @@ function onMessage(msg) {
       setStatus(srvEl, msg.ok ? 'server ✓' : (msg.status === 403 ? 'server ✗ (set token in options)' : 'server ✗ (start it)'), msg.ok ? 'ok' : 'bad');
       break;
     case 'snapshot':
-      if (msg.ok) { snapErrUntil = 0; snapEl.onclick = null; snapEl.style.cursor = ''; lastSnapAt = Date.now(); if (msg.count != null) lastSnapCount = msg.count; renderSnapAge(); }
+      if (msg.ok) { snapErrUntil = 0; snapEl.onclick = null; snapEl.style.cursor = ''; lastSnapAt = Date.now(); shareFlashUntil = lastSnapAt + 1200; if (msg.count != null) lastSnapCount = msg.count; renderSnapAge(); }
       else if (msg.perm) {
         // Capturing an arbitrary shared tab needs All-sites — offer a one-click grant (a panel click is a gesture).
         snapErrUntil = Date.now() + 60000;
