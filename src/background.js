@@ -17,9 +17,43 @@ const panelPorts = new Set();
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
 // Heartbeat: alarms fire even after the SW was unloaded, waking it back up.
-chrome.runtime.onInstalled.addListener(() => chrome.alarms.create('heartbeat', { periodInMinutes: 0.5 }));
-chrome.runtime.onStartup.addListener(() => chrome.alarms.create('heartbeat', { periodInMinutes: 0.5 }));
-chrome.alarms.onAlarm.addListener(() => { /* wake-only keepalive; snapshots are driven by the panel */ });
+chrome.runtime.onInstalled.addListener(() => { chrome.alarms.create('heartbeat', { periodInMinutes: 0.5 }); refreshBadge(); });
+chrome.runtime.onStartup.addListener(() => { chrome.alarms.create('heartbeat', { periodInMinutes: 0.5 }); refreshBadge(); });
+chrome.alarms.onAlarm.addListener(() => { refreshBadge(); }); // wake-only keepalive + keep the toolbar badge honest
+
+// The toolbar icon reflects session state even when the panel is hidden, so you can close the
+// panel and still see the session is live: no badge = idle, green = capturing, blue = an assistant
+// (brain) is attached. Capture itself runs in the content script + SW, independent of the panel.
+const BADGE = {
+  idle:  { text: '',  color: null,      title: 'Meet Live Assist — no active session (click to open)' },
+  live:  { text: '●', color: '#17935a', title: 'Meet Live Assist — capturing this meeting (click to open)' },
+  brain: { text: '●', color: '#3b6ef0', title: 'Meet Live Assist — capturing · assistant attached (click to open)' },
+};
+async function setActionState(state) {
+  const c = BADGE[state] || BADGE.idle;
+  try {
+    await chrome.action.setBadgeText({ text: c.text });
+    if (c.color) {
+      await chrome.action.setBadgeBackgroundColor({ color: c.color });
+      if (chrome.action.setBadgeTextColor) await chrome.action.setBadgeTextColor({ color: c.color }); // glyph = bg → solid dot
+    }
+    await chrome.action.setTitle({ title: c.title });
+  } catch (_) {}
+}
+// Active = a session is running (Meet/Zoom join or co-pilot), regardless of the panel being open.
+// Upgrade live→brain when the server says an assistant pinged within 45s.
+async function refreshBadge() {
+  const { mla_active, mla_session } = await chrome.storage.session.get(['mla_active', 'mla_session']);
+  if (!mla_active) { setActionState('idle'); return; }
+  let brain = false;
+  if (mla_session) {
+    try {
+      const r = await fetch(`${await getServerUrl()}/brain-ping?session=${encodeURIComponent(mla_session)}`, { headers: await authHeaders() });
+      if (r.ok) { const j = await r.json(); brain = j.ageMs != null && j.ageMs < 45000; }
+    } catch (_) { /* server down — leave it as live */ }
+  }
+  setActionState(brain ? 'brain' : 'live');
+}
 
 // A keyboard command counts as invoking the extension, so it grants activeTab on the Meet tab —
 // which tabCapture requires (a side-panel click does not). This is the reliable way to START STT.
@@ -226,6 +260,8 @@ async function startCoPilot() {
   await saveState(session, []);
   await (capQueue = capQueue.then(() => chrome.storage.session.set({ mla_commit: {}, mla_recent: [] })).catch(() => {}));
   await postToServer(session, ''); // create the file + header
+  await chrome.storage.session.set({ mla_active: true });
+  setActionState('live');
   broadcast({ type: 'session', session, code: 'copilot' });
   // Listen to the microphone (the user), transcribed locally — no Meet tab involved.
   await ensureOffscreen();
@@ -234,7 +270,8 @@ async function startCoPilot() {
 }
 async function stopCoPilot() {
   stopStt();
-  await chrome.storage.session.set({ mla_session: null });
+  await chrome.storage.session.set({ mla_session: null, mla_active: false });
+  setActionState('idle');
   broadcast({ type: 'session-end' });
 }
 
@@ -486,6 +523,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       // Ordered behind any in-flight persist so it can't be clobbered by a late cap-final from the old call.
       await (capQueue = capQueue.then(() => chrome.storage.session.set({ mla_commit: {}, mla_recent: [] })).catch(() => {}));
       await postToServer(msg.session, ''); // creates the file + header on the server
+      await chrome.storage.session.set({ mla_active: true });
+      setActionState('live');
       broadcast({ type: 'session', session: msg.session, code: msg.code });
     } else if (msg.type === 'cap') {
       broadcast({ type: 'cap', id: msg.id, ts: msg.ts, speaker: msg.speaker, text: msg.text }); // live, no server
@@ -495,7 +534,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       broadcast({ type: 'cap-final', ts: msg.ts, speaker: msg.speaker, text: msg.text, id: msg.id });
       capQueue = capQueue.then(() => persistCapFinal(msg)).catch(() => {});
     } else if (msg.type === 'session-end') {
-      await chrome.storage.session.set({ mla_sharing: false });
+      await chrome.storage.session.set({ mla_sharing: false, mla_active: false });
+      setActionState('idle');
       broadcast({ type: 'session-end' });
       broadcast({ type: 'sharing', on: false });
     } else if (msg.type === 'capture-health') {
