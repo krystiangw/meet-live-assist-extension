@@ -452,12 +452,32 @@ async function pollBrain() {
   if (!currentSession) return;
   try {
     const r = await fetch(`${serverUrl}/brain-ping?session=${encodeURIComponent(currentSession)}`, { headers: hdrs() });
-    if (!r.ok) return;
-    const { ageMs } = await r.json();
+    if (!r.ok) { setBrainWork(''); return; } // can't confirm activity → don't leave a stale bubble pinned
+    const { ageMs, status, statusAgeMs } = await r.json();
     const live = ageMs != null && ageMs < 45000; // heartbeat within 45s = attached
     setStatus(brainEl, live ? '🧠 assistant on' : '🧠 no assistant', live ? 'ok' : 'bad');
     setBrainEmpty(live);
-  } catch (_) { /* server down — srv pill already reflects it */ }
+    // Show a live "working…" bubble while the agent is mid-action; stale (>30s) = drop it (crash guard).
+    setBrainWork(live && status && statusAgeMs != null && statusAgeMs < 30000 ? status : '');
+  } catch (_) { setBrainWork(''); /* server down — srv pill already reflects it */ }
+}
+
+// A single, reused typing/working indicator pinned to the bottom of the Chat section.
+let brainWorkEl = null;
+function setBrainWork(text) {
+  if (!text) { if (brainWorkEl) { brainWorkEl.remove(); brainWorkEl = null; } return; }
+  if (!brainWorkEl) {
+    brainWorkEl = document.createElement('div');
+    brainWorkEl.className = 'chat-msg agent working';
+    const dots = document.createElement('span'); dots.className = 'work-dots';
+    dots.append(document.createElement('i'), document.createElement('i'), document.createElement('i'));
+    const label = document.createElement('span'); label.className = 'work-label';
+    brainWorkEl.append(dots, label);
+  }
+  brainWorkEl.querySelector('.work-label').textContent = text;
+  const atBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 40;
+  chatEl.appendChild(brainWorkEl); // keep pinned below the latest message
+  if (atBottom) chatEl.scrollTop = chatEl.scrollHeight; // don't yank the view if user scrolled up to read
 }
 
 async function pollAdvice() {
@@ -613,6 +633,7 @@ function appendChat({ role, text, image }) {
     const img = document.createElement('img'); img.src = image; img.className = 'rich-img'; div.appendChild(img);
   }
   chatEl.appendChild(div);
+  if (brainWorkEl) chatEl.appendChild(brainWorkEl); // keep the working indicator last
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
@@ -921,7 +942,7 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
   if (!currentSession || !confirm('Delete ALL data for this meeting (transcript, snapshots, chat)? This cannot be undone.')) return;
   try {
     const r = await fetch(`${serverUrl}/clear`, { method: 'POST', headers: hdrs(true), body: JSON.stringify({ session: currentSession }) });
-    if (r.ok) { clearLog(); resetAdvice(); resetItems(); resetSnap(); chatEl.innerHTML = ''; lastChatSeq = 0; setStatus(capEl, 'cleared', 'idle'); }
+    if (r.ok) { clearLog(); resetAdvice(); resetItems(); resetSnap(); chatEl.innerHTML = ''; brainWorkEl = null; lastChatSeq = 0; setStatus(capEl, 'cleared', 'idle'); }
   } catch (_) {}
 });
 
@@ -944,7 +965,7 @@ modeSel.addEventListener('change', () => { chrome.storage.local.set({ mla_mode: 
 function setSession(session) {
   if (session && session !== currentSession) {
     currentSession = session; lastAdviceSeq = 0; lastItemsSeq = 0; lastReqSeq = -1; lastChatSeq = 0; lastEditSeq = -1; lastDomReqSeq = -1; lastDbgReqSeq = -1; lastCallChatSeq = -1; lastActSeq = -1;
-    chatEl.innerHTML = ''; resetItems(); resetTalk(); resetSnap(); setDrive(false);
+    chatEl.innerHTML = ''; brainWorkEl = null; resetItems(); resetTalk(); resetSnap(); setDrive(false);
     setStatus(brainEl, '🧠 ?', 'idle');
     cueArmed = false; setTimeout(() => { cueArmed = true; }, 2500); // don't cue on initial backfill
     postMode(modeSel.value); // register the current mode for the new session

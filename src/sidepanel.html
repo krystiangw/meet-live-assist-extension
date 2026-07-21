@@ -197,6 +197,14 @@
     .chat-msg.user { margin-left: auto; background: color-mix(in srgb, var(--info) 14%, var(--surface)); border-bottom-right-radius: 5px; }
     .chat-msg.agent { margin-right: auto; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 5px; }
     .chat-msg a { color: inherit; }
+    /* Live "agent is working" indicator: animated dots + current activity ("creating Jira ticket…"). */
+    .chat-msg.working { display: flex; align-items: center; gap: 8px; font-style: italic; color: color-mix(in srgb, var(--text) 62%, transparent); background: color-mix(in srgb, var(--explain) 8%, var(--surface)); border: 1px dashed color-mix(in srgb, var(--explain) 40%, var(--line)); }
+    .work-dots { display: inline-flex; gap: 3px; flex: none; }
+    .work-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--explain); opacity: .35; animation: mla-bounce 1.2s infinite ease-in-out; }
+    .work-dots i:nth-child(2) { animation-delay: .18s; }
+    .work-dots i:nth-child(3) { animation-delay: .36s; }
+    @keyframes mla-bounce { 0%, 60%, 100% { opacity: .35; transform: none; } 30% { opacity: 1; transform: translateY(-3px); } }
+    @media (prefers-reduced-motion: reduce) { .work-dots i { animation: none; } }
     #quickAsk { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 12px 0; }
     #quickAsk button { font: 11px system-ui; padding: 4px 10px; border-radius: 999px; cursor: pointer;
       border: 1px solid var(--line); background: transparent; color: inherit; }
