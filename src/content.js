@@ -326,12 +326,38 @@
     const setter = Object.getOwnPropertyDescriptor(proto, 'value');
     if (setter && setter.set) setter.set.call(el, value); else el.value = value;
   }
-  const CHAT_INPUT_SEL = 'textarea[aria-label*="message" i], textarea[aria-label*="wiadomo" i], textarea[placeholder*="message" i]';
+  const CHAT_INPUT_SEL = 'textarea[aria-label*="message" i], textarea[aria-label*="wiadomo" i], '
+    + 'div[contenteditable="true"][aria-label*="message" i], div[contenteditable="true"][aria-label*="wiadomo" i], '
+    + 'textarea[placeholder*="message" i], div[contenteditable="true"][role="textbox"]';
   function findChatInput() { try { return document.querySelector(CHAT_INPUT_SEL); } catch (_) { return null; } }
   function openChatPanel() {
     for (const b of document.querySelectorAll('button,[role="button"]')) {
       const l = (b.getAttribute('aria-label') || '').toLowerCase();
       if (/chat with everyone|open chat|otwórz czat|czat z/i.test(l)) { try { b.click(); } catch (_) {} return; }
+    }
+  }
+  // Meet's chat composer is framework-controlled: a plain `value =` is ignored (Send stays disabled) and a
+  // lone synthetic Enter won't fire. execCommand('insertText') drives the *real* input pipeline, so the
+  // framework registers the text (works for both <textarea> and contenteditable). Fall back to value+InputEvent.
+  function typeInto(el, text) {
+    el.focus();
+    let ok = false;
+    try { ok = document.execCommand('insertText', false, text); } catch (_) {}
+    if (!ok) {
+      if (el.isContentEditable) el.textContent = text; else setNativeValue(el, text);
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
+    }
+  }
+  function findSendButton() {
+    return Array.from(document.querySelectorAll('button,[role="button"]')).find((b) => {
+      const l = (b.getAttribute('aria-label') || '').toLowerCase();
+      const disabled = b.disabled || b.getAttribute('aria-disabled') === 'true';
+      return !disabled && /send( a)? message|wyślij wiadomo|wyslij wiadomo/.test(l);
+    });
+  }
+  function pressEnter(el) {
+    for (const type of ['keydown', 'keypress', 'keyup']) {
+      el.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
     }
   }
   function postToCallChat(text) {
@@ -340,15 +366,14 @@
     let tries = 0;
     const timer = setInterval(() => {
       const ta = findChatInput();
-      if (!ta) { if (++tries > 12) clearInterval(timer); return; } // ~2.4s to open the panel
+      if (!ta) { if (++tries > 15) clearInterval(timer); return; } // ~3s to open the panel
       clearInterval(timer);
-      ta.focus(); setNativeValue(ta, text); ta.dispatchEvent(new Event('input', { bubbles: true }));
+      typeInto(ta, text);
       setTimeout(() => {
-        const send = Array.from(document.querySelectorAll('button,[role="button"]'))
-          .find((b) => /send a message|wyślij wiadomo/i.test((b.getAttribute('aria-label') || '')) && !b.disabled);
+        const send = findSendButton();
         if (send) { try { send.click(); return; } catch (_) {} }
-        ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
-      }, 120);
+        pressEnter(ta); // Meet sends on Enter (Shift+Enter = newline)
+      }, 150);
     }, 200);
   }
 
