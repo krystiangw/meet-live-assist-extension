@@ -207,8 +207,22 @@ async function captureSnapshot(auto = false) {
   // Meet tab (which renders the shared screen). Fall back to any active Meet tab.
   let tab = null;
   try { const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); tab = t || null; } catch (_) {}
-  if (!tab || !/^https?:/.test(tab.url || '')) tab = await findActiveMeetTab();
-  if (!tab) { if (!auto) broadcast({ type: 'snapshot', ok: false, reason: 'no capturable tab' }); return; }
+  if (auto) {
+    // Auto-capture stays ON THE MEETING — never snapshot a private tab the user flips to mid-call.
+    // Allowed: the Meet/Zoom tab (renders a remote share) and the "presented" tab (first non-meeting tab
+    // seen during a share, i.e. the one being self-shared). Any other tab → skip. Manual 📷 / agent
+    // requests below still capture whatever's visible.
+    if (!tab || !/^https?:/.test(tab.url || '')) return;
+    const isMeeting = /^https:\/\/meet\.google\.com\//.test(tab.url) || /^https:\/\/[^/]*\.zoom\.us\//.test(tab.url);
+    if (!isMeeting) {
+      const { mla_shareTabId } = await chrome.storage.session.get('mla_shareTabId');
+      if (mla_shareTabId == null) await chrome.storage.session.set({ mla_shareTabId: tab.id });
+      else if (tab.id !== mla_shareTabId) return; // unrelated tab the user flipped to → don't capture it
+    }
+  } else {
+    if (!tab || !/^https?:/.test(tab.url || '')) tab = await findActiveMeetTab();
+    if (!tab) { broadcast({ type: 'snapshot', ok: false, reason: 'no capturable tab' }); return; }
+  }
   let dataUrl;
   try {
     dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 60 });
@@ -577,14 +591,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       await postCallChatResult(msg.seq, !!msg.ok, msg.reason);
       broadcast({ type: 'callchat', ok: !!msg.ok, reason: msg.reason || '' });
     } else if (msg.type === 'session-end') {
-      await chrome.storage.session.set({ mla_sharing: false, mla_active: false });
+      await chrome.storage.session.set({ mla_sharing: false, mla_active: false, mla_shareTabId: null });
       setActionState('idle');
       broadcast({ type: 'session-end' });
       broadcast({ type: 'sharing', on: false });
     } else if (msg.type === 'capture-health') {
       broadcast({ type: 'capture-health', ok: !!msg.ok, reason: msg.reason });
     } else if (msg.type === 'sharing') {
-      await chrome.storage.session.set({ mla_sharing: !!msg.on });
+      // Reset the learned "presented" tab on every share transition so it re-learns per share.
+      await chrome.storage.session.set({ mla_sharing: !!msg.on, mla_shareTabId: null });
       broadcast({ type: 'sharing', on: !!msg.on });
     } else if (msg.type === 'lang') {
       await chrome.storage.session.set({ mla_lang: msg.lang });
