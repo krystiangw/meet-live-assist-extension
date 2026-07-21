@@ -195,7 +195,12 @@ async function captureSnapshot(auto = false) {
   let dataUrl;
   try {
     dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 60 });
-  } catch (e) { if (!auto) broadcast({ type: 'snapshot', ok: false, reason: String(e && e.message || e) }); return; }
+  } catch (e) {
+    const m = String((e && e.message) || e);
+    const perm = /permission|<all_urls>|activeTab/i.test(m); // shared tab not covered by host perms
+    if (!auto) broadcast({ type: 'snapshot', ok: false, perm, reason: perm ? 'needs screen access for this tab' : m });
+    return;
+  }
 
   const hash = await frameHash(dataUrl);
   // Auto (presentation) sampling: forward only when the screen actually changed, so a static slide

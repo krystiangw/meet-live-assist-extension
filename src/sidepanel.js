@@ -74,7 +74,7 @@ function renderSnapAge() {
   setStatus(snapEl, `📷 ${age}`, 'ok');
   snapEl.title = `Last snapshot sent to the assistant ${age}${lastSnapCount != null ? ` · ${lastSnapCount} this meeting` : ''}`;
 }
-function resetSnap() { lastSnapAt = 0; lastSnapCount = null; snapErrUntil = 0; setStatus(snapEl, 'shots 0', 'idle'); }
+function resetSnap() { lastSnapAt = 0; lastSnapCount = null; snapErrUntil = 0; snapEl.onclick = null; snapEl.style.cursor = ''; setStatus(snapEl, 'shots 0', 'idle'); }
 setInterval(renderSnapAge, 1000);
 function hdrs(json) { const h = { 'X-MLA-Token': serverToken }; if (json) h['Content-Type'] = 'application/json'; return h; }
 
@@ -765,8 +765,15 @@ function onMessage(msg) {
       setStatus(srvEl, msg.ok ? 'server ✓' : (msg.status === 403 ? 'server ✗ (set token in options)' : 'server ✗ (start it)'), msg.ok ? 'ok' : 'bad');
       break;
     case 'snapshot':
-      if (msg.ok) { lastSnapAt = Date.now(); if (msg.count != null) lastSnapCount = msg.count; renderSnapAge(); }
-      else { snapErrUntil = Date.now() + 4000; setStatus(snapEl, `shot ✗ ${msg.reason || ''}`.trim(), 'bad'); }
+      if (msg.ok) { snapErrUntil = 0; snapEl.onclick = null; snapEl.style.cursor = ''; lastSnapAt = Date.now(); if (msg.count != null) lastSnapCount = msg.count; renderSnapAge(); }
+      else if (msg.perm) {
+        // Capturing an arbitrary shared tab needs All-sites — offer a one-click grant (a panel click is a gesture).
+        snapErrUntil = Date.now() + 60000;
+        setStatus(snapEl, '📷 grant screen access', 'bad');
+        snapEl.title = 'Snapshots need All-sites access for the shared tab — click to grant';
+        snapEl.style.cursor = 'pointer';
+        snapEl.onclick = async () => { if (await ensurePerms(ALL_URLS)) { snapEl.onclick = null; snapEl.style.cursor = ''; snapErrUntil = 0; requestCapture(false); } };
+      } else { snapErrUntil = Date.now() + 4000; setStatus(snapEl, `shot ✗ ${msg.reason || ''}`.trim(), 'bad'); }
       break;
     case 'debug':
       dbgEl.hidden = false;
