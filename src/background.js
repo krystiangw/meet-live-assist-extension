@@ -87,12 +87,21 @@ async function saveState(session, buffer) {
 // concurrently and Meet fires many cap-finals in bursts, so serialize persists to avoid lost updates.
 let capQueue = Promise.resolve();
 function commonPrefixLen(a, b) { const n = Math.min(a.length, b.length); let i = 0; while (i < n && a[i] === b[i]) i++; return i; }
+function textKey(s) { return (s || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+function tokenSim(a, b) {
+  const A = new Set(textKey(a).split(' ').filter((w) => w.length > 2));
+  const B = new Set(textKey(b).split(' ').filter((w) => w.length > 2));
+  if (!A.size || !B.size) return 0;
+  let i = 0; A.forEach((w) => { if (B.has(w)) i++; });
+  return i / (A.size + B.size - i);
+}
 async function persistCapFinal(msg) {
   const { session, buffer } = await loadState();
   const sess = msg.session || session;
-  const { mla_commit, mla_recent } = await chrome.storage.session.get(['mla_commit', 'mla_recent']);
+  const { mla_commit, mla_recent, mla_committedLines } = await chrome.storage.session.get(['mla_commit', 'mla_recent', 'mla_committedLines']);
   const commit = (mla_commit && typeof mla_commit === 'object') ? mla_commit : {};
   const recent = Array.isArray(mla_recent) ? mla_recent : [];
+  const committedLines = Array.isArray(mla_committedLines) ? mla_committedLines : [];
   const full = (msg.text || '').trim();
   const prev = commit[msg.id] || '';
   // Emit only what's new vs this block's last commit, diffing on the longest common prefix so an ASR
@@ -104,12 +113,20 @@ async function persistCapFinal(msg) {
   // Cross-block replay guard: drop an exact repeat, or a long substring of a very recent delta (a short
   // utterance like "yes"/"right" is kept even if it appears inside a recent line).
   if (delta && recent.some((r) => r.speaker === spk && (r.text === delta || (delta.length >= 15 && r.text.includes(delta))))) delta = '';
+  // ASR revised an already-committed block's EARLY words → LCP=0 so the whole line re-posts as "new".
+  // If the delta is basically the full line and it's mostly the same content we already committed, drop it.
+  if (delta && prev && delta.length >= full.length * 0.6 && tokenSim(prev, full) > 0.6) delta = '';
+  // Whole-session replay guard: a DOM re-scrape re-finalizes OLD blocks (new id, old text) long after they
+  // left the small `recent` window. Drop an exact re-commit of a line already written this session.
+  const fullKey = textKey(full);
+  if (delta && full.length >= 15 && committedLines.includes(fullKey)) delta = '';
   commit[msg.id] = full;
   const ids = Object.keys(commit);
   if (ids.length > 60) for (const k of ids.slice(0, ids.length - 60)) delete commit[k];
   if (delta) {
     recent.push({ speaker: spk, text: delta });
     if (recent.length > 12) recent.shift();
+    if (full.length >= 15) { committedLines.push(fullKey); if (committedLines.length > 400) committedLines.shift(); }
     buffer.push({ ts: msg.ts, speaker: msg.speaker, text: delta });
     await saveState(sess, buffer);
     const who = msg.speaker ? `${msg.speaker}: ` : '';
@@ -117,7 +134,7 @@ async function persistCapFinal(msg) {
   } else {
     await saveState(sess, buffer);
   }
-  await chrome.storage.session.set({ mla_commit: commit, mla_recent: recent });
+  await chrome.storage.session.set({ mla_commit: commit, mla_recent: recent, mla_committedLines: committedLines });
 }
 
 function broadcast(msg) {
@@ -263,7 +280,7 @@ function buildCopilotSession() {
 async function startCoPilot() {
   const session = buildCopilotSession();
   await saveState(session, []);
-  await (capQueue = capQueue.then(() => chrome.storage.session.set({ mla_commit: {}, mla_recent: [] })).catch(() => {}));
+  await (capQueue = capQueue.then(() => chrome.storage.session.set({ mla_commit: {}, mla_recent: [], mla_committedLines: [] })).catch(() => {}));
   await postToServer(session, ''); // create the file + header
   await chrome.storage.session.set({ mla_active: true });
   setActionState('live');
@@ -526,7 +543,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (mla_stt_on) await stopStt();
       await saveState(msg.session, []);
       // Ordered behind any in-flight persist so it can't be clobbered by a late cap-final from the old call.
-      await (capQueue = capQueue.then(() => chrome.storage.session.set({ mla_commit: {}, mla_recent: [] })).catch(() => {}));
+      await (capQueue = capQueue.then(() => chrome.storage.session.set({ mla_commit: {}, mla_recent: [], mla_committedLines: [] })).catch(() => {}));
       await postToServer(msg.session, ''); // creates the file + header on the server
       await chrome.storage.session.set({ mla_active: true });
       setActionState('live');

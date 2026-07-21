@@ -21,8 +21,10 @@
     chatText: ['[class*="chat-info" i]', '[class*="message-text" i]', '[class*="text" i]'],
   };
 
-  const FLUSH_STABLE_MS = 600;
-  const MAX_UTTER_MS = 3500;
+  const FLUSH_SENT_MS = 900;   // sentence-complete line → commit after this much quiet
+  const FLUSH_MID_MS = 2500;   // mid-sentence → wait longer for ASR to settle
+  const MAX_UTTER_MS = 8000;   // force-commit a long monologue at least this often
+  const SENT_END = /[.!?…]["')\]]?\s*$/;
   const POLL_MS = 200;
   const CAPTURE_WARN_MS = 12000;
   const ZOOM_WC_RE = /\/wc\//;
@@ -137,7 +139,9 @@
         for (let i = trackers.length - 1; i >= 0; i--) {
           const tr = trackers[i];
           if (!document.contains(tr.el)) { finalize(tr); trackers.splice(i, 1); continue; }
-          if (tr.text && !tr.finalized && (now() - tr.lastChange >= FLUSH_STABLE_MS || now() - tr.lastFinal >= MAX_UTTER_MS)) finalize(tr);
+          const quiet = now() - tr.lastChange;
+          const dueStable = SENT_END.test(tr.text) ? quiet >= FLUSH_SENT_MS : quiet >= FLUSH_MID_MS;
+          if (tr.text && !tr.finalized && (dueStable || now() - tr.lastFinal >= MAX_UTTER_MS)) finalize(tr);
         }
       } else if (started && regionSeenAt && now() - regionSeenAt > CAPTURE_WARN_MS && !captureWarned) {
         captureWarned = true; send({ type: 'capture-health', ok: false, reason: 'no caption region' }); updateBadge();

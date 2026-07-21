@@ -22,8 +22,13 @@
   };
 
   // ---- TUNABLES ------------------------------------------------------------
-  const FLUSH_STABLE_MS = 600; // write a line once its text stops changing this long (= finalized)
-  const MAX_UTTER_MS = 3500;   // force-commit a long, still-growing utterance this often (kills monologue latency)
+  // Commit a line when it looks utterance-complete, NOT every 600ms — cuts revision-dups, mid-word splits,
+  // and (with the SILENT-on-filler rule) the agent's wake/turn count. Sentence-aware: end-punctuation lines
+  // commit fast; mid-sentence lines wait longer for ASR to settle/continue.
+  const FLUSH_SENT_MS = 900;   // text ends in . ? ! … → commit after this much quiet
+  const FLUSH_MID_MS = 2500;   // no sentence end yet → wait longer (let ASR finish the thought)
+  const MAX_UTTER_MS = 8000;   // force-commit a long, still-growing monologue at least this often
+  const SENT_END = /[.!?…]["')\]]?\s*$/;
   const POLL_MS = 200;          // caption scan interval
   const CAPTURE_WARN_MS = 12000; // in-call but no caption region this long → warn (CC off / Google reshipped the DOM)
   const AUTO_CAPTIONS = true;   // auto-enable Meet captions on every call
@@ -166,7 +171,9 @@
         for (let i = trackers.length - 1; i >= 0; i--) {
           const tr = trackers[i];
           if (!document.contains(tr.el)) { finalize(tr); trackers.splice(i, 1); continue; }
-          if (tr.text && !tr.finalized && (now() - tr.lastChange >= FLUSH_STABLE_MS || now() - tr.lastFinal >= MAX_UTTER_MS)) finalize(tr);
+          const quiet = now() - tr.lastChange;
+          const dueStable = SENT_END.test(tr.text) ? quiet >= FLUSH_SENT_MS : quiet >= FLUSH_MID_MS;
+          if (tr.text && !tr.finalized && (dueStable || now() - tr.lastFinal >= MAX_UTTER_MS)) finalize(tr);
         }
       } else if (started && regionSeenAt && now() - regionSeenAt > CAPTURE_WARN_MS && !captureWarned) {
         captureWarned = true; send({ type: 'capture-health', ok: false, reason: 'no caption region' }); updateBadge();
