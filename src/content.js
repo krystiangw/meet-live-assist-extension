@@ -14,6 +14,11 @@
     block: ['.nMcdL', '.TBMuR', '.bh44bd'],
     speaker: ['.NWpY1d', '.KcIKyf', '.zs7s8d', '.jxFHg'],
     text: ['.ygicle.VbkSUe', '.bh44bd', '.iTTPOb', '.VbkSUe'],
+    // Chat panel messages (opportunistic — only in the DOM while the chat panel is open).
+    // data-message-id / data-sender-name are the stable hooks; classes are fallbacks.
+    chatMsg: ['div[data-message-id]', 'div[jsname="Ne3sFf"]'],
+    chatSender: ['[data-sender-name]', '.poVWob', '.YTbUzc'],
+    chatText: ['[data-message-text]', '.beTDc', '.oIy2qc', '.bzBcof'],
   };
 
   // ---- TUNABLES ------------------------------------------------------------
@@ -56,6 +61,9 @@
   let captureWarned = false;
   let trackerId = 0;
   const trackers = []; // [{ el, id, ts, text, lastChange, speaker, finalized }]
+  const seenChatIds = new Set();  // meeting-chat messages already forwarded (by data-message-id)
+  const seenChatEls = new WeakSet(); // …fallback for messages with no stable id
+  let chatTick = 0;
 
   const now = () => Date.now();
   const pad = (n) => String(n).padStart(2, '0');
@@ -113,9 +121,35 @@
     updateBadge();
   }
 
+  // ---- MEETING CHAT (opportunistic — only when the chat panel is open) -----
+  // People paste links / names / ticket IDs / decisions in chat that never reach the captions.
+  // Forward each message once as a distinct `[chat]` line so the brain has it as context.
+  function readChatMessage(node) {
+    const sender = (firstMatch(node, SEL.chatSender)?.textContent || node.getAttribute('data-sender-name') || '').trim();
+    let text = (firstMatch(node, SEL.chatText)?.textContent || node.getAttribute('data-message-text') || '').trim();
+    if (!text) { // fallback: whole-node text minus the sender label
+      text = (node.textContent || '').trim();
+      if (sender && text.startsWith(sender)) text = text.slice(sender.length).trim();
+    }
+    return { sender, text };
+  }
+  function scanChat() {
+    let nodes = [];
+    for (const s of SEL.chatMsg) { try { const l = document.querySelectorAll(s); if (l && l.length) { nodes = Array.from(l); break; } } catch (_) {} }
+    for (const node of nodes) {
+      const id = node.getAttribute('data-message-id') || '';
+      if (id) { if (seenChatIds.has(id)) continue; } else if (seenChatEls.has(node)) continue;
+      const { sender, text } = readChatMessage(node);
+      if (!text || NOISE_RE.test(text)) continue;
+      if (id) seenChatIds.add(id); else seenChatEls.add(node);
+      send({ type: 'chat-in', session, ts: tsLabel(), sender: sender || '?', text: normalizeGlossary(text) });
+    }
+  }
+
   // ---- SCAN LOOP -----------------------------------------------------------
   function scan() {
     if (!started) { scanning = false; return; }
+    if (!userPaused && (++chatTick % 8 === 0)) { try { scanChat(); } catch (_) {} } // ~every 1.6s, independent of captions
     if (!userPaused && !sttPaused) {
       const region = firstRegion();
       if (region) {

@@ -739,6 +739,10 @@ function onMessage(msg) {
       checkMuted(msg.speaker, msg.text);
       checkMention(msg.speaker, msg.text);
       break;
+    case 'chat-in': // meeting-chat message captured into context
+      appendLine({ ts: msg.ts, speaker: `💬 ${msg.sender}`, text: msg.text });
+      checkMention(msg.sender, msg.text);
+      break;
     case 'session-end':
       setStatus(capEl, 'ended', 'idle');
       setSharing(false);

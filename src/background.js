@@ -538,6 +538,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       // the file/brain (dedup + delta) is serialized behind capQueue so concurrent cap-finals don't race.
       broadcast({ type: 'cap-final', ts: msg.ts, speaker: msg.speaker, text: msg.text, id: msg.id });
       capQueue = capQueue.then(() => persistCapFinal(msg)).catch(() => {});
+    } else if (msg.type === 'chat-in') {
+      // Meeting-chat message → feed the brain as a distinct [chat] line + mirror to the panel transcript.
+      const { mla_session } = await chrome.storage.session.get('mla_session');
+      const sess = msg.session || mla_session;
+      if (sess) capQueue = capQueue.then(() => postToServer(sess, `[${msg.ts}] [chat] ${msg.sender}: ${msg.text}\n`)).catch(() => {});
+      broadcast({ type: 'chat-in', ts: msg.ts, sender: msg.sender, text: msg.text });
     } else if (msg.type === 'session-end') {
       await chrome.storage.session.set({ mla_sharing: false, mla_active: false });
       setActionState('idle');

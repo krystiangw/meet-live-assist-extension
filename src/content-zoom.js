@@ -15,6 +15,10 @@
     block: ['[class*="live-transcription-content" i]', '[class*="caption" i] li', '[class*="subtitle-item" i]'],
     speaker: ['[class*="speaker" i]', '[class*="name" i]'],
     text: ['[class*="text" i]', '[class*="content" i]'],
+    // Chat panel messages (opportunistic — only in the DOM while the chat panel is open).
+    chatMsg: ['[class*="new-chat-message" i]', '[class*="chat-item" i]', '#chat-list [class*="message" i]'],
+    chatSender: ['[class*="sender" i]', '[class*="chat-item__sender" i]'],
+    chatText: ['[class*="chat-info" i]', '[class*="message-text" i]', '[class*="text" i]'],
   };
 
   const FLUSH_STABLE_MS = 600;
@@ -50,6 +54,7 @@
   }
 
   let session = null, started = false, userPaused = false, sttPaused = false, scanning = false;
+  const seenChatEls = new WeakSet(); let chatTick = 0; // meeting-chat dedup (Zoom messages carry no stable id)
   let currentCode = null, regionSeenAt = 0, captureWarned = false, lineCount = 0, trackerId = 0;
   const trackers = [];
   const now = () => Date.now();
@@ -98,8 +103,24 @@
     updateBadge();
   }
 
+  // Meeting chat → forward each message once as a distinct [chat] line for the brain's context.
+  function scanChat() {
+    let nodes = [];
+    for (const s of SEL.chatMsg) { try { const l = document.querySelectorAll(s); if (l && l.length) { nodes = Array.from(l); break; } } catch (_) {} }
+    for (const node of nodes) {
+      if (seenChatEls.has(node)) continue;
+      seenChatEls.add(node);
+      const sender = (firstMatch(node, SEL.chatSender)?.textContent || '').trim();
+      let text = (firstMatch(node, SEL.chatText)?.textContent || '').trim();
+      if (!text) { text = (node.textContent || '').trim(); if (sender && text.startsWith(sender)) text = text.slice(sender.length).trim(); }
+      if (!text || NOISE_RE.test(text)) continue;
+      send({ type: 'chat-in', session, ts: tsLabel(), sender: sender || '?', text: normalizeGlossary(text) });
+    }
+  }
+
   function scan() {
     if (!started) { scanning = false; return; }
+    if (!userPaused && (++chatTick % 8 === 0)) { try { scanChat(); } catch (_) {} } // ~every 1.6s, independent of captions
     if (!userPaused && !sttPaused) {
       const region = firstRegion();
       if (region) {
