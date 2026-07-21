@@ -48,11 +48,8 @@
     /* ---- Header: title row, status row, toolbar row ---- */
     header { padding: 8px 12px 6px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 7px;
       background: color-mix(in srgb, #ffffff 66%, transparent); backdrop-filter: saturate(1.1) blur(10px); position: relative; z-index: 5; }
-    .h-title { display: flex; align-items: center; gap: 8px; }
-    .h-title img { border-radius: 5px; flex: 0 0 auto; }
-    .h-title h1 { font-size: 13px; margin: 0; font-weight: 600; flex: 1; }
     #modeSel {
-      font: 12px system-ui; padding: 3px 6px; border-radius: 7px;
+      font: 12px system-ui; padding: 2px 6px; border-radius: 999px; margin-left: auto;
       background: var(--field); color: var(--text); border: 1px solid var(--line); cursor: pointer;
     }
 
@@ -66,7 +63,7 @@
     .status.ok::before { background: var(--say); }
     .status.bad::before { background: var(--risk); }
     .status.idle::before { background: color-mix(in srgb, var(--ink) 30%, transparent); }
-    #session { font-size: 10px; opacity: .45; margin-left: auto; max-width: 45%;
+    #session { font-size: 10px; opacity: .45; max-width: 38%;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     .toolbar { display: flex; align-items: center; gap: 6px; }
@@ -223,18 +220,6 @@
 </head>
 <body>
   <header>
-    <div class="h-title">
-      <img src="icons/icon32.png" width="18" height="18" alt="Meet Live Assist" title="Meet Live Assist" />
-      <h1>Meet Live Assist</h1>
-      <select id="modeSel" title="Agent mode — how proactive it is (Auto / Listener / Lead) or its job: Explain (define terms + cite sources) · Produce (turn talk into tickets, docs, plans)">
-        <option value="auto">🤖 Auto</option>
-        <option value="listener">👂 Listener</option>
-        <option value="lead">🎤 Lead</option>
-        <option value="explain">📚 Explain</option>
-        <option value="produce">🏗 Produce</option>
-      </select>
-    </div>
-
     <div class="statusrow">
       <span id="capStatus" class="status idle" title="Capture state — idle / capturing (Meet or Zoom captions) / co-pilot / ⚠ no captions">idle</span>
       <span id="srvStatus" class="status idle" title="Local bridge server — ✓ connected, ✗ down (start it), or ✗ token missing (set it in Options)">server ?</span>
@@ -242,6 +227,13 @@
       <span id="talkStatus" class="status idle" title="Your share of talk time this meeting (rough, by words)" hidden></span>
       <span id="snapStatus" class="status idle" title="Screen snapshots captured this meeting (kept for the assistant's visual context)">shots 0</span>
       <span id="session" title="This meeting's session id (date_time_code)"></span>
+      <select id="modeSel" title="Agent mode — how proactive it is (Auto / Listener / Lead) or its job: Explain (define terms + cite sources) · Produce (turn talk into tickets, docs, plans)">
+        <option value="auto">🤖 Auto</option>
+        <option value="listener">👂 Listener</option>
+        <option value="lead">🎤 Lead</option>
+        <option value="explain">📚 Explain</option>
+        <option value="produce">🏗 Produce</option>
+      </select>
     </div>
 
     <div class="toolbar">
