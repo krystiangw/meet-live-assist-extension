@@ -563,7 +563,7 @@ async function pollCallChat() {
     const { items, last } = await r.json();
     if (lastCallChatSeq < 0) { lastCallChatSeq = last || 0; return; } // baseline: don't replay old
     for (const it of items || []) {
-      if (postChatEl.checked) { try { port.postMessage({ type: 'send-call-chat', text: it.text }); } catch (_) {} } // double-guard the opt-in
+      if (postChatEl.checked) { try { port.postMessage({ type: 'send-call-chat', text: it.text, seq: it.seq }); } catch (_) {} } // double-guard the opt-in
     }
     if (typeof last === 'number') lastCallChatSeq = Math.max(lastCallChatSeq, last);
   } catch (_) {}

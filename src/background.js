@@ -297,14 +297,25 @@ async function stopCoPilot() {
   broadcast({ type: 'session-end' });
 }
 
-// Relay a message into the meeting chat via the active Meet/Zoom tab's content script.
-async function sendToCallChat(text) {
+// Relay a message into the meeting chat via the active Meet/Zoom tab's content script. The content script
+// reports actual delivery back via a 'callchat-done' message → /callchat-result (so the brain gets an ACK).
+async function sendToCallChat(text, seq) {
   if (!text) return;
   const tabs = await chrome.tabs.query({ url: ['https://meet.google.com/*', 'https://*.zoom.us/wc/*'] });
   const tab = tabs.find((t) => t.active) || tabs[0];
-  if (!tab) { broadcast({ type: 'callchat', ok: false, reason: 'no meeting tab' }); return; }
-  try { await chrome.tabs.sendMessage(tab.id, { type: 'call-chat', text }); broadcast({ type: 'callchat', ok: true }); }
-  catch (e) { broadcast({ type: 'callchat', ok: false, reason: String(e && e.message || e) }); }
+  if (!tab) { broadcast({ type: 'callchat', ok: false, reason: 'no meeting tab' }); await postCallChatResult(seq, false, 'no meeting tab'); return; }
+  try { await chrome.tabs.sendMessage(tab.id, { type: 'call-chat', text, seq }); broadcast({ type: 'callchat', ok: true }); }
+  catch (e) { broadcast({ type: 'callchat', ok: false, reason: String(e && e.message || e) }); await postCallChatResult(seq, false, 'content script unreachable'); }
+}
+async function postCallChatResult(seq, ok, reason) {
+  const { mla_session } = await chrome.storage.session.get('mla_session');
+  if (!mla_session) return;
+  try {
+    await fetch((await getServerUrl()) + '/callchat-result', {
+      method: 'POST', headers: await authHeaders(),
+      body: JSON.stringify({ session: mla_session, seq, ok, reason: reason || '' }),
+    });
+  } catch (_) {}
 }
 
 // ---- presentation DOM edits on the shared (non-Meet) tab -----------------
@@ -561,6 +572,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       const sess = msg.session || mla_session;
       if (sess) capQueue = capQueue.then(() => postToServer(sess, `[${msg.ts}] [chat] ${msg.sender}: ${msg.text}\n`)).catch(() => {});
       broadcast({ type: 'chat-in', ts: msg.ts, sender: msg.sender, text: msg.text });
+    } else if (msg.type === 'callchat-done') {
+      // Content script reports whether a /callchat message actually landed in Meet → ACK for the brain.
+      await postCallChatResult(msg.seq, !!msg.ok, msg.reason);
+      broadcast({ type: 'callchat', ok: !!msg.ok, reason: msg.reason || '' });
     } else if (msg.type === 'session-end') {
       await chrome.storage.session.set({ mla_sharing: false, mla_active: false });
       setActionState('idle');
@@ -610,7 +625,7 @@ chrome.runtime.onConnect.addListener((port) => {
     } else if (m.type === 'copilot-stop') {
       stopCoPilot();
     } else if (m.type === 'send-call-chat') {
-      sendToCallChat(m.text);
+      sendToCallChat(m.text, m.seq);
     } else if (m.type === 'do-act') {
       handleAct(m.cmd);
     } else if (m.type === 'apply-edit') {

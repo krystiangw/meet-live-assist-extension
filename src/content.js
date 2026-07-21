@@ -367,19 +367,25 @@
       el.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
     }
   }
-  function postToCallChat(text) {
+  function reportCallChat(seq, ok, reason) { send({ type: 'callchat-done', session, seq, ok, reason: reason || '' }); }
+  function postToCallChat(text, seq) {
     if (!text) return;
     if (!findChatInput()) openChatPanel();
     let tries = 0;
     const timer = setInterval(() => {
       const ta = findChatInput();
-      if (!ta) { if (++tries > 15) clearInterval(timer); return; } // ~3s to open the panel
+      if (!ta) { if (++tries > 15) { clearInterval(timer); reportCallChat(seq, false, 'chat panel/input not found'); } return; } // ~3s to open
       clearInterval(timer);
       typeInto(ta, text);
       setTimeout(() => {
-        const send = findSendButton();
-        if (send) { try { send.click(); return; } catch (_) {} }
-        pressEnter(ta); // Meet sends on Enter (Shift+Enter = newline)
+        const send1 = findSendButton();
+        if (send1) { try { send1.click(); } catch (_) { pressEnter(ta); } } else pressEnter(ta);
+        // Meet clears the composer on a successful send — use that as the delivery signal.
+        setTimeout(() => {
+          const after = findChatInput();
+          const leftover = after ? ((after.value != null ? after.value : after.textContent) || '').trim() : '';
+          reportCallChat(seq, !leftover, leftover ? 'composer not cleared — send likely failed' : '');
+        }, 500);
       }, 150);
     }, 200);
   }
@@ -398,7 +404,7 @@
     if (!msg) return;
     if (msg.type === 'capture-mode') { sttPaused = (msg.captions === false); sendResponse({ ok: true }); return; }
     if (msg.type === 'grab-context') { sendResponse({ text: grabContext() }); return; }
-    if (msg.type === 'call-chat') { postToCallChat(msg.text); sendResponse({ ok: true }); return; }
+    if (msg.type === 'call-chat') { postToCallChat(msg.text, msg.seq); sendResponse({ ok: true }); return; }
     if (msg.type !== 'mic') return;
     const b = findMicButton();
     if (!b) { sendResponse({ ok: false }); return; }
