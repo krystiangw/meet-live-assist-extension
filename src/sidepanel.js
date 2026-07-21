@@ -429,7 +429,7 @@ async function speak(text, btn) {
   }
 }
 
-function resetAdvice() { adviceEl.innerHTML = '<div class="empty small">Advice will appear here live…</div>'; hasAdvice = false; lastAdviceSeq = 0; syncSearchVisibility(); }
+function resetAdvice() { adviceEl.innerHTML = '<div class="empty small">Suggestions will appear here live…</div>'; hasAdvice = false; lastAdviceSeq = 0; syncSearchVisibility(); }
 
 // Reflect brain liveness in the advice empty-state so "nothing happening" is explained, not silent.
 function setBrainEmpty(live) {
