@@ -25,9 +25,10 @@ chrome.alarms.onAlarm.addListener(() => { refreshBadge(); }); // wake-only keepa
 // panel and still see the session is live: no badge = idle, green = capturing, blue = an assistant
 // (brain) is attached. Capture itself runs in the content script + SW, independent of the panel.
 const BADGE = {
-  idle:  { text: '',  color: null,      title: 'Meet Live Assist — no active session (click to open)' },
-  live:  { text: '●', color: '#17935a', title: 'Meet Live Assist — capturing this meeting (click to open)' },
-  brain: { text: '●', color: '#3b6ef0', title: 'Meet Live Assist — capturing · assistant attached (click to open)' },
+  idle:   { text: '',  color: null,      title: 'Meet Live Assist — no active session (click to open)' },
+  live:   { text: '●', color: '#17935a', title: 'Meet Live Assist — capturing this meeting (click to open)' },
+  brain:  { text: '●', color: '#3b6ef0', title: 'Meet Live Assist — capturing · assistant attached (click to open)' },
+  paused: { text: '❙❙', color: '#b07a12', title: 'Meet Live Assist — PAUSED (capture + advice held; click to open)' },
 };
 async function setActionState(state) {
   const c = BADGE[state] || BADGE.idle;
@@ -42,9 +43,13 @@ async function setActionState(state) {
 }
 // Active = a session is running (Meet/Zoom join or co-pilot), regardless of the panel being open.
 // Upgrade live→brain when the server says an assistant pinged within 45s.
+async function isPaused() {
+  return (await chrome.storage.session.get('mla_paused')).mla_paused === true;
+}
 async function refreshBadge() {
-  const { mla_active, mla_session } = await chrome.storage.session.get(['mla_active', 'mla_session']);
+  const { mla_active, mla_session, mla_paused } = await chrome.storage.session.get(['mla_active', 'mla_session', 'mla_paused']);
   if (!mla_active) { setActionState('idle'); return; }
+  if (mla_paused) { setActionState('paused'); return; }
   let brain = false;
   if (mla_session) {
     try {
@@ -96,13 +101,23 @@ function tokenSim(a, b) {
   return i / (A.size + B.size - i);
 }
 async function persistCapFinal(msg) {
+  if (await isPaused()) return; // dropped during a hold — nothing recorded while paused
   const { session, buffer } = await loadState();
   const sess = msg.session || session;
-  const { mla_commit, mla_recent, mla_committedLines } = await chrome.storage.session.get(['mla_commit', 'mla_recent', 'mla_committedLines']);
+  const { mla_commit, mla_recent, mla_committedLines, mla_rebaseline } = await chrome.storage.session.get(['mla_commit', 'mla_recent', 'mla_committedLines', 'mla_rebaseline']);
   const commit = (mla_commit && typeof mla_commit === 'object') ? mla_commit : {};
   const recent = Array.isArray(mla_recent) ? mla_recent : [];
   const committedLines = Array.isArray(mla_committedLines) ? mla_committedLines : [];
   const full = (msg.text || '').trim();
+  // First cap-final after RESUME: adopt the current caption text as this block's baseline and emit nothing,
+  // so words spoken during the hold don't leak as a delta on a block that straddled the pause. One-shot
+  // (rare multi-block straddle may still leak one line; acceptable for the privacy win).
+  if (mla_rebaseline) {
+    commit[msg.id] = full;
+    await chrome.storage.session.set({ mla_commit: commit, mla_rebaseline: false });
+    await saveState(sess, buffer);
+    return;
+  }
   const prev = commit[msg.id] || '';
   // Emit only what's new vs this block's last commit, diffing on the longest common prefix so an ASR
   // mid-sentence revision re-posts just the changed tail (not the whole line). Back up to a word boundary.
@@ -202,6 +217,7 @@ function hammingHex(a, b) {
 async function captureSnapshot(auto = false) {
   const { mla_session } = await chrome.storage.session.get('mla_session');
   if (!mla_session) return;
+  if (auto && await isPaused()) return; // no automatic frames while paused (manual 📷 still allowed)
   // Capture what the user is actually looking at: the active tab of the focused window. During a
   // self-share that's the shared app tab (Meet is inactive then); for a remote share it's usually the
   // Meet tab (which renders the shared screen). Fall back to any active Meet tab.
@@ -296,7 +312,7 @@ async function startCoPilot() {
   await saveState(session, []);
   await (capQueue = capQueue.then(() => chrome.storage.session.set({ mla_commit: {}, mla_recent: [], mla_committedLines: [] })).catch(() => {}));
   await postToServer(session, ''); // create the file + header
-  await chrome.storage.session.set({ mla_active: true });
+  await chrome.storage.session.set({ mla_active: true, mla_paused: false }); // never inherit a stale pause
   setActionState('live');
   broadcast({ type: 'session', session, code: 'copilot' });
   // Listen to the microphone (the user), transcribed locally — no Meet tab involved.
@@ -306,7 +322,7 @@ async function startCoPilot() {
 }
 async function stopCoPilot() {
   stopStt();
-  await chrome.storage.session.set({ mla_session: null, mla_active: false });
+  await chrome.storage.session.set({ mla_session: null, mla_active: false, mla_paused: false });
   setActionState('idle');
   broadcast({ type: 'session-end' });
 }
@@ -570,28 +586,33 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       // Ordered behind any in-flight persist so it can't be clobbered by a late cap-final from the old call.
       await (capQueue = capQueue.then(() => chrome.storage.session.set({ mla_commit: {}, mla_recent: [], mla_committedLines: [] })).catch(() => {}));
       await postToServer(msg.session, ''); // creates the file + header on the server
-      await chrome.storage.session.set({ mla_active: true });
+      await chrome.storage.session.set({ mla_active: true, mla_paused: false });
       setActionState('live');
       broadcast({ type: 'session', session: msg.session, code: msg.code });
     } else if (msg.type === 'cap') {
-      broadcast({ type: 'cap', id: msg.id, ts: msg.ts, speaker: msg.speaker, text: msg.text }); // live, no server
+      if (!(await isPaused())) broadcast({ type: 'cap', id: msg.id, ts: msg.ts, speaker: msg.speaker, text: msg.text }); // live, no server
     } else if (msg.type === 'cap-final') {
       // Panel gets FULL text immediately (low latency, upserts by id → one clean line). Persistence to
       // the file/brain (dedup + delta) is serialized behind capQueue so concurrent cap-finals don't race.
-      broadcast({ type: 'cap-final', ts: msg.ts, speaker: msg.speaker, text: msg.text, id: msg.id });
+      // Enqueue SYNCHRONOUSLY (before any await) so cap-final file order is preserved; persistCapFinal
+      // itself drops the write while paused. Broadcast is upsert-by-id, so gating it async is harmless.
       capQueue = capQueue.then(() => persistCapFinal(msg)).catch(() => {});
+      if (!(await isPaused())) broadcast({ type: 'cap-final', ts: msg.ts, speaker: msg.speaker, text: msg.text, id: msg.id });
     } else if (msg.type === 'chat-in') {
       // Meeting-chat message → feed the brain as a distinct [chat] line + mirror to the panel transcript.
       const { mla_session } = await chrome.storage.session.get('mla_session');
       const sess = msg.session || mla_session;
-      if (sess) capQueue = capQueue.then(() => postToServer(sess, `[${msg.ts}] [chat] ${msg.sender}: ${msg.text}\n`)).catch(() => {});
-      broadcast({ type: 'chat-in', ts: msg.ts, sender: msg.sender, text: msg.text });
+      if (sess) {
+        // Enqueue synchronously (order-safe); the thunk skips the write while paused.
+        capQueue = capQueue.then(async () => { if (await isPaused()) return; return postToServer(sess, `[${msg.ts}] [chat] ${msg.sender}: ${msg.text}\n`); }).catch(() => {});
+        if (!(await isPaused())) broadcast({ type: 'chat-in', ts: msg.ts, sender: msg.sender, text: msg.text });
+      }
     } else if (msg.type === 'callchat-done') {
       // Content script reports whether a /callchat message actually landed in Meet → ACK for the brain.
       await postCallChatResult(msg.seq, !!msg.ok, msg.reason);
       broadcast({ type: 'callchat', ok: !!msg.ok, reason: msg.reason || '' });
     } else if (msg.type === 'session-end') {
-      await chrome.storage.session.set({ mla_sharing: false, mla_active: false, mla_shareTabId: null });
+      await chrome.storage.session.set({ mla_sharing: false, mla_active: false, mla_shareTabId: null, mla_paused: false });
       setActionState('idle');
       broadcast({ type: 'session-end' });
       broadcast({ type: 'sharing', on: false });
@@ -605,10 +626,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       await chrome.storage.session.set({ mla_lang: msg.lang });
       broadcast({ type: 'lang', lang: msg.lang });
     } else if (msg.type === 'stt-line') {
-      const d = new Date();
-      const ts = [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
-      // Mic STT is the user (Krystian → 'You'); tabCapture STT is remote participants (unattributed).
-      broadcast({ type: 'line', ts, speaker: msg.source === 'mic' ? 'You' : '(unattributed)', text: msg.text });
+      if (!(await isPaused())) {
+        const d = new Date();
+        const ts = [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
+        // Mic STT is the user (Krystian → 'You'); tabCapture STT is remote participants (unattributed).
+        broadcast({ type: 'line', ts, speaker: msg.source === 'mic' ? 'You' : '(unattributed)', text: msg.text });
+      }
     } else if (msg.type === 'stt-status') {
       broadcast({ type: 'stt', on: !!msg.on });
     } else if (msg.type === 'stt-error') {
@@ -627,8 +650,8 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener(async (m) => {
     if (m.type === 'hello') {
       const { session, buffer } = await loadState();
-      const { mla_sharing, mla_lang } = await chrome.storage.session.get(['mla_sharing', 'mla_lang']);
-      port.postMessage({ type: 'restore', session, buffer, sharing: !!mla_sharing, lang: mla_lang || null });
+      const { mla_sharing, mla_lang, mla_paused } = await chrome.storage.session.get(['mla_sharing', 'mla_lang', 'mla_paused']);
+      port.postMessage({ type: 'restore', session, buffer, sharing: !!mla_sharing, lang: mla_lang || null, paused: !!mla_paused });
     } else if (m.type === 'snapshot-now') {
       captureSnapshot(!!m.auto);
     } else if (m.type === 'stt-start') {
@@ -639,6 +662,22 @@ chrome.runtime.onConnect.addListener((port) => {
       startCoPilot();
     } else if (m.type === 'copilot-stop') {
       stopCoPilot();
+    } else if (m.type === 'pause') {
+      await chrome.storage.session.set({ mla_paused: true });
+      setActionState('paused');
+      broadcast({ type: 'paused', on: true });
+    } else if (m.type === 'resume') {
+      // mla_rebaseline: next cap-final adopts current text as baseline so paused words don't leak (see persistCapFinal).
+      await chrome.storage.session.set({ mla_paused: false, mla_rebaseline: true });
+      refreshBadge();
+      broadcast({ type: 'paused', on: false });
+    } else if (m.type === 'session-stop') {
+      // Graceful end from the panel: stop capture (like a real call ending). The brain wraps up + stops
+      // via the /control 'stopped' the panel also posts. Distinct from 🗑 clear (which wipes data).
+      await chrome.storage.session.set({ mla_sharing: false, mla_active: false, mla_shareTabId: null, mla_paused: false });
+      setActionState('idle');
+      broadcast({ type: 'session-end' });
+      broadcast({ type: 'sharing', on: false });
     } else if (m.type === 'send-call-chat') {
       sendToCallChat(m.text, m.seq);
     } else if (m.type === 'do-act') {

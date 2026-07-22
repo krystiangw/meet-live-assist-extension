@@ -69,6 +69,13 @@ assisting this meeting, don't start a second watch.
    linger. (To assist a *specific* meeting only, replace `ls -t … head -1`
    with a fixed file path for that meeting code.)
 
+   **Obey panel session-control each loop** — the user can pause/stop from the panel. GET it alongside the
+   heartbeat: `curl -s -H "X-MLA-Token: $MLA_TOKEN" "http://127.0.0.1:8848/control?session=$SESS"` → `{state}`.
+   - `paused` → **stay silent**: post no advice/actions this turn (the panel also stopped capture, so the
+     transcript won't grow anyway). Keep heartbeating so the 🧠 pill stays on; resume normally when it flips
+     back to `running`.
+   - `stopped` → do the **wrap-up** (step 4) and **TaskStop** — same as a real call ending.
+
 3. **On each event, assist with YOUR domain context.** Keep it concise and in the user's preferred language
    (Polish for Krystian). **Tag every line with a colour-coded marker** (see "Output format" below) so the
    user can tell at a glance what each line is. Useful outputs:

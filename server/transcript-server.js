@@ -178,6 +178,7 @@ const dbgData = new Map(); // session -> { kind, data }
 // the panel polls it to show whether an assistant is actually attached to this meeting.
 const brainPing = new Map(); // session -> last heartbeat ms
 const brainStatus = new Map(); // session -> { text, ts } current agent activity ("creating Jira ticket…"); '' = idle
+const control = new Map(); // session -> 'running' | 'paused' | 'stopped' — panel drives it; the brain obeys
 
 // Live decisions + action items captured by the brain during the call (the board; source for Jira drafts).
 const items = new Map(); // session -> { seq, list: [{ seq, ts, kind, text, owner, blockedBy }] }
@@ -574,6 +575,28 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Panel -> server: session control the brain obeys. paused = stay silent (panel also stops capture);
+  // stopped = do the wrap-up and TaskStop. Panel sets it; the brain GETs it each loop.
+  if (req.method === 'POST' && req.url === '/control') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
+      const state = ['running', 'paused', 'stopped'].includes(d.state) ? d.state : null;
+      if (!state) { res.writeHead(400); return res.end('bad state'); }
+      control.set(safeSession(d.session), state);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, state }));
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/control')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ state: control.get(safeSession(u.searchParams.get('session'))) || 'running' }));
+    return;
+  }
+
   // Panel -> server: wipe everything for one meeting (transcript, chat, mode, snapshots, in-memory).
   if (req.method === 'POST' && req.url === '/clear') {
     let body = '';
@@ -583,7 +606,7 @@ const server = http.createServer((req, res) => {
       const s = safeSession(d.session);
       for (const suf of ['.txt', '.chat.txt', '.mode.txt', '.summary.md']) { try { fs.unlinkSync(path.join(TRANSCRIPTS_DIR, s + suf)); } catch (_) {} }
       try { fs.rmSync(path.join(SNAP_DIR, s), { recursive: true, force: true }); } catch (_) {}
-      for (const m of [advice, chat, items, modes, edits, domReq, doms, dbgReq, dbgData, snapReq, brainPing, brainStatus, summaries, autopilot, callChat, callChatResult, takeover, drive, acts, actResults, suppress]) m.delete(s);
+      for (const m of [advice, chat, items, modes, edits, domReq, doms, dbgReq, dbgData, snapReq, brainPing, brainStatus, control, summaries, autopilot, callChat, callChatResult, takeover, drive, acts, actResults, suppress]) m.delete(s);
       seenSessions.delete(s);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));

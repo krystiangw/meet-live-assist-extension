@@ -766,6 +766,7 @@ function onMessage(msg) {
       (msg.buffer || []).forEach(appendLine);
       setSharing(!!msg.sharing);
       if (msg.lang) callLang = msg.lang;
+      setPausedUI(!!msg.paused);
       break;
     case 'session': {
       clearLog(); resetAdvice(); resetItems(); resetSnap();
@@ -775,6 +776,7 @@ function onMessage(msg) {
       copilotOn = isCopilot; copilotBtn.classList.toggle('on', isCopilot);
       document.getElementById('consent').hidden = isCopilot; // no participants to disclose to in co-pilot
       setSession(msg.session);
+      setPausedUI(false); // a fresh session is never paused
       break;
     }
     case 'line': // STT lines (no id)
@@ -803,6 +805,10 @@ function onMessage(msg) {
       setSharing(false);
       copilotOn = false; copilotBtn.classList.remove('on');
       setDrive(false);
+      setPausedUI(false);
+      break;
+    case 'paused':
+      setPausedUI(!!msg.on);
       break;
     case 'act': {
       const el = document.getElementById('actStatus'); el.hidden = false;
@@ -876,6 +882,42 @@ copilotBtn.addEventListener('click', async () => {
     copilotOn = false; copilotBtn.classList.remove('on');
     try { port.postMessage({ type: 'copilot-stop' }); } catch (_) {}
   }
+});
+
+// ---- session control: pause / resume / stop -------------------------------
+// Pause holds capture + advice (SW drops caps/snapshots; brain obeys /control and stays silent);
+// stop is a graceful end (brain wraps up), distinct from 🗑 clear which wipes data.
+const pauseBtn = document.getElementById('pauseBtn');
+const stopBtn = document.getElementById('stopBtn');
+let paused = false;
+function setPausedUI(on) {
+  paused = !!on;
+  pauseBtn.textContent = paused ? '⏵' : '⏸';
+  pauseBtn.classList.toggle('on', paused);
+  pauseBtn.title = paused
+    ? 'Resume — restart capture & advice'
+    : 'Pause — hold capture & advice; nothing is recorded until you resume';
+  if (paused) setStatus(capEl, '⏸ paused', 'idle');
+  else if (currentSession) setStatus(capEl, copilotOn ? 'co-pilot' : 'capturing', 'ok');
+}
+async function postControl(state) {
+  if (!currentSession) return;
+  try { await fetch(`${serverUrl}/control`, { method: 'POST', headers: hdrs(true), body: JSON.stringify({ session: currentSession, state }) }); } catch (_) {}
+}
+pauseBtn.addEventListener('click', () => {
+  if (!currentSession) return;
+  const next = !paused;
+  setPausedUI(next); // optimistic; SW echoes a 'paused' broadcast that re-affirms it
+  try { port.postMessage({ type: next ? 'pause' : 'resume' }); } catch (_) {}
+  postControl(next ? 'paused' : 'running');
+});
+stopBtn.addEventListener('click', () => {
+  if (!currentSession) return;
+  if (!confirm('End this session? The assistant wraps up and stops capturing. Data is kept — use 🗑 to wipe.')) return;
+  postControl('stopped');
+  try { port.postMessage({ type: 'session-stop' }); } catch (_) {}
+  setPausedUI(false);
+  setStatus(capEl, 'ended', 'idle');
 });
 
 const consentEl = document.getElementById('consent');
