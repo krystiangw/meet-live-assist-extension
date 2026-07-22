@@ -224,7 +224,8 @@
     #quickAsk button { font: 11px system-ui; padding: 4px 10px; border-radius: 999px; cursor: pointer;
       border: 1px solid var(--line); background: transparent; color: inherit; }
     #quickAsk button:hover { background: var(--hover); }
-    #chatForm { display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--line); }
+    #chatForm { display: flex; gap: 6px; padding: 8px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+      border-top: 1px solid var(--line); }
     #chatInput { flex: 1; padding: 8px 10px; font: inherit; border-radius: 8px;
       border: 1px solid var(--line); background: var(--field); color: var(--text); }
     #chatForm button { padding: 8px 14px; font: inherit; border-radius: 8px; cursor: pointer;

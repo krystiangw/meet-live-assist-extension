@@ -583,11 +583,13 @@ const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://127.0.0.1');
     const ts = brainPing.get(safeSession(u.searchParams.get('session'))) || 0;
     const st = brainStatus.get(safeSession(u.searchParams.get('session')));
+    const tk = takeover.get(safeSession(u.searchParams.get('session')));
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       ts, ageMs: ts ? Date.now() - ts : null,
       status: st ? st.text : '', statusAgeMs: st ? Date.now() - st.ts : null,
       estTokens: estTokensFor(u.searchParams.get('session')),
+      agent: tk ? tk.agent : null,
     }));
     return;
   }

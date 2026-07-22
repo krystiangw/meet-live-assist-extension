@@ -129,11 +129,25 @@
   // ---- MEETING CHAT (opportunistic — only when the chat panel is open) -----
   // People paste links / names / ticket IDs / decisions in chat that never reach the captions.
   // Forward each message once as a distinct `[chat]` line so the brain has it as context.
+  // Meet renders a hover action-toolbar INSIDE each message node ("Pin message", "keep", "More options").
+  // Reading raw textContent drags those button labels into the captured line. Strip interactive nodes
+  // before reading, and mop up any label that survives as a plain text node.
+  // Anchored to end-of-string (no /g): only peel toolbar labels that TRAIL the message — never mid-text,
+  // so a real "…pin message #1423, more options?" stays intact. Loop to strip a run of stacked labels.
+  const CHAT_UI_NOISE_TRAIL = /\s*(?:Hover over a message to pin it|Unpin message|Pin message|More options|React to message)\s*$/i;
+  function cleanNodeText(el) {
+    if (!el) return '';
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll('button, [role="button"]').forEach((n) => n.remove());
+    let out = (clone.textContent || '').replace(/\s{2,}/g, ' ').trim();
+    while (CHAT_UI_NOISE_TRAIL.test(out)) out = out.replace(CHAT_UI_NOISE_TRAIL, '').trim();
+    return out;
+  }
   function readChatMessage(node) {
-    const sender = (firstMatch(node, SEL.chatSender)?.textContent || node.getAttribute('data-sender-name') || '').trim();
-    let text = (firstMatch(node, SEL.chatText)?.textContent || node.getAttribute('data-message-text') || '').trim();
-    if (!text) { // fallback: whole-node text minus the sender label
-      text = (node.textContent || '').trim();
+    const sender = cleanNodeText(firstMatch(node, SEL.chatSender)) || (node.getAttribute('data-sender-name') || '').trim();
+    let text = cleanNodeText(firstMatch(node, SEL.chatText)) || (node.getAttribute('data-message-text') || '').trim();
+    if (!text) { // fallback: whole-node text (interactive UI stripped) minus the sender label
+      text = cleanNodeText(node);
       if (sender && text.startsWith(sender)) text = text.slice(sender.length).trim();
     }
     return { sender, text };

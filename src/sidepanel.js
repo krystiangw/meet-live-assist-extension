@@ -482,9 +482,10 @@ async function pollBrain() {
   try {
     const r = await fetch(`${serverUrl}/brain-ping?session=${encodeURIComponent(currentSession)}`, { headers: hdrs() });
     if (!r.ok) { setBrainWork(''); return; } // can't confirm activity → don't leave a stale bubble pinned
-    const { ageMs, status, statusAgeMs, estTokens } = await r.json();
+    const { ageMs, status, statusAgeMs, estTokens, agent } = await r.json();
     const live = ageMs != null && ageMs < 45000; // heartbeat within 45s = attached
-    setStatus(brainEl, live ? '🧠 assistant on' : '🧠 no assistant', live ? 'ok' : 'bad');
+    // Name the attached agent so it's obvious WHICH one is on (multiple agents share the machine).
+    setStatus(brainEl, live ? `🧠 ${agent || 'assistant'} on` : '🧠 no assistant', live ? 'ok' : 'bad');
     setBrainEmpty(live);
     // Show a live "working…" bubble while the agent is mid-action; stale (>30s) = drop it (crash guard).
     setBrainWork(live && status && statusAgeMs != null && statusAgeMs < 30000 ? status : '');

@@ -492,6 +492,11 @@ Either path counts as confirmation:
 - **Automatic takeover:** on arm, `POST /brain-takeover {session, agent:"<your unique id>"}`; each loop
   `GET /brain-takeover?session=` — if it returns a **different** agent with a small `ageMs`, another
   assistant claimed this meeting → **stop** (don't double-assist). Replaces the manual clad-task handoff.
+  Your `agent` id is surfaced in the panel's 🧠 pill (via `/brain-ping`), so pick a legible one.
+- **Lifecycle chat messages (name yourself).** Right after takeover, post ONE opening line to the **panel
+  chat** — `POST /chat {role:"agent", text:"🧠 <agent> connected and ready."}` — so it's obvious which agent
+  is on. In the wrap-up (step 4), post a matching closing line (`🧠 <agent> — call wrapped, signing off.`).
+  Opening/closing only; don't narrate connect/disconnect anywhere else.
 - **Live ticket creation:** put **sprint + epic/parent + story points in the ticket up front, in the
   description** (not a follow-up comment). Don't create a bare title and backfill. **Always set the
   Development Area** field (`customfield_11074`, single-select `{"value": "FE"}`): `FE` / `BE` / `DS` / `QA`
@@ -507,9 +512,19 @@ Either path counts as confirmation:
 ### Token economy on the watch loop (a long call grows context ~quadratically)
 The single biggest failure mode is cost: ~1 turn per caption × context that carries all prior turns. Levers,
 in order of leverage:
-- **Run the watch loop cheap.** Use **Sonnet + `/effort low`** for the observe-and-mirror loop; escalate to
-  Opus / higher effort only for an actual action (drafting a ticket, a real analysis), then drop back. Don't
-  sit on Opus for 45 min of listening (matches the shared-limit rule in CLAUDE.md).
+- **Run the watch loop cheap — two-tier model split.** The workload is ~99% cheap triage (filler? say
+  something? log an item?) and ~1% heavy work (draft a ticket, real analysis, synthesis). Match the model:
+  - **Tier 1 — the loop: `Sonnet` + `/effort low`.** Handles all observe/advise/log. This is the money
+    lever — Sonnet at ~5× lower cost, and the loop is silent most turns anyway. Set it at session start
+    (`/model sonnet`); **don't sit on Opus for 45 min of listening** (shared-limit rule, CLAUDE.md).
+  - **Tier 2 — heavy tasks: spawn an `Opus` subagent** (Agent tool, `model: opus`) for the rare draft/
+    analysis, report its result, drop back. **The autonomous loop can't switch its own model per-turn**
+    (only you can, via `/model`), so escalation MUST go through a subagent (or the Tier-0 gate below).
+  - **Tier 0 (server, deferred by design):** a cheap/local LLM gate in the transcript server that decides
+    "does this chunk even deserve waking the brain?" — the biggest structural cut (~80% fewer wakeups), but
+    it adds a dependency (local ollama, or Haiku API + key) and latency. **Build only after measuring a real
+    call on Sonnet (`/cost`)** — premature otherwise. If built, prefer a local model (trust-first, nothing
+    leaves the machine) and make it conservative (wake on any doubt).
 - **Keep the session lean on MCP.** Connect only the servers this meeting needs (e.g. CIO/Rudderstack when
   relevant). Heavy connectors (Datadog/Figma/…) push ~150k of tool schemas into context and reload on every
   reconnect — pure overhead on a watch loop.
