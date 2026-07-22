@@ -334,14 +334,39 @@
     if (setter && setter.set) setter.set.call(el, value); else el.value = value;
   }
   const CHAT_INPUT_SEL = 'textarea[aria-label*="message" i], textarea[aria-label*="wiadomo" i], '
+    + 'textarea[aria-label*="send" i], textarea[placeholder*="message" i], textarea[placeholder*="wiadomo" i], '
     + 'div[contenteditable="true"][aria-label*="message" i], div[contenteditable="true"][aria-label*="wiadomo" i], '
-    + 'textarea[placeholder*="message" i], div[contenteditable="true"][role="textbox"]';
-  function findChatInput() { try { return document.querySelector(CHAT_INPUT_SEL); } catch (_) { return null; } }
-  function openChatPanel() {
+    + 'div[contenteditable="true"][role="textbox"]';
+  function findChatInput() {
+    try {
+      const el = document.querySelector(CHAT_INPUT_SEL);
+      if (el) return el;
+      // Fallback (Meet's DOM rotates): any textarea/textbox inside a chat side-panel region.
+      for (const r of document.querySelectorAll('[aria-label*="chat" i], [aria-label*="czat" i], [role="complementary"]')) {
+        const c = r.querySelector('textarea, div[contenteditable="true"][role="textbox"]');
+        if (c) return c;
+      }
+    } catch (_) {}
+    return null;
+  }
+  function chatToggleBtn() {
     for (const b of document.querySelectorAll('button,[role="button"]')) {
       const l = (b.getAttribute('aria-label') || '').toLowerCase();
-      if (/chat with everyone|open chat|otwórz czat|czat z/i.test(l)) { try { b.click(); } catch (_) {} return; }
+      if (/chat with everyone|open chat|otwórz czat|czat z/i.test(l)) return b;
     }
+    return null;
+  }
+  // Is the chat panel already open? Check the composer, a live Send button, or the toggle's pressed state —
+  // so we NEVER click the toggle on an open panel (that would close it, which broke delivery before).
+  function chatOpen() {
+    if (findChatInput() || findSendButton()) return true;
+    const t = chatToggleBtn();
+    return !!t && (t.getAttribute('aria-pressed') === 'true' || t.getAttribute('aria-expanded') === 'true');
+  }
+  function openChatPanel() {
+    if (chatOpen()) return; // already open — clicking the toggle would CLOSE it
+    const t = chatToggleBtn();
+    if (t) { try { t.click(); } catch (_) {} }
   }
   // Meet's chat composer is framework-controlled: a plain `value =` is ignored (Send stays disabled) and a
   // lone synthetic Enter won't fire. execCommand('insertText') drives the *real* input pipeline, so the
@@ -370,7 +395,7 @@
   function reportCallChat(seq, ok, reason) { send({ type: 'callchat-done', session, seq, ok, reason: reason || '' }); }
   function postToCallChat(text, seq) {
     if (!text) return;
-    if (!findChatInput()) openChatPanel();
+    if (!chatOpen()) openChatPanel(); // open only if closed — never toggle an open panel shut
     let tries = 0;
     const timer = setInterval(() => {
       const ta = findChatInput();
