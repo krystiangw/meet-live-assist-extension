@@ -146,6 +146,9 @@
     .advice-item.ACTION { border-left-color: var(--action); background: color-mix(in srgb, var(--action) 8%, var(--surface)); }
     .advice-item.ACTION .marker { color: var(--action); }
     .advice-item.SAY .body { font-weight: 600; }
+    /* SAY splits into the words to speak (prominent, dark) vs framing/why (receded) — read your line at a glance. */
+    .advice-item.SAY .say-quote { font-weight: 700; color: var(--ink); }
+    .advice-item.SAY .say-frame { font-weight: 400; font-size: 12px; color: color-mix(in srgb, var(--text) 58%, transparent); }
     /* Make bold actually pop as a scan-anchor — distinct even against SAY's 600 body baseline. */
     .advice-item .body strong, .item .txt strong { font-weight: 800; color: color-mix(in srgb, var(--ink) 92%, var(--text)); }
     /* Auto-highlighted numbers/values: subtle tinted chip so they surface in a thicket of text. */

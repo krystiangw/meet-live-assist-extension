@@ -254,7 +254,7 @@ function renderInline(parent, line) {
     else if (best.p.kind === 'link') { const a = document.createElement('a'); a.href = g2; a.textContent = g1; a.target = '_blank'; a.rel = 'noreferrer'; parent.appendChild(a); }
     else if (best.p.kind === 'url') { const a = document.createElement('a'); a.href = g1; a.textContent = g1; a.target = '_blank'; a.rel = 'noreferrer'; parent.appendChild(a); }
     else if (best.p.kind === 'jira') { parent.appendChild(jiraLink(full) || document.createTextNode(full)); }
-    else if (best.p.kind === 'bold') { const b = document.createElement('strong'); b.textContent = g1; parent.appendChild(b); }
+    else if (best.p.kind === 'bold') { const b = document.createElement('strong'); renderInline(b, g1); parent.appendChild(b); } // recurse so a Jira key / URL inside **…** still links
     else if (best.p.kind === 'code') { const c = document.createElement('code'); c.textContent = g1; parent.appendChild(c); }
     else if (best.p.kind === 'num') { const s = document.createElement('span'); s.className = 'kw-num'; s.textContent = full; parent.appendChild(s); }
     rest = rest.slice(best.m.index + full.length);
@@ -296,6 +296,22 @@ function renderRich(parent, text) {
     }
     i++;
   }
+}
+
+// SAY = words to actually speak. Split the quoted line(s) (what to say, rendered prominent) from any
+// framing/why (rendered muted) so the user reads their line at a glance. No quotes → whole body is the line.
+function renderSay(parent, text) {
+  const s = String(text || '');
+  const re = /["“”]([^"“”]+)["“”]/g;
+  let last = 0; let m; let any = false;
+  const seg = (cls, str) => { const e = document.createElement('span'); e.className = cls; renderInline(e, str); parent.appendChild(e); };
+  while ((m = re.exec(s))) {
+    any = true;
+    if (m.index > last) seg('say-frame', s.slice(last, m.index));
+    seg('say-quote', m[1]);
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) seg(any ? 'say-frame' : 'say-quote', s.slice(last)); // no quotes at all → all speakable
 }
 
 // ---- list controls: keyword filter + per-item delete / suppress-similar ----
@@ -365,7 +381,7 @@ function appendAdvice({ marker, text, image }) {
   const mk = document.createElement('span'); mk.className = 'marker'; mk.textContent = MARKER_LABEL[m] || '🔵 INFO';
   mk.title = MARKER_TIP[m] || MARKER_TIP.INFO;
   const bd = document.createElement('span'); bd.className = 'body';
-  renderRich(bd, text);
+  if (m === 'SAY') renderSay(bd, text); else renderRich(bd, text);
   if (image && /^(https?:|data:image\/)/.test(image)) {
     const img = document.createElement('img'); img.src = image; img.className = 'rich-img'; bd.appendChild(img);
   }
