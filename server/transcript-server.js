@@ -177,11 +177,34 @@ const dbgData = new Map(); // session -> { kind, data }
 // Brain liveness: the brain (Claude session running the skill) heartbeats here each loop;
 // the panel polls it to show whether an assistant is actually attached to this meeting.
 const brainPing = new Map(); // session -> last heartbeat ms
+const brainStatus = new Map(); // session -> { text, ts } current agent activity ("creating Jira ticket…"); '' = idle
 
 // Live decisions + action items captured by the brain during the call (the board; source for Jira drafts).
 const items = new Map(); // session -> { seq, list: [{ seq, ts, kind, text, owner, blockedBy }] }
 const ITEMS_MAX = 200;
 const ITEM_KINDS = new Set(['decision', 'action']);
+
+// Autopilot: whether the brain may auto-create action items and post links to the call chat (user opt-in).
+const autopilot = new Map(); // session -> { create, postChat }
+// Brain -> panel -> content script: messages to type into the meeting chat (gated by autopilot.postChat).
+const callChat = new Map(); // session -> { seq, items: [{ seq, text }] }
+// Content script -> panel -> server: delivery ACK for a /callchat message (did it actually land in Meet?).
+const callChatResult = new Map(); // session -> { seq, items: [{ seq, ok, reason }] }
+// Handoff between assistants: the latest brain to claim a meeting. A previous assistant sees a newer
+// agent here and yields, so takeover is automatic instead of a manual clad-task.
+const takeover = new Map(); // session -> { agent, ts }
+
+// Agent-driven page actions (flow testing / debugging in the user's real tab). Gated by `drive` (panel
+// opt-in). Brain enqueues to /act, the extension executes on the app tab and posts the outcome to /act-result.
+const drive = new Map();       // session -> bool (is the user letting the agent control the tab?)
+const acts = new Map();        // session -> { seq, items: [cmd] }
+const actResults = new Map();  // session -> { seq, items: [{ seq, ok, value, error }] }
+const ACT_OPS = new Set(['click', 'type', 'press', 'navigate', 'waitFor', 'getText', 'exists', 'select', 'scroll']);
+
+// Suppressions: the user dismissed an advice/action and asked for "no more like this". The brain reads
+// these each turn and skips advice/actions on a suppressed topic.
+const suppress = new Map(); // session -> [{ text, kind, ts }]
+const SUPPRESS_TTL_MS = 8 * 3600 * 1000; // drop dismissals older than 8h (defensive against stale bleed)
 
 // Post-call artifact: the brain writes a summary + action items at wrap-up; the panel offers copy/download.
 const summaries = new Map(); // session -> markdown
@@ -189,7 +212,7 @@ function summaryFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSess
 
 // Meeting mode — steers how the brain advises. Panel sets it; brain reads it each turn.
 const modes = new Map(); // session -> mode
-const MODES = new Set(['auto', 'listener', 'lead']);
+const MODES = new Set(['auto', 'listener', 'lead', 'explain', 'produce']);
 function modeFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.mode.txt`); }
 
 // Only allow safe, contained filenames (no path traversal).
@@ -342,6 +365,7 @@ const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://127.0.0.1');
     const session = safeSession(u.searchParams.get('session'));
     const lang = (u.searchParams.get('lang') || 'auto').slice(0, 5);
+    const src = u.searchParams.get('src') === 'mic' ? 'mic' : 'tab';
     const chunks = []; let size = 0;
     req.on('data', (c) => { chunks.push(c); size += c.length; if (size > 25e6) req.destroy(); });
     req.on('end', () => {
@@ -359,9 +383,10 @@ const server = http.createServer((req, res) => {
               seenSessions.add(session);
               fs.appendFileSync(file, `==== ${session} — started ${new Date().toISOString()} ====\n`);
             }
-            // tabCapture STT has no speaker labels (and captures remote participants, not Krystian) —
-            // mark it unattributed so the brain never authorizes an action from these lines.
-            fs.appendFileSync(file, `[${hms}] (unattributed): ${text}\n`);
+            // Mic STT is the user (co-pilot) → 'You' (authorizes actions). tabCapture STT is remote
+            // participants with no labels → mark unattributed so the brain never auto-authorizes from it.
+            const who = src === 'mic' ? 'You' : '(unattributed)';
+            fs.appendFileSync(file, `[${hms}] ${who}: ${text}\n`);
           } catch (_) {}
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -494,7 +519,10 @@ const server = http.createServer((req, res) => {
     req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
     req.on('end', () => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
-      brainPing.set(safeSession(d.session), Date.now());
+      const s = safeSession(d.session);
+      brainPing.set(s, Date.now());
+      // Optional: current activity to surface in the panel. Sent each turn; '' clears it.
+      if (d.status !== undefined) brainStatus.set(s, { text: String(d.status || '').slice(0, 120), ts: Date.now() });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     });
@@ -503,8 +531,35 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/brain-ping')) {
     const u = new URL(req.url, 'http://127.0.0.1');
     const ts = brainPing.get(safeSession(u.searchParams.get('session'))) || 0;
+    const st = brainStatus.get(safeSession(u.searchParams.get('session')));
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ts, ageMs: ts ? Date.now() - ts : null }));
+    res.end(JSON.stringify({
+      ts, ageMs: ts ? Date.now() - ts : null,
+      status: st ? st.text : '', statusAgeMs: st ? Date.now() - st.ts : null,
+    }));
+    return;
+  }
+
+  // Brain -> server: claim a meeting ("I'm taking this session now"). Other assistants GET this and, on
+  // seeing a NEWER agent than themselves, yield — automatic handoff instead of a manual clad-task.
+  if (req.method === 'POST' && req.url === '/brain-takeover') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
+      const agent = String(d.agent || '').slice(0, 80);
+      if (!agent) { res.writeHead(400); return res.end('agent required'); }
+      takeover.set(safeSession(d.session), { agent, ts: Date.now() });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/brain-takeover')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const t = takeover.get(safeSession(u.searchParams.get('session')));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ agent: t ? t.agent : null, ageMs: t ? Date.now() - t.ts : null }));
     return;
   }
 
@@ -517,7 +572,7 @@ const server = http.createServer((req, res) => {
       const s = safeSession(d.session);
       for (const suf of ['.txt', '.chat.txt', '.mode.txt', '.summary.md']) { try { fs.unlinkSync(path.join(TRANSCRIPTS_DIR, s + suf)); } catch (_) {} }
       try { fs.rmSync(path.join(SNAP_DIR, s), { recursive: true, force: true }); } catch (_) {}
-      for (const m of [advice, chat, items, modes, edits, domReq, doms, dbgReq, dbgData, snapReq, brainPing, summaries]) m.delete(s);
+      for (const m of [advice, chat, items, modes, edits, domReq, doms, dbgReq, dbgData, snapReq, brainPing, brainStatus, summaries, autopilot, callChat, callChatResult, takeover, drive, acts, actResults, suppress]) m.delete(s);
       seenSessions.delete(s);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
@@ -548,6 +603,203 @@ const server = http.createServer((req, res) => {
     if (text == null) { try { text = fs.readFileSync(summaryFileFor(s), 'utf8'); } catch (_) { text = ''; } }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ text: text || '' }));
+    return;
+  }
+
+  // Autopilot flags: panel sets them; brain reads them each turn to decide auto-create / post-to-chat.
+  if (req.method === 'POST' && req.url === '/autopilot') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
+      autopilot.set(safeSession(d.session), { create: !!d.create, postChat: !!d.postChat });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(autopilot.get(safeSession(d.session))));
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/autopilot')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(autopilot.get(safeSession(u.searchParams.get('session'))) || { create: false, postChat: false }));
+    return;
+  }
+
+  // Drive flag: panel opt-in for the agent to control the tab. Panel sets; brain reads before acting.
+  if (req.method === 'POST' && req.url === '/drive') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
+      drive.set(safeSession(d.session), !!d.on);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ on: drive.get(safeSession(d.session)) }));
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/drive')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ on: !!drive.get(safeSession(u.searchParams.get('session'))) }));
+    return;
+  }
+
+  // Brain -> server: enqueue a page action. Panel polls + relays to the app tab (only while drive is on).
+  if (req.method === 'POST' && req.url === '/act') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
+      const session = safeSession(d.session);
+      if (!ACT_OPS.has(d.op)) { res.writeHead(400); return res.end('bad op'); }
+      let a = acts.get(session);
+      if (!a) { a = { seq: 0, items: [] }; acts.set(session, a); }
+      a.seq++;
+      const cmd = { seq: a.seq, op: d.op, selector: d.selector, text: d.text, value: d.value, key: d.key, url: d.url, timeout: d.timeout };
+      a.items.push(cmd);
+      if (a.items.length > 100) a.items.splice(0, a.items.length - 100);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ seq: a.seq }));
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/act-result')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const session = safeSession(u.searchParams.get('session'));
+    const since = parseInt(u.searchParams.get('since') || '0', 10) || 0;
+    const r = actResults.get(session) || { seq: 0, items: [] };
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ items: r.items.filter((i) => i.seq > since), last: r.seq }));
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/act')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const session = safeSession(u.searchParams.get('session'));
+    const since = parseInt(u.searchParams.get('since') || '0', 10) || 0;
+    const a = acts.get(session) || { seq: 0, items: [] };
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ items: a.items.filter((i) => i.seq > since), last: a.seq }));
+    return;
+  }
+  // Extension -> server: the outcome of an action (brain polls this).
+  if (req.method === 'POST' && req.url === '/act-result') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 2e6) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
+      const session = safeSession(d.session);
+      let r = actResults.get(session);
+      if (!r) { r = { seq: 0, items: [] }; actResults.set(session, r); }
+      r.seq = Math.max(r.seq, d.seq || 0);
+      r.items.push({ seq: d.seq || r.seq, ok: !!d.ok, value: d.value, error: d.error });
+      if (r.items.length > 100) r.items.splice(0, r.items.length - 100);
+      res.writeHead(200); res.end('ok');
+    });
+    return;
+  }
+
+  // Panel -> server: import pre-join context (e.g. a Gemini / Zoom-AI "summarize so far") into the
+  // transcript so the brain has what happened before capture started.
+  if (req.method === 'POST' && req.url === '/context') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e6) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
+      const session = safeSession(d.session);
+      const text = typeof d.text === 'string' ? d.text.trim() : '';
+      if (!text) { res.writeHead(400); return res.end('empty'); }
+      const dt = new Date();
+      const hms = [dt.getHours(), dt.getMinutes(), dt.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
+      try {
+        const file = fileFor(session);
+        if (!seenSessions.has(session)) { seenSessions.add(session); fs.appendFileSync(file, `==== ${session} — started ${new Date().toISOString()} ====\n`); }
+        fs.appendFileSync(file, `\n[${hms}] ===== PRE-JOIN CONTEXT (imported) =====\n${text}\n=================================================\n`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, chars: text.length }));
+      } catch (e) { res.writeHead(500); res.end('write failed'); }
+    });
+    return;
+  }
+
+  // Brain -> server: enqueue a message to send into the meeting chat. Panel polls + relays to the tab.
+  if (req.method === 'POST' && req.url === '/callchat') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
+      const session = safeSession(d.session);
+      const text = typeof d.text === 'string' ? d.text.trim() : '';
+      if (!text) { res.writeHead(400); return res.end('empty'); }
+      let cc = callChat.get(session);
+      if (!cc) { cc = { seq: 0, items: [] }; callChat.set(session, cc); }
+      cc.seq++; cc.items.push({ seq: cc.seq, text });
+      if (cc.items.length > 50) cc.items.splice(0, cc.items.length - 50);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ seq: cc.seq }));
+    });
+    return;
+  }
+  // Extension -> server: did a /callchat message actually land in Meet? (delivery ACK, so the brain isn't
+  // posting into the void). MUST be matched before GET /callchat (startsWith).
+  if (req.method === 'POST' && req.url === '/callchat-result') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
+      const session = safeSession(d.session);
+      let cr = callChatResult.get(session);
+      if (!cr) { cr = { seq: 0, items: [] }; callChatResult.set(session, cr); }
+      cr.seq++;
+      cr.items.push({ seq: Number(d.seq) || cr.seq, ok: !!d.ok, reason: typeof d.reason === 'string' ? d.reason.slice(0, 200) : '' });
+      if (cr.items.length > 50) cr.items.splice(0, cr.items.length - 50);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/callchat-result')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const session = safeSession(u.searchParams.get('session'));
+    const since = parseInt(u.searchParams.get('since') || '0', 10) || 0;
+    const cr = callChatResult.get(session) || { seq: 0, items: [] };
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ items: cr.items.filter((i) => i.seq > since), last: cr.seq }));
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/callchat')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const session = safeSession(u.searchParams.get('session'));
+    const since = parseInt(u.searchParams.get('since') || '0', 10) || 0;
+    const cc = callChat.get(session) || { seq: 0, items: [] };
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ items: cc.items.filter((i) => i.seq > since), last: cc.seq }));
+    return;
+  }
+
+  // Panel -> server: suppress a topic ("don't suggest similar"). Brain <- server: read + honour it.
+  if (req.method === 'POST' && req.url === '/suppress') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
+      const session = safeSession(d.session);
+      const text = typeof d.text === 'string' ? d.text.trim().slice(0, 500) : '';
+      if (!text) { res.writeHead(400); return res.end('empty'); }
+      const list = suppress.get(session) || [];
+      list.push({ text, kind: d.kind === 'action' ? 'action' : d.kind === 'advice' ? 'advice' : 'any', ts: Date.now() });
+      if (list.length > 100) list.splice(0, list.length - 100);
+      suppress.set(session, list);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ count: list.length }));
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/suppress')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    // TTL so stale dismissals never bleed into a later meeting (defensive; entries are already per-session).
+    const list = (suppress.get(safeSession(u.searchParams.get('session'))) || []).filter((e) => !e.ts || Date.now() - e.ts < SUPPRESS_TTL_MS);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ items: list.map(({ text, kind }) => ({ text, kind })) }));
     return;
   }
 
