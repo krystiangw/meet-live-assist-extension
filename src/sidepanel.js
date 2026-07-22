@@ -17,6 +17,7 @@ const shareEl = document.getElementById('shareStatus');
 const speakEl = document.getElementById('speakStatus');
 const sessionEl = document.getElementById('session');
 const chatEl = document.getElementById('chat');
+const tokenEstEl = document.getElementById('tokenEst');
 const chatForm = document.getElementById('chatForm');
 const chatInput = document.getElementById('chatInput');
 const sttToggle = document.getElementById('sttToggle');
@@ -457,12 +458,13 @@ async function pollBrain() {
   try {
     const r = await fetch(`${serverUrl}/brain-ping?session=${encodeURIComponent(currentSession)}`, { headers: hdrs() });
     if (!r.ok) { setBrainWork(''); return; } // can't confirm activity → don't leave a stale bubble pinned
-    const { ageMs, status, statusAgeMs } = await r.json();
+    const { ageMs, status, statusAgeMs, estTokens } = await r.json();
     const live = ageMs != null && ageMs < 45000; // heartbeat within 45s = attached
     setStatus(brainEl, live ? '🧠 assistant on' : '🧠 no assistant', live ? 'ok' : 'bad');
     setBrainEmpty(live);
     // Show a live "working…" bubble while the agent is mid-action; stale (>30s) = drop it (crash guard).
     setBrainWork(live && status && statusAgeMs != null && statusAgeMs < 30000 ? status : '');
+    renderTokenEst(estTokens);
   } catch (_) { setBrainWork(''); /* server down — srv pill already reflects it */ }
 }
 
@@ -482,6 +484,20 @@ function setBrainWork(text) {
   const atBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 40;
   chatEl.appendChild(brainWorkEl); // keep pinned below the latest message
   if (atBottom) chatEl.scrollTop = chatEl.scrollHeight; // don't yank the view if user scrolled up to read
+}
+
+// Volume-based token estimate near the chat (server computes it). Directional gauge, not billing.
+function fmtTok(n) {
+  if (!n || n < 1) return null;
+  if (n < 1000) return String(n);
+  const k = Math.round(n / 1000); // round first, then roll over so 999.5k shows as 1M, not "1000k"
+  return k >= 1000 ? (k / 1000).toFixed(1).replace(/\.0$/, '') + 'M' : k + 'k';
+}
+function renderTokenEst(n) {
+  const s = fmtTok(n);
+  if (!s) { tokenEstEl.hidden = true; return; }
+  tokenEstEl.textContent = `⛃ ~${s} tok (est.)`;
+  tokenEstEl.hidden = false;
 }
 
 async function pollAdvice() {

@@ -228,6 +228,16 @@ function fileFor(session) {
   return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.txt`);
 }
 
+// Rough, volume-based estimate of tokens the brain has processed this call: transcript + chat bytes ÷ 4.
+// NOT billing — it counts raw volume once, so it undercounts per-turn context re-reads (the panel labels it "est.").
+function estTokensFor(session) {
+  let bytes = 0;
+  for (const f of [fileFor(session), chatFileFor(session)]) {
+    try { bytes += fs.statSync(f).size; } catch (_) { /* not created yet */ }
+  }
+  return Math.round(bytes / 4);
+}
+
 function cors(req, res) {
   // Reflect only the extension's own origin — never a web page's. A malicious site's cross-origin
   // request then fails its preflight (custom X-MLA-Token header forces one) and is never sent.
@@ -536,6 +546,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({
       ts, ageMs: ts ? Date.now() - ts : null,
       status: st ? st.text : '', statusAgeMs: st ? Date.now() - st.ts : null,
+      estTokens: estTokensFor(u.searchParams.get('session')),
     }));
     return;
   }

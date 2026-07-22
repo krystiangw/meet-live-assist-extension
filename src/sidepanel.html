@@ -215,6 +215,8 @@
     .work-dots i:nth-child(3) { animation-delay: .36s; }
     @keyframes mla-bounce { 0%, 60%, 100% { opacity: .35; transform: none; } 30% { opacity: 1; transform: translateY(-3px); } }
     @media (prefers-reduced-motion: reduce) { .work-dots i { animation: none; } }
+    .token-est { margin: 2px 12px 0; text-align: right; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: color-mix(in srgb, var(--text) 55%, transparent); cursor: help; font-variant-numeric: tabular-nums; }
     #quickAsk { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 12px 0; }
     #quickAsk button { font: 11px system-ui; padding: 4px 10px; border-radius: 999px; cursor: pointer;
       border: 1px solid var(--line); background: transparent; color: inherit; }
@@ -324,6 +326,8 @@
 
   <div class="section-label">Chat</div>
   <div id="chat"></div>
+  <div id="tokenEst" class="token-est" hidden
+    title="Rough estimate of what the assistant has processed this call (transcript + chat volume ÷ 4). Volume-based estimate, not exact billing — it undercounts per-turn context re-reads.">⛃ —</div>
   <div id="quickAsk">
     <button type="button" title="Quick catch-up on the last few minutes" data-ask="What did I miss in the last few minutes? Give me a 3-bullet catch-up.">⏮ Recap</button>
     <button type="button" title="Check if you were mentioned or asked anything" data-ask="Was I (Krystian) mentioned or asked anything recently? If so, what and by whom?">🙋 Mentioned me?</button>
