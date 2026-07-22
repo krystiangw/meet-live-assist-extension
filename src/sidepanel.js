@@ -461,6 +461,14 @@ async function speak(text, btn) {
 
 function resetAdvice() { adviceEl.innerHTML = '<div class="empty small">Suggestions will appear here live…</div>'; hasAdvice = false; lastAdviceSeq = 0; syncSearchVisibility(); }
 
+// Server seq only grows within one server lifetime; if `last` comes back BELOW our cursor the transcript
+// server restarted (its in-memory queue reset to 0). Resync from 0 so we don't miss the fresh queue —
+// otherwise Math.max would pin the stale-high cursor and drop every post-restart message.
+function nextSeq(cur, last) {
+  if (typeof last !== 'number') return cur;
+  return last < cur ? 0 : Math.max(cur, last);
+}
+
 // Reflect brain liveness in the advice empty-state so "nothing happening" is explained, not silent.
 function setBrainEmpty(live) {
   if (hasAdvice) return;
@@ -523,7 +531,7 @@ async function pollAdvice() {
     if (!r.ok) return;
     const { items, last } = await r.json();
     (items || []).forEach(appendAdvice);
-    if (typeof last === 'number') lastAdviceSeq = Math.max(lastAdviceSeq, last);
+    lastAdviceSeq = nextSeq(lastAdviceSeq, last);
   } catch (_) { /* server down — transcript-side status already reflects it */ }
 }
 
@@ -590,7 +598,7 @@ async function pollItems() {
     if (!r.ok) return;
     const { items, last } = await r.json();
     (items || []).forEach(appendItem);
-    if (typeof last === 'number') lastItemsSeq = Math.max(lastItemsSeq, last);
+    lastItemsSeq = nextSeq(lastItemsSeq, last);
   } catch (_) {}
 }
 
@@ -685,7 +693,7 @@ async function pollChat() {
     if (!r.ok) return;
     const { items, last } = await r.json();
     (items || []).forEach(appendChat);
-    if (typeof last === 'number') lastChatSeq = Math.max(lastChatSeq, last);
+    lastChatSeq = nextSeq(lastChatSeq, last);
   } catch (_) { /* server down */ }
 }
 
