@@ -234,6 +234,9 @@ const RICH = [
   { re: /\b[A-Z][A-Z0-9]{1,5}-\d+\b/, kind: 'jira' },
   { re: /\*\*([^*]+)\*\*/, kind: 'bold' },
   { re: /`([^`]+)`/, kind: 'code' },
+  // Auto-emphasise the highest-stakes tokens so they pop even when the brain didn't bold them:
+  // money, number+unit (SP/pts/%/days/…), times, ISO dates, and 3+-digit counts (SP totals, refs).
+  { re: /([$€£]\s?\d[\d.,]*|\b\d[\d.,]*\s?%|\b\d[\d.,]*\s?(?:SP|pts?|points?|days?|weeks?|hrs?|hours?|mins?|minutes?)\b|\b\d{1,2}:\d{2}\b|\b\d{4}-\d{2}-\d{2}\b|\b\d{1,3}(?:,\d{3})+\b|\b\d{3,}\b)/i, kind: 'num' },
 ];
 function renderInline(parent, line) {
   let rest = line;
@@ -252,6 +255,7 @@ function renderInline(parent, line) {
     else if (best.p.kind === 'jira') { parent.appendChild(jiraLink(full) || document.createTextNode(full)); }
     else if (best.p.kind === 'bold') { const b = document.createElement('strong'); b.textContent = g1; parent.appendChild(b); }
     else if (best.p.kind === 'code') { const c = document.createElement('code'); c.textContent = g1; parent.appendChild(c); }
+    else if (best.p.kind === 'num') { const s = document.createElement('span'); s.className = 'kw-num'; s.textContent = full; parent.appendChild(s); }
     rest = rest.slice(best.m.index + full.length);
   }
 }
@@ -518,12 +522,17 @@ function appendItem({ kind, text, owner, blockedBy }) {
   const k = document.createElement('span'); k.className = 'kind'; k.textContent = decision ? 'DECISION' : 'ACTION';
   k.title = decision ? 'A decision reached in the meeting' : 'An action item / to-do (click text to mark done)';
   const body = document.createElement('div'); body.className = 'body';
-  const txt = document.createElement('div'); txt.className = 'txt'; linkify(txt, text);
+  const txt = document.createElement('div'); txt.className = 'txt'; renderInline(txt, text);
   txt.title = 'Click to mark done'; txt.addEventListener('click', (e) => { if (e.target.tagName === 'A') return; div.classList.toggle('done'); });
   body.appendChild(txt);
   if (owner || blockedBy) {
     const meta = document.createElement('div'); meta.className = 'meta';
-    meta.textContent = [owner ? `owner: ${owner}` : '', blockedBy ? `blocked by: ${blockedBy}` : ''].filter(Boolean).join(' · ');
+    const parts = [['owner: ', owner], ['blocked by: ', blockedBy]].filter(([, v]) => v);
+    parts.forEach(([label, val], idx) => {
+      if (idx) meta.appendChild(document.createTextNode(' · '));
+      meta.appendChild(document.createTextNode(label));
+      const s = document.createElement('strong'); s.textContent = val; meta.appendChild(s); // who/blocker is the scan-anchor
+    });
     body.appendChild(meta);
   }
   div.append(k, body);

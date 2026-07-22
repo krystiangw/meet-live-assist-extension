@@ -146,6 +146,11 @@
     .advice-item.ACTION { border-left-color: var(--action); background: color-mix(in srgb, var(--action) 8%, var(--surface)); }
     .advice-item.ACTION .marker { color: var(--action); }
     .advice-item.SAY .body { font-weight: 600; }
+    /* Make bold actually pop as a scan-anchor — distinct even against SAY's 600 body baseline. */
+    .advice-item .body strong, .item .txt strong { font-weight: 800; color: color-mix(in srgb, var(--ink) 92%, var(--text)); }
+    /* Auto-highlighted numbers/values: subtle tinted chip so they surface in a thicket of text. */
+    .kw-num { font-weight: 700; font-variant-numeric: tabular-nums; padding: 0 3px; border-radius: 4px;
+      background: color-mix(in srgb, var(--summary) 15%, transparent); }
     .advice-item .body a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
     .upd-badge { align-self: flex-start; font-size: 10px; font-weight: 600; line-height: 1.6; padding: 0 6px;
       border-radius: 8px; white-space: nowrap; border: 1px solid color-mix(in srgb, var(--action) 55%, transparent);
@@ -177,8 +182,13 @@
     .item.action .kind { background: color-mix(in srgb, var(--action) 18%, transparent); color: var(--action); }
     .item.decision .kind { background: color-mix(in srgb, var(--summary) 18%, transparent); color: var(--summary); }
     .item .body { flex: 1; }
-    .item .meta { font-size: 11px; opacity: .6; margin-top: 1px; }
+    .item .meta { font-size: 11px; color: color-mix(in srgb, var(--text) 52%, transparent); margin-top: 1px; }
+    .item .meta strong { font-weight: 700; color: var(--text); } /* owner/blocker name stands out from the dim label */
     .item .txt { cursor: pointer; }
+    .item .txt code {
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: color-mix(in srgb, var(--ink) 12%, transparent); padding: 1px 4px; border-radius: 4px;
+    }
     .item.done .txt { text-decoration: line-through; opacity: .5; }
     .item .jira { border: 1px solid var(--line); background: transparent; color: inherit;
       font: 11px system-ui; padding: 2px 8px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
