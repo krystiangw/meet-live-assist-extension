@@ -202,6 +202,11 @@ and literal values in `` `code` `` (flags, file paths, function/env names, IDs, 
 **echo them for confirmation** per "Data fidelity". One bold phrase per line, not five — over-bolding reads
 as noise, same as none.
 
+**🟢 SAY — quote the exact words to speak.** Wrap the words Krystian should say out loud in **double quotes**;
+put any framing/why OUTSIDE the quotes and keep it short. The panel renders the quoted part prominently and
+the framing muted, so he reads his line at a glance. E.g.
+`Framing: "the exact sentence to say."` — or just `"the exact sentence"` when no framing is needed.
+
 ### Working status (live "…" bubble in the panel)
 When you start a **multi-step action that takes more than a moment** (creating a Jira ticket, drafting a
 doc, reading a snapshot, searching Confluence), tell the panel so it shows an animated *"working…"* bubble
@@ -498,6 +503,22 @@ Either path counts as confirmation:
   every caption line; extra wakeups are pure noise/cost.
 - **Cost:** every caption line can wake you — stay ruthlessly SILENT on filler (per the output rules) and
   don't react to half-sentences; the server-side flush batching does the rest.
+
+### Token economy on the watch loop (a long call grows context ~quadratically)
+The single biggest failure mode is cost: ~1 turn per caption × context that carries all prior turns. Levers,
+in order of leverage:
+- **Run the watch loop cheap.** Use **Sonnet + `/effort low`** for the observe-and-mirror loop; escalate to
+  Opus / higher effort only for an actual action (drafting a ticket, a real analysis), then drop back. Don't
+  sit on Opus for 45 min of listening (matches the shared-limit rule in CLAUDE.md).
+- **Keep the session lean on MCP.** Connect only the servers this meeting needs (e.g. CIO/Rudderstack when
+  relevant). Heavy connectors (Datadog/Figma/…) push ~150k of tool schemas into context and reload on every
+  reconnect — pure overhead on a watch loop.
+- **Compact periodically** on long calls (`/compact` before the window balloons) — old transcript turns
+  summarised out beat letting the quadratic win.
+- **The server already batches for you** (since 2026-07): it coalesces caption writes into ~3.5s windows,
+  drops pure filler ("uh", "so?"), and flushes immediately on a question or decision cue. Net effect you'll
+  notice: advice on ordinary chatter lags a few seconds (intended, saves turns); questions/decisions still
+  wake you promptly. Don't add your own polling on top.
 
 ### Data fidelity — captions are lossy (validated on a real 60-min call)
 Captions drop/garble the highest-stakes tokens: **numbers** ("680/681" flipped from "let's go ahead with

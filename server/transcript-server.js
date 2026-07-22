@@ -239,6 +239,38 @@ function estTokensFor(session) {
   return Math.round(bytes / 4);
 }
 
+// --- Adaptive caption batching (token economy) --------------------------------------------------
+// Each file write wakes the brain's Monitor → a turn. Coalescing chatter into fewer, larger writes and
+// dropping pure filler cuts turns (and the quadratic context growth they cause). Hybrid: buffer normal
+// caption lines for a short window, but flush IMMEDIATELY when a line carries a question or a decision cue
+// so live ripostes on the moments that matter stay fast. Chat lines and the empty keepalive flush too.
+const COALESCE_MS = 3500;
+const MAX_BUF_CHARS = 1200;
+const appendBuf = new Map(); // session -> { lines: [], timer }
+// No '?' in the trailing class: a question like "So?" must reach the cue-flush, not be dropped as filler.
+const FILLER_RE = /^(uh+|um+|erm+|hmm+|mhm+|so|ok|okay|yeah|yep|nope|right|well|and|but|the|like|you know|i mean)[\s.,!-]*$/i;
+const FLUSH_CUE_RE = /\?|\b(agree|agreed|decide|decided|decision|let'?s|we'?ll|we will|action item|to-?dos?|deadline|blocker|blocked|approved?|reject(ed)?|ship it)\b/i;
+function spokenText(line) { // strip "[hh:mm:ss] Speaker: " to classify the actual words
+  return line.replace(/^\[[^\]]*\]\s*/, '').replace(/^[^:]{1,40}:\s*/, '').trim();
+}
+function flushAppend(session) {
+  const b = appendBuf.get(session);
+  if (!b) return;
+  if (b.timer) { clearTimeout(b.timer); b.timer = null; }
+  if (b.lines.length) {
+    try { fs.appendFileSync(fileFor(session), b.lines.join('')); } catch (e) { console.error('[transcript] flush failed', e); }
+    b.lines = [];
+  }
+}
+function bufferCaption(session, line) {
+  let b = appendBuf.get(session);
+  if (!b) { b = { lines: [], timer: null }; appendBuf.set(session, b); }
+  b.lines.push(line);
+  const chars = b.lines.reduce((n, l) => n + l.length, 0);
+  if (FLUSH_CUE_RE.test(line) || chars >= MAX_BUF_CHARS) { flushAppend(session); return; }
+  if (!b.timer) b.timer = setTimeout(() => { b.timer = null; flushAppend(session); }, COALESCE_MS);
+}
+
 function cors(req, res) {
   // Reflect only the extension's own origin — never a web page's. A malicious site's cross-origin
   // request then fails its preflight (custom X-MLA-Token header forces one) and is never sent.
@@ -283,7 +315,14 @@ const server = http.createServer((req, res) => {
           fs.appendFileSync(file, `==== ${session} — started ${new Date().toISOString()} ====\n`);
           console.log(`[transcript] new session → ${file}`);
         }
-        if (line) fs.appendFileSync(file, line);
+        if (line) {
+          const isChat = / \[chat\] /.test(line);
+          if (isChat) { flushAppend(session); fs.appendFileSync(file, line); } // discrete message → write now
+          else if (FILLER_RE.test(spokenText(line))) { /* pure filler → drop (don't wake the brain for "uh") */ }
+          else bufferCaption(session, line); // coalesce chatter; cue lines flush themselves
+        } else {
+          flushAppend(session); // empty keepalive → push out anything pending
+        }
         res.writeHead(204); res.end();
       } catch (e) {
         console.error('[transcript] write failed', e);
@@ -397,6 +436,7 @@ const server = http.createServer((req, res) => {
             // Mic STT is the user (co-pilot) → 'You' (authorizes actions). tabCapture STT is remote
             // participants with no labels → mark unattributed so the brain never auto-authorizes from it.
             const who = src === 'mic' ? 'You' : '(unattributed)';
+            flushAppend(session); // drain any buffered DOM captions first so file order stays chronological
             fs.appendFileSync(file, `[${hms}] ${who}: ${text}\n`);
           } catch (_) {}
         }
@@ -606,7 +646,8 @@ const server = http.createServer((req, res) => {
       const s = safeSession(d.session);
       for (const suf of ['.txt', '.chat.txt', '.mode.txt', '.summary.md']) { try { fs.unlinkSync(path.join(TRANSCRIPTS_DIR, s + suf)); } catch (_) {} }
       try { fs.rmSync(path.join(SNAP_DIR, s), { recursive: true, force: true }); } catch (_) {}
-      for (const m of [advice, chat, items, modes, edits, domReq, doms, dbgReq, dbgData, snapReq, brainPing, brainStatus, control, summaries, autopilot, callChat, callChatResult, takeover, drive, acts, actResults, suppress]) m.delete(s);
+      { const b = appendBuf.get(s); if (b && b.timer) clearTimeout(b.timer); }
+      for (const m of [advice, chat, items, modes, edits, domReq, doms, dbgReq, dbgData, snapReq, brainPing, brainStatus, control, appendBuf, summaries, autopilot, callChat, callChatResult, takeover, drive, acts, actResults, suppress]) m.delete(s);
       seenSessions.delete(s);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
@@ -747,6 +788,7 @@ const server = http.createServer((req, res) => {
       try {
         const file = fileFor(session);
         if (!seenSessions.has(session)) { seenSessions.add(session); fs.appendFileSync(file, `==== ${session} — started ${new Date().toISOString()} ====\n`); }
+        flushAppend(session); // drain buffered captions first so the imported block stays in order
         fs.appendFileSync(file, `\n[${hms}] ===== PRE-JOIN CONTEXT (imported) =====\n${text}\n=================================================\n`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, chars: text.length }));
@@ -963,6 +1005,11 @@ const server = http.createServer((req, res) => {
 
   res.writeHead(404); res.end('not found');
 });
+
+// Flush any buffered captions before dying (launchd reload / Ctrl-C) so the tail isn't lost on restart.
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => { for (const s of appendBuf.keys()) flushAppend(s); process.exit(0); });
+}
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[transcript] listening on http://127.0.0.1:${PORT}`);
