@@ -156,7 +156,9 @@
   }
   function buildSession(code) {
     const d = new Date();
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}_${code}`;
+    // No time component: same meeting on the same day → same file across a disconnect/rejoin
+    // (a recurring meeting on another day still gets its own date → own file).
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${code}`;
   }
 
   let badge;

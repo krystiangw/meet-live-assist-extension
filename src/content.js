@@ -233,8 +233,9 @@
   function buildSession(code) {
     const d = new Date();
     const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    const time = `${pad(d.getHours())}${pad(d.getMinutes())}`;
-    return `${date}_${time}_${code}`;
+    // No time component: same meeting code on the same day → same file, so a disconnect/rejoin
+    // resumes the SAME transcript. A recurring meeting on another day gets its own date → own file.
+    return `${date}_${code}`;
   }
 
   // ---- LIFECYCLE: start/stop with the call ---------------------------------
