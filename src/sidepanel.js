@@ -20,6 +20,7 @@ const chatEl = document.getElementById('chat');
 const tokenEstEl = document.getElementById('tokenEst');
 const chatForm = document.getElementById('chatForm');
 const chatInput = document.getElementById('chatInput');
+const cmdMenu = document.getElementById('cmdMenu');
 const sttToggle = document.getElementById('sttToggle');
 const sttEl = document.getElementById('sttStatus');
 const editEl = document.getElementById('editStatus');
@@ -64,8 +65,21 @@ let pingTimer = null;
 let pollTimer = null;
 let brainTimer = null;
 let shareTimer = null;
+let lastAuthWarnAt = 0;
 
 function setStatus(el, text, cls) { el.textContent = text; el.className = 'status ' + cls; }
+async function pollServerHealth() {
+  if (Date.now() - lastAuthWarnAt < 20000) return;
+  try {
+    // Poll a token-guarded route, NOT /health (which is unauthenticated and always 200) — so the pill
+    // reflects auth too: a wrong/missing token shows the token warning instead of a misleading ✓.
+    const r = await fetch(`${serverUrl}/brain-ping?session=${encodeURIComponent(currentSession || 'none')}`, { headers: hdrs() });
+    if (r.status === 403) { lastAuthWarnAt = Date.now(); setStatus(srvEl, 'server ✗ (set token in options)', 'bad'); return; }
+    setStatus(srvEl, r.ok ? 'server ✓' : 'server ✗ (start it)', r.ok ? 'ok' : 'bad');
+  } catch (_) {
+    setStatus(srvEl, 'server ✗ (start it)', 'bad');
+  }
+}
 
 // Live "Ns ago" next to 📷 so you can see at a glance how stale the assistant's visual context is.
 function renderSnapAge() {
@@ -316,7 +330,7 @@ function renderSay(parent, text) {
 
 // ---- list controls: keyword filter + per-item delete / suppress-similar ----
 let adviceFilter = '', itemFilter = '';
-async function suppressTopic(text, kind) {
+async function suppress(text, kind) {
   if (!currentSession || !text) return;
   try { await fetch(`${serverUrl}/suppress`, { method: 'POST', headers: hdrs(true), body: JSON.stringify({ session: currentSession, text, kind }) }); } catch (_) {}
 }
@@ -401,7 +415,7 @@ function appendAdvice({ marker, text, image }) {
     div.append(cp);
   }
   div.append(iconBtn('✕', 'Remove this advice', () => { div.remove(); syncSearchVisibility(); }));
-  if (text) div.append(iconBtn('🚫', 'Remove & stop suggesting similar', () => { div.remove(); syncSearchVisibility(); suppressTopic(text, 'advice'); }));
+  if (text) div.append(iconBtn('🚫', 'Remove & stop suggesting similar', () => { div.remove(); syncSearchVisibility(); suppress(text, 'advice'); }));
   div.dataset.text = (text || '').toLowerCase();
   if (adviceFilter && !div.dataset.text.includes(adviceFilter)) div.hidden = true;
   adviceEl.appendChild(div);
@@ -585,7 +599,7 @@ function appendItem({ kind, text, owner, blockedBy }) {
     div.append(j);
   }
   div.append(iconBtn('✕', 'Remove this item', () => { div.remove(); syncSearchVisibility(); }));
-  if (!decision) div.append(iconBtn('🚫', 'Remove & stop suggesting similar', () => { div.remove(); syncSearchVisibility(); suppressTopic(text, 'action'); }));
+  if (!decision) div.append(iconBtn('🚫', 'Remove & stop suggesting similar', () => { div.remove(); syncSearchVisibility(); suppress(text, 'action'); }));
   div.dataset.text = (text || '').toLowerCase();
   if (itemFilter && !div.dataset.text.includes(itemFilter)) div.hidden = true;
   itemsEl.appendChild(div);
@@ -709,11 +723,126 @@ async function sendChat(text) {
   } catch (_) {}
 }
 
+const COMMANDS = [
+  {
+    name: '/snapshot', aliases: ['/snap', '/shot'], arg: null,
+    desc: 'Send a screen snapshot to the assistant',
+    run: () => { try { port.postMessage({ type: 'snapshot-now' }); } catch (_) {} },
+  },
+  { name: '/summary', aliases: [], arg: null, desc: 'Fetch & copy the post-call summary', run: () => doSummary() },
+  { name: '/clear', aliases: [], arg: null, desc: 'Clear the transcript', run: () => doClear() },
+  { name: '/pause', aliases: [], arg: null, desc: 'Pause capture + advice', run: () => applyPause(true) },
+  { name: '/resume', aliases: [], arg: null, desc: 'Resume', run: () => applyPause(false) },
+  { name: '/stop', aliases: [], arg: null, desc: 'Stop & wrap up', run: () => applyStop() },
+  {
+    name: '/autopilot', aliases: [], arg: 'on|off', desc: 'Toggle auto-create of decisions/actions',
+    run: (argText) => { autoCreateEl.checked = argText.trim() === 'on'; postAutopilot(); },
+  },
+  {
+    name: '/postchat', aliases: [], arg: 'on|off', desc: 'Toggle posting links to call chat',
+    run: (argText) => { postChatEl.checked = argText.trim() === 'on'; postAutopilot(); },
+  },
+  { name: '/suppress', aliases: [], arg: '<text>', desc: 'Suppress advice like this', run: (argText) => suppress(argText, 'any') },
+  { name: '/ask', aliases: [], arg: '<question>', desc: 'Ask the assistant', run: (argText) => sendChat(argText) },
+  {
+    name: '/recap', aliases: [], arg: null, desc: 'Quick recap so far',
+    run: () => sendChat('Quick recap of the discussion so far, please — 3 bullets max.'),
+  },
+  {
+    name: '/explain', aliases: [], arg: '<term>', desc: 'Explain a term/decision',
+    run: (argText) => sendChat('Explain briefly: ' + argText),
+  },
+  {
+    name: '/draft', aliases: [], arg: '<action item>', desc: 'Draft a Jira ticket (DRAFT only)',
+    run: (argText) => sendChat('Draft a Jira ticket (DRAFT only — do not create) for this action item: "' + argText + '". Use the team\'s Goal / Summary / Test plan sections.'),
+  },
+];
+let cmdMatches = [];
+let cmdFocus = 0;
+
+function findCommand(token) {
+  return COMMANDS.find((cmd) => cmd.name === token || cmd.aliases.includes(token));
+}
+function hideCommandMenu() {
+  cmdMenu.hidden = true;
+  cmdMatches = [];
+  cmdFocus = 0;
+}
+function renderCommandMenu() {
+  const value = chatInput.value;
+  if (!value.startsWith('/') || value.includes(' ')) { hideCommandMenu(); return; }
+  const token = value.toLowerCase();
+  cmdMatches = COMMANDS.filter((cmd) => [cmd.name, ...cmd.aliases].some((name) => name.startsWith(token)));
+  if (!cmdMatches.length) { hideCommandMenu(); return; }
+  cmdFocus = Math.min(cmdFocus, cmdMatches.length - 1);
+  cmdMenu.innerHTML = '';
+  cmdMatches.forEach((cmd, index) => {
+    const row = document.createElement('div');
+    row.className = 'cmd-row' + (index === cmdFocus ? ' focused' : '');
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', index === cmdFocus ? 'true' : 'false');
+    const name = document.createElement('span'); name.className = 'cmd-name';
+    name.textContent = cmd.name + (cmd.arg ? ` ${cmd.arg}` : '');
+    const desc = document.createElement('span'); desc.className = 'cmd-desc'; desc.textContent = cmd.desc;
+    row.append(name, desc);
+    row.addEventListener('mousedown', (e) => { e.preventDefault(); chooseCommand(cmd); });
+    cmdMenu.appendChild(row);
+  });
+  cmdMenu.hidden = false;
+}
+function completeCommand(cmd) {
+  chatInput.value = cmd.name + (cmd.arg ? ' ' : '');
+  hideCommandMenu();
+  chatInput.focus();
+}
+function runCommand(cmd, argText) {
+  if (cmd.arg && !argText.trim()) { completeCommand(cmd); return false; }
+  chatInput.value = '';
+  hideCommandMenu();
+  cmd.run(argText);
+  return true;
+}
+function chooseCommand(cmd) {
+  if (cmd.arg) completeCommand(cmd);
+  else runCommand(cmd, '');
+}
+
+chatInput.addEventListener('input', () => { cmdFocus = 0; renderCommandMenu(); });
+chatInput.addEventListener('keydown', (e) => {
+  if (cmdMenu.hidden) {
+    if (e.key === 'Escape') hideCommandMenu();
+    return;
+  }
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    const step = e.key === 'ArrowDown' ? 1 : -1;
+    cmdFocus = (cmdFocus + step + cmdMatches.length) % cmdMatches.length;
+    renderCommandMenu();
+  } else if (e.key === 'Tab' || e.key === 'ArrowRight') {
+    e.preventDefault();
+    completeCommand(cmdMatches[cmdFocus]);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    hideCommandMenu();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    chooseCommand(cmdMatches[cmdFocus]);
+  }
+});
+
 chatForm.addEventListener('submit', (e) => {
   e.preventDefault();
   const text = chatInput.value.trim();
   if (!text) return;
+  const [token] = text.split(/\s+/, 1);
+  const cmd = findCommand(token.toLowerCase());
+  if (cmd) {
+    const argText = text.slice(token.length).trim();
+    runCommand(cmd, argText);
+    return;
+  }
   chatInput.value = '';
+  hideCommandMenu();
   sendChat(text);
 });
 
@@ -852,6 +981,7 @@ function onMessage(msg) {
       callLang = msg.lang;
       break;
     case 'server':
+      if (!msg.ok && msg.status === 403) lastAuthWarnAt = Date.now();
       setStatus(srvEl, msg.ok ? 'server ✓' : (msg.status === 403 ? 'server ✗ (set token in options)' : 'server ✗ (start it)'), msg.ok ? 'ok' : 'bad');
       break;
     case 'snapshot':
@@ -929,21 +1059,25 @@ async function postControl(state) {
   if (!currentSession) return;
   try { await fetch(`${serverUrl}/control`, { method: 'POST', headers: hdrs(true), body: JSON.stringify({ session: currentSession, state }) }); } catch (_) {}
 }
-pauseBtn.addEventListener('click', () => {
+// Full pause/stop behavior lives here so both the buttons and the /pause,/resume,/stop
+// slash commands apply it identically — postControl alone only notifies the server/brain,
+// it does NOT tell the SW to actually drop captures or update the pause UI.
+function applyPause(next) {
   if (!currentSession) return;
-  const next = !paused;
   setPausedUI(next); // optimistic; SW echoes a 'paused' broadcast that re-affirms it
   try { port.postMessage({ type: next ? 'pause' : 'resume' }); } catch (_) {}
   postControl(next ? 'paused' : 'running');
-});
-stopBtn.addEventListener('click', () => {
+}
+function applyStop() {
   if (!currentSession) return;
   if (!confirm('End this session? The assistant wraps up and stops capturing. Data is kept — use 🗑 to wipe.')) return;
   postControl('stopped');
   try { port.postMessage({ type: 'session-stop' }); } catch (_) {}
   setPausedUI(false);
   setStatus(capEl, 'ended', 'idle');
-});
+}
+pauseBtn.addEventListener('click', () => applyPause(!paused));
+stopBtn.addEventListener('click', applyStop);
 
 const consentEl = document.getElementById('consent');
 document.getElementById('consentDismiss').addEventListener('click', () => { consentEl.hidden = true; });
@@ -1019,7 +1153,7 @@ function downloadText(name, text) {
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   } catch (_) {}
 }
-document.getElementById('summaryBtn').addEventListener('click', async () => {
+async function doSummary() {
   if (!currentSession) return;
   try {
     const r = await fetch(`${serverUrl}/summary?session=${encodeURIComponent(currentSession)}`, { headers: hdrs() });
@@ -1028,15 +1162,17 @@ document.getElementById('summaryBtn').addEventListener('click', async () => {
     if (text && text.trim()) { appendChat({ role: 'agent', text }); downloadText(`${currentSession}.summary.md`, text); }
     else { appendChat({ role: 'agent', text: '_No summary yet — ask the assistant to wrap up, or it writes one when the call ends._' }); }
   } catch (_) {}
-});
+}
+document.getElementById('summaryBtn').addEventListener('click', doSummary);
 
-document.getElementById('clearBtn').addEventListener('click', async () => {
+async function doClear() {
   if (!currentSession || !confirm('Delete ALL data for this meeting (transcript, snapshots, chat)? This cannot be undone.')) return;
   try {
     const r = await fetch(`${serverUrl}/clear`, { method: 'POST', headers: hdrs(true), body: JSON.stringify({ session: currentSession }) });
     if (r.ok) { clearLog(); resetAdvice(); resetItems(); resetSnap(); chatEl.innerHTML = ''; brainWorkEl = null; lastChatSeq = 0; setStatus(capEl, 'cleared', 'idle'); }
   } catch (_) {}
-});
+}
+document.getElementById('clearBtn').addEventListener('click', doClear);
 
 sttToggle.addEventListener('change', () => {
   try { port.postMessage({ type: sttToggle.checked ? 'stt-start' : 'stt-stop' }); } catch (_) {}
@@ -1087,6 +1223,8 @@ chrome.storage.local.get(['serverUrl', 'ttsVoicePl', 'ttsVoiceEn', 'mla_mode', '
   buildNameRe(c.mla_names);
   if (c.mla_mode) modeSel.value = c.mla_mode;
   fetchHealth(); // first-run checklist (auto-opens once if something's missing)
+  pollServerHealth();
+  setInterval(pollServerHealth, 5000);
 });
 // Pick up token / names edited in options without reopening the panel.
 chrome.storage.onChanged.addListener((ch, area) => {

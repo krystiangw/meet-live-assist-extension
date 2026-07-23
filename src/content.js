@@ -57,9 +57,7 @@
   // ---- STATE ---------------------------------------------------------------
   let session = null;
   let started = false;
-  let userPaused = false;
   let sttPaused = false; // paused while local STT (tab audio) is the transcript source
-  let lineCount = 0;
   let scanning = false;
   let currentCode = null;
   let regionSeenAt = 0;   // last time the caption region existed (watchdog)
@@ -121,9 +119,7 @@
     tr.finalized = true;
     tr.ts = tsLabel();   // stamp the commit moment (matters for forced mid-monologue flushes)
     tr.lastFinal = now();
-    lineCount++;
     send({ type: 'cap-final', session, id: tr.id, ts: tr.ts, speaker: tr.speaker || '', text });
-    updateBadge();
   }
 
   // ---- MEETING CHAT (opportunistic — only when the chat panel is open) -----
@@ -168,12 +164,12 @@
   // ---- SCAN LOOP -----------------------------------------------------------
   function scan() {
     if (!started) { scanning = false; return; }
-    if (!userPaused && (++chatTick % 8 === 0)) { try { scanChat(); } catch (_) {} } // ~every 1.6s, independent of captions
-    if (!userPaused && !sttPaused) {
+    if (++chatTick % 8 === 0) { try { scanChat(); } catch (_) {} } // ~every 1.6s, independent of captions
+    if (!sttPaused) {
       const region = firstRegion();
       if (region) {
         regionSeenAt = now();
-        if (captureWarned) { captureWarned = false; send({ type: 'capture-health', ok: true }); updateBadge(); }
+        if (captureWarned) { captureWarned = false; send({ type: 'capture-health', ok: true }); }
         for (const el of blocksIn(region)) {
           const { speaker, text } = readBlock(el);
           if (!text || NOISE_RE.test(text)) continue;
@@ -190,7 +186,7 @@
           if (tr.text && !tr.finalized && (dueStable || now() - tr.lastFinal >= MAX_UTTER_MS)) finalize(tr);
         }
       } else if (started && regionSeenAt && now() - regionSeenAt > CAPTURE_WARN_MS && !captureWarned) {
-        captureWarned = true; send({ type: 'capture-health', ok: false, reason: 'no caption region' }); updateBadge();
+        captureWarned = true; send({ type: 'capture-health', ok: false, reason: 'no caption region' });
       }
     }
     setTimeout(scan, POLL_MS);
@@ -224,7 +220,7 @@
   // Watchdog: Meet captions sometimes switch off mid-call — re-enable them if the region disappears
   // (only click the CC button when it's actually OFF, so we never toggle captions off ourselves).
   function keepCaptionsOn() {
-    if (!AUTO_CAPTIONS || !started || userPaused || sttPaused) return;
+    if (!AUTO_CAPTIONS || !started || sttPaused) return;
     if (firstRegion()) return; // captions visible → nothing to do
     const btn = findCaptionButton();
     if (btn && btn.off) { try { btn.el.click(); } catch (_) {} }
@@ -241,30 +237,6 @@
     return `${date}_${time}_${code}`;
   }
 
-  // ---- BADGE (quick in-page status; side panel is the primary UI) ----------
-  let badge;
-  function updateBadge() {
-    if (!badge) return;
-    if (!started) { badge.textContent = '○ idle'; badge.style.background = '#555'; return; }
-    if (userPaused) { badge.textContent = '⏸ paused'; badge.style.background = '#8a6d00'; return; }
-    if (captureWarned) { badge.textContent = '⚠ no captions'; badge.style.background = '#d1242f'; return; }
-    badge.textContent = `● rec ${lineCount}`;
-    badge.style.background = '#1a7f37';
-  }
-  function makeBadge() {
-    badge = document.createElement('button');
-    Object.assign(badge.style, {
-      position: 'fixed', zIndex: 2147483647, bottom: '16px', right: '16px',
-      padding: '6px 10px', borderRadius: '20px', border: 'none', color: '#fff',
-      background: '#555', font: '12px/1.2 system-ui, sans-serif', cursor: 'pointer',
-      boxShadow: '0 2px 8px rgba(0,0,0,.3)', opacity: '0.85',
-    });
-    badge.title = 'Meet transcript capture (auto). Click to pause/resume.';
-    badge.addEventListener('click', () => { userPaused = !userPaused; updateBadge(); });
-    document.body.appendChild(badge);
-    updateBadge();
-  }
-
   // ---- LIFECYCLE: start/stop with the call ---------------------------------
   function startScan() { if (!scanning) { scanning = true; scan(); } }
 
@@ -275,18 +247,15 @@
       currentCode = code;
       session = buildSession(code);
       started = true;
-      lineCount = 0;
       trackers.length = 0;
       captionsHandled = false;
       regionSeenAt = now(); captureWarned = false; // grace period before the caption-region watchdog fires
       ensureCaptionsOn();
       send({ type: 'session', session, code });
       startScan();
-      updateBadge();
     } else if (!inCall && started) {
       started = false; session = null; currentCode = null; trackers.length = 0;
       send({ type: 'session-end' });
-      updateBadge();
     }
   }
 
@@ -463,7 +432,6 @@
   const boot = setInterval(() => {
     if (!document.body) return;
     clearInterval(boot);
-    makeBadge();
     tick();
     setInterval(tick, 1500); // handle SPA navigation (lobby -> call -> leave)
     setInterval(checkSharing, 3000);
