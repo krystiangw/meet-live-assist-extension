@@ -9,6 +9,9 @@
 (function () {
   'use strict';
 
+  const GEN = (window.__mlaGen = (window.__mlaGen || 0) + 1);
+  const isCurrent = () => window.__mlaGen === GEN;
+
   const SEL = {
     region: ['[class*="live-transcription" i]', '[class*="closed-caption" i]', '[aria-label*="caption" i]',
              '[class*="subtitle" i]', '[class*="caption" i]'],
@@ -121,7 +124,7 @@
   }
 
   function scan() {
-    if (!started) { scanning = false; return; }
+    if (!started || !isCurrent()) { scanning = false; return; } // stand down if a newer instance took over
     if (!userPaused && (++chatTick % 8 === 0)) { try { scanChat(); } catch (_) {} } // ~every 1.6s, independent of captions
     if (!userPaused && !sttPaused) {
       const region = firstRegion();
@@ -184,6 +187,7 @@
 
   function startScan() { if (!scanning) { scanning = true; scan(); } }
   function tick() {
+    if (!isCurrent()) return; // a newer instance owns capture now
     const inCall = ZOOM_WC_RE.test(location.pathname);
     const code = meetingCode();
     if (inCall && (!started || code !== currentCode)) {
@@ -238,6 +242,9 @@
 
   chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
     if (!msg) return;
+    // Liveness probe from the SW. Without it every ensureCapture() re-injects this script blindly,
+    // and two live instances scrape the same captions.
+    if (msg.type === 'ping') { sendResponse({ ok: true, gen: GEN, started, session }); return; }
     if (msg.type === 'capture-mode') { sttPaused = (msg.captions === false); sendResponse({ ok: true }); return; }
     if (msg.type === 'grab-context') { sendResponse({ text: grabContext() }); return; }
     if (msg.type === 'call-chat') { postToZoomChat(msg.text); sendResponse({ ok: true }); return; }
