@@ -74,6 +74,7 @@
   const seenChatIds = new Set();  // meeting-chat messages already forwarded (by data-message-id)
   const seenChatEls = new WeakSet(); // …fallback for messages with no stable id
   let chatTick = 0;
+  let primed = false; // false until the first scan pass has absorbed the captions already on screen
 
   const now = () => Date.now();
   const pad = (n) => String(n).padStart(2, '0');
@@ -126,7 +127,12 @@
     tr.finalized = true;
     tr.ts = tsLabel();   // stamp the commit moment (matters for forced mid-monologue flushes)
     tr.lastFinal = now();
-    send({ type: 'cap-final', session, id: tr.id, ts: tr.ts, speaker: tr.speaker || '', text });
+    // Emit only what hasn't been sent for this block (matters after priming, and for a block that keeps
+    // growing past a forced mid-monologue commit).
+    const out = (tr.sent && text.startsWith(tr.sent)) ? text.slice(tr.sent.length).trim() : text;
+    tr.sent = text;
+    if (!out) return;
+    send({ type: 'cap-final', session, id: tr.id, ts: tr.ts, speaker: tr.speaker || '', text: out });
   }
 
   // ---- MEETING CHAT (opportunistic — only when the chat panel is open) -----
@@ -181,10 +187,17 @@
           const { speaker, text } = readBlock(el);
           if (!text || NOISE_RE.test(text)) continue;
           let tr = trackers.find((t) => t.el === el);
-          if (!tr) { tr = { el, id: ++trackerId, ts: tsLabel(), text: '', lastChange: now(), lastFinal: now(), speaker: '', finalized: false }; trackers.push(tr); }
+          if (!tr) {
+            // `sent` = text already handed to the SW. Empty for a normal new block; on a re-injection the
+            // priming pass below fills it with whatever is ALREADY on screen, so the accumulated caption
+            // history is not re-emitted as one giant "new" line (it was, live: 11 minutes in one line).
+            tr = { el, id: ++trackerId, ts: tsLabel(), text: '', sent: primed ? '' : text, lastChange: now(), lastFinal: now(), speaker: '', finalized: !primed };
+            trackers.push(tr);
+          }
           if (speaker) tr.speaker = speaker;
           if (text !== tr.text) { tr.text = text; tr.lastChange = now(); tr.finalized = false; emitInterim(tr); }
         }
+        primed = true; // everything present on this first pass counts as already seen
         for (let i = trackers.length - 1; i >= 0; i--) {
           const tr = trackers[i];
           if (!document.contains(tr.el)) { finalize(tr); trackers.splice(i, 1); continue; }
@@ -257,6 +270,7 @@
       session = buildSession(code);
       started = true;
       trackers.length = 0;
+      primed = false;
       captionsHandled = false;
       regionSeenAt = now(); captureWarned = false; // grace period before the caption-region watchdog fires
       ensureCaptionsOn();
