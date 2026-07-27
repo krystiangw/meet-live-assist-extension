@@ -75,6 +75,33 @@
   const seenChatEls = new WeakSet(); // …fallback for messages with no stable id
   let chatTick = 0;
   let primed = false; // false until the first scan pass has absorbed the captions already on screen
+  // Sentences already handed over in THIS session. Per-element `sent` is not enough: Meet re-renders caption
+  // nodes (and when SEL.block misses, blocksIn() falls back to the whole region), so a fresh tracker can hold
+  // the entire history and re-emit it — live, every utterance after a re-injection re-sent 11 minutes of talk.
+  // Deduping by sentence is DOM-shape independent. Short confirmations ("Okay.", "Yeah.") are exempt: they
+  // legitimately repeat.
+  const emitted = new Set();
+  const DEDUPE_MIN_CHARS = 8;
+  const EMITTED_MAX = 3000;
+  function normSentence(x) {
+    return x.toLowerCase().replace(/[^a-z0-9ąćęłńóśźż ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  function dropAlreadyEmitted(text) {
+    const parts = String(text || '').split(/(?<=[.!?…])\s+/).map((x) => x.trim()).filter(Boolean);
+    const keep = [];
+    for (const part of parts) {
+      const key = normSentence(part);
+      if (!key) continue;
+      if (key.length >= DEDUPE_MIN_CHARS && emitted.has(key)) continue;
+      keep.push(part);
+    }
+    for (const part of parts) {
+      const key = normSentence(part);
+      if (key.length >= DEDUPE_MIN_CHARS) emitted.add(key);
+    }
+    if (emitted.size > EMITTED_MAX) emitted.clear(); // bound memory on a very long call
+    return keep.join(' ');
+  }
 
   const now = () => Date.now();
   const pad = (n) => String(n).padStart(2, '0');
@@ -129,8 +156,9 @@
     tr.lastFinal = now();
     // Emit only what hasn't been sent for this block (matters after priming, and for a block that keeps
     // growing past a forced mid-monologue commit).
-    const out = (tr.sent && text.startsWith(tr.sent)) ? text.slice(tr.sent.length).trim() : text;
+    const delta = (tr.sent && text.startsWith(tr.sent)) ? text.slice(tr.sent.length).trim() : text;
     tr.sent = text;
+    const out = dropAlreadyEmitted(delta);
     if (!out) return;
     send({ type: 'cap-final', session, id: tr.id, ts: tr.ts, speaker: tr.speaker || '', text: out });
   }
@@ -197,7 +225,12 @@
           if (speaker) tr.speaker = speaker;
           if (text !== tr.text) { tr.text = text; tr.lastChange = now(); tr.finalized = false; emitInterim(tr); }
         }
-        primed = true; // everything present on this first pass counts as already seen
+        if (!primed) {
+          // Seed the dedupe from the whole caption area — covers re-rendered nodes and the whole-region
+          // fallback, which per-element priming missed.
+          try { dropAlreadyEmitted((region.textContent || '').trim()); } catch (_) {}
+          primed = true;
+        }
         for (let i = trackers.length - 1; i >= 0; i--) {
           const tr = trackers[i];
           if (!document.contains(tr.el)) { finalize(tr); trackers.splice(i, 1); continue; }
@@ -271,6 +304,7 @@
       started = true;
       trackers.length = 0;
       primed = false;
+      emitted.clear();
       captionsHandled = false;
       regionSeenAt = now(); captureWarned = false; // grace period before the caption-region watchdog fires
       ensureCaptionsOn();
