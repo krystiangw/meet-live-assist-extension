@@ -292,7 +292,7 @@ async function startStt() {
   const { mla_session, mla_lang } = await chrome.storage.session.get(['mla_session', 'mla_lang']);
   chrome.runtime.sendMessage({ type: 'offscreen-start', streamId, session: mla_session, lang: mla_lang || 'auto', serverUrl: await getServerUrl(), token: await getToken() });
   await chrome.storage.session.set({ mla_stt_on: true });
-  try { chrome.tabs.sendMessage(tab.id, { type: 'capture-mode', captions: false }); } catch (_) {} // avoid dup transcript
+  try { chrome.tabs.sendMessage(tab.id, { type: 'capture-mode', captions: false }, () => void chrome.runtime.lastError); } catch (_) {} // avoid dup transcript
 }
 // Heal an orphaned content script. Reloading the extension invalidates the injected script's context:
 // its chrome.* calls throw, `send()` swallows them, and it goes on scraping into the void — capture looks
@@ -307,7 +307,10 @@ async function ensureCapture() {
     const alive = await new Promise((resolve) => {
       let done = false;
       try {
-        chrome.tabs.sendMessage(t.id, { type: 'ping' }, (r) => { done = true; resolve(!!(r && r.ok)); });
+        chrome.tabs.sendMessage(t.id, { type: 'ping' }, (r) => {
+          void chrome.runtime.lastError; // a dead/absent script is the signal here, not an error to report
+          done = true; resolve(!!(r && r.ok));
+        });
       } catch (_) { return resolve(false); }
       setTimeout(() => { if (!done) resolve(false); }, 400); // no listener → callback never fires
     });
@@ -323,7 +326,7 @@ async function stopStt() {
   chrome.runtime.sendMessage({ type: 'offscreen-stop' });
   await chrome.storage.session.set({ mla_stt_on: false });
   const tabs = await chrome.tabs.query({ url: ['https://meet.google.com/*', 'https://*.zoom.us/*'] });
-  for (const t of tabs) { try { chrome.tabs.sendMessage(t.id, { type: 'capture-mode', captions: true }); } catch (_) {} }
+  for (const t of tabs) { try { chrome.tabs.sendMessage(t.id, { type: 'capture-mode', captions: true }, () => void chrome.runtime.lastError); } catch (_) {} }
 }
 
 // ---- co-pilot: a session without any meeting (debug your app with the agent watching + listening) ----
