@@ -39,7 +39,7 @@
   const POLL_MS = 200;
   const CAPTURE_WARN_MS = 12000;
   const ZOOM_WC_RE = /\/wc\//;
-  const NOISE_RE = /^(show captions|hide captions|captions|save|more|settings)$/i;
+  const NOISE_RE = /^(show captions|hide captions|captions|save|more|settings|napisy (są )?włączone|captions (are )?(enabled|on)|transkrypcja (jest )?włączona)$/i;
 
   const GLOSSARY = [
     [/\btest[ -]?g(?:orilla|uerrilla|orila)\b/gi, 'Acme'],
@@ -99,9 +99,12 @@
       if (speaker && text.startsWith(speaker)) text = text.slice(speaker.length).trim();
       if (!speaker) { const s = splitSpeaker(text); if (s) { speaker = s.speaker; text = s.text; } }
     }
-    // Full-transcript rows bake the timestamp into the speaker title ("Krystian21:59:05"). Strip it only
-    // here — the raw title is what cuts the prefix off the row text above.
+    // Full-transcript rows carry the timestamp in its own element between the name and the utterance, so it
+    // survives the prefix cut above and would otherwise be read as speech ("22:08:58Ten wszystkich.").
+    text = text.replace(/^\d{1,2}:\d{2}(:\d{2})?\s*/, '');
     speaker = speaker.replace(/\s*\d{1,2}:\d{2}(:\d{2})?\s*$/, '').trim();
+    // A letter avatar is part of the title element, so its initial lands in front of the name ("KKrystian").
+    speaker = speaker.replace(/^(\p{Lu})\1(?=\p{Ll})/u, '$1');
     return { speaker, text: normalizeGlossary(text) };
   }
   function tsLabel() { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
@@ -116,7 +119,6 @@
     if (tr.finalized || !text) return;
     tr.finalized = true; tr.ts = tsLabel(); tr.lastFinal = now(); lineCount++;
     send({ type: 'cap-final', session, id: 'z' + tr.id, ts: tr.ts, speaker: tr.speaker || '', text });
-    updateBadge();
   }
 
   // Meeting chat → forward each message once as a distinct [chat] line for the brain's context.
@@ -140,9 +142,8 @@
     if (!userPaused && !sttPaused) {
       const region = firstRegion();
       if (region) {
-        if (!badge) makeBadge(); // lazily, so the visible badge is the one in the frame that has captions
         regionSeenAt = now();
-        if (captureWarned) { captureWarned = false; send({ type: 'capture-health', ok: true }); updateBadge(); }
+        if (captureWarned) { captureWarned = false; send({ type: 'capture-health', ok: true }); }
         for (const el of blocksIn(region)) {
           const { speaker, text } = readBlock(el);
           if (!text || NOISE_RE.test(text)) continue;
@@ -151,7 +152,10 @@
           // utterance. Reusing the tracker would reuse its line id, and the panel upserts by id — the new
           // utterance would overwrite the old line. A wholesale text replacement (not an ASR revision that
           // extends the text) means a recycled row, so retire the tracker and start a fresh id.
-          if (tr && tr.finalized && text !== tr.text && !text.startsWith(tr.text)) {
+          // Compare against the previous text without its trailing punctuation: the ASR revises
+          // "Bardzo serde." into "Bardzo serdecznie.", which is a continuation, not a recycled row.
+          const prevStem = tr ? tr.text.replace(/[\s.,!?…]+$/, '') : '';
+          if (tr && tr.finalized && text !== tr.text && !text.startsWith(prevStem)) {
             trackers.splice(trackers.indexOf(tr), 1);
             tr = null;
           }
@@ -170,13 +174,13 @@
                  && now() - regionSeenAt > CAPTURE_WARN_MS && !captureWarned) {
         // Only warn from a frame that could plausibly hold the captions: with child frames present the
         // captions may be in one of them, and a red "no captions" here would be a lie.
-        captureWarned = true; send({ type: 'capture-health', ok: false, reason: 'no caption region' }); updateBadge();
+        captureWarned = true; send({ type: 'capture-health', ok: false, reason: 'no caption region' });
       }
     } else if (sttPaused) {
       // STT owns the transcript while it runs. Keep the watchdog quiet instead of leaving a stale
       // "no captions" warning that can never clear — it looks exactly like broken capture.
       regionSeenAt = now();
-      if (captureWarned) { captureWarned = false; send({ type: 'capture-health', ok: true }); updateBadge(); }
+      if (captureWarned) { captureWarned = false; send({ type: 'capture-health', ok: true }); }
     }
     setTimeout(scan, POLL_MS);
   }
@@ -192,27 +196,6 @@
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${code}`;
   }
 
-  let badge;
-  function updateBadge() {
-    if (!badge) return;
-    if (!started) { badge.textContent = '○ zoom idle'; badge.style.background = '#555'; return; }
-    if (userPaused) { badge.textContent = '⏸ zoom paused'; badge.style.background = '#8a6d00'; return; }
-    if (captureWarned) { badge.textContent = '⚠ zoom no captions'; badge.style.background = '#d1242f'; return; }
-    badge.textContent = `● zoom rec ${lineCount}`; badge.style.background = '#1a7f37';
-  }
-  function makeBadge() {
-    badge = document.createElement('button');
-    Object.assign(badge.style, {
-      position: 'fixed', zIndex: 2147483647, bottom: '16px', right: '16px', padding: '6px 10px',
-      borderRadius: '20px', border: 'none', color: '#fff', background: '#555',
-      font: '12px/1.2 system-ui, sans-serif', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,.3)', opacity: '0.85',
-    });
-    badge.title = 'Zoom transcript capture (auto). Click to pause/resume.';
-    badge.addEventListener('click', () => { userPaused = !userPaused; updateBadge(); });
-    document.body.appendChild(badge);
-    updateBadge();
-  }
-
   function startScan() { if (!scanning) { scanning = true; scan(); } }
   function tick() {
     if (!isCurrent()) return; // a newer instance owns capture now
@@ -223,11 +206,10 @@
       currentCode = code; started = true; lineCount = 0;
       trackers.length = 0; regionSeenAt = now(); captureWarned = false;
       if (IS_TOP) { session = buildSession(code); send({ type: 'session', session, code }); }
-      startScan(); updateBadge();
+      startScan();
     } else if (!inCall && started) {
       started = false; session = null; currentCode = null; trackers.length = 0;
       if (IS_TOP) send({ type: 'session-end' });
-      updateBadge();
     }
   }
 
@@ -283,7 +265,6 @@
   const boot = setInterval(() => {
     if (!document.body) return;
     clearInterval(boot);
-    if (IS_TOP && !window.frames.length) makeBadge(); // otherwise scan() creates it in whichever frame has captions
     tick(); setInterval(tick, 1500);
   }, 800);
 })();
