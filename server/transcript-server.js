@@ -137,7 +137,7 @@ function purgeOld() {
   try {
     for (const f of fs.readdirSync(TRANSCRIPTS_DIR)) {
       if (f.startsWith('.')) continue; // never touch .mla-token etc.
-      if (!/\.(txt|md)$/.test(f)) continue; // .txt / .chat.txt / .mode.txt / .summary.md only
+      if (!/\.(txt|md|wake)$/.test(f)) continue; // .txt / .chat.txt / .mode.txt / .summary.md / .wake only
       const p = path.join(TRANSCRIPTS_DIR, f);
       try { if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p); } catch (_) {}
     }
@@ -239,36 +239,106 @@ function estTokensFor(session) {
   return Math.round(bytes / 4);
 }
 
-// --- Adaptive caption batching (token economy) --------------------------------------------------
-// Each file write wakes the brain's Monitor → a turn. Coalescing chatter into fewer, larger writes and
-// dropping pure filler cuts turns (and the quadratic context growth they cause). Hybrid: buffer normal
-// caption lines for a short window, but flush IMMEDIATELY when a line carries a question or a decision cue
-// so live ripostes on the moments that matter stay fast. Chat lines and the empty keepalive flush too.
-const COALESCE_MS = 3500;
-const MAX_BUF_CHARS = 1200;
-const appendBuf = new Map(); // session -> { lines: [], timer }
-// No '?' in the trailing class: a question like "So?" must reach the cue-flush, not be dropped as filler.
-const FILLER_RE = /^(uh+|um+|erm+|hmm+|mhm+|so|ok|okay|yeah|yep|nope|right|well|and|but|the|like|you know|i mean)[\s.,!-]*$/i;
-const FLUSH_CUE_RE = /\?|\b(agree|agreed|decide|decided|decision|let'?s|we'?ll|we will|action item|to-?dos?|deadline|blocker|blocked|approved?|reject(ed)?|ship it)\b/i;
+// --- Wake gating (token economy) ----------------------------------------------------------------
+// The transcript file used to be BOTH the archive and the brain's doorbell (its Monitor tails it), so the
+// only way to not spend a turn was to not write the line — which is why a plain "okay"/"yeah" was dropped,
+// losing exactly the agreement cues the decisions board depends on ("Agree = log").
+//
+// Split the two channels: `<session>.txt` gets EVERYTHING (complete record), `<session>.wake` gets a batch
+// only when it's worth a turn — that's what the brain tails. A skipped batch is not lost: its lines stay
+// queued and ride along with the next wake, so a wrong "nothing here yet" costs latency, not information.
+// That's what makes gating this aggressive safe.
+//
+// Measured on two real calls against ground truth (95 moments where the brain actually posted advice):
+// 786 → 136 and 1109 → 237 wakes, no productive moment missed.
+// Tunable via env (also how the test harness shrinks them) — no code edit needed to re-tune a call.
+const WAKE_BASE_MS = parseInt(process.env.WAKE_BASE_MS || '10000', 10);   // normal coalescing window
+const WAKE_MAX_MS = parseInt(process.env.WAKE_MAX_MS || '90000', 10);     // widest window, reached by doubling on empty batches
+const WAKE_MIN_GAP_MS = parseInt(process.env.WAKE_MIN_GAP_MS || '8000', 10); // never wake twice inside this
+const WAKE_FORCE_MS = parseInt(process.env.WAKE_FORCE_MS || '180000', 10);   // even pure chatter lands eventually — never go blind longer
+const WAKE_MAX_CHARS = parseInt(process.env.WAKE_MAX_CHARS || '4000', 10);   // a burst this big is substance by volume alone
+const wakeBuf = new Map(); // session -> { lines, firstAt, since, window, lastAt, timer }
+
+// Wake NOW: decisions, blockers, someone calling Krystian (incl. the caption manglings of his name), and
+// real questions. This bypass is what keeps recall at 100% — the gating below only defers the rest.
+// The name list carries Meet's real manglings of "Krystian" — captions turned it into "Christian" on a
+// live test, and "Chris"/"Kirsten" on earlier calls. Missing a mangling means missing a direct callout.
+const URGENT_RE = /\b(agreed|decided|decision|action item|deadline|blocker|blocked|approved|rejected|ship it|krystian|krystiana|krystianie|christian|chris|kirsten|christos)\b/i;
+// Substance: a number or a domain word. Deliberately a short, editable list — it will drift with the work.
+// NOTE: no bare "pr" here. With the /i flag and the trailing \w* it matched problem/pretty/probably/
+// present — 3-9% of batches on real calls passed on that alone. A pull request is either uppercase "PR"
+// or comes with a number, so match those two shapes explicitly instead (see PR_RE).
+const CONTENT_RE = /[0-9]|\b(ticket|jira|sprint|epic|story|point|backend|frontend|api|flag|deploy|release|bug|test|column|filter|sort|invite|credit|email|status|candidate|job|search|design|figma|migration|angular|eslint|contract|deliverab|onboarding|roadmap|ticket[ai]|sprint[uy]|zadani|błąd|blad|wdroż|wdroz)\w*/i;
+const PR_RE = /\bPR\b|\bpr\s*#?\d/;  // case-sensitive on purpose: "PR" the noun, or "pr 1234"
+const SMALLTALK_RE = /\b(good morning|good afternoon|how are you|how'?s it going|weekend|holiday|vacation|weather|coffee|lunch|haha|lol|thank you|thanks|bye|see you|cheers|sorry|no worries|exactly|of course|makes sense|got it|fair enough|dzień dobry|dzien dobry|cześć|czesc|dzięki|dzieki|jasne|no dobra|w porządku|w porzadku|do zobaczenia|weekend)\b/i;
+const TECH_NOISE_RE = /\b(can you hear|you'?re muted|i'?m muted|mute|unmute|my (mic|camera|internet)|connection|breaking up|share (my )?screen|do you see|can you see (my|the) screen|let me (share|refresh|reload)|hold on|one second|just a (sec|moment)|lag|frozen|freezing|słyszysz|slyszysz|widzisz|udostępni|udostepni|sekund|zaraz wracam)\b/i;
+
 function spokenText(line) { // strip "[hh:mm:ss] Speaker: " to classify the actual words
   return line.replace(/^\[[^\]]*\]\s*/, '').replace(/^[^:]{1,40}:\s*/, '').trim();
 }
-function flushAppend(session) {
-  const b = appendBuf.get(session);
+function wakeFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.wake`); }
+function isUrgentLine(line) {
+  const t = spokenText(line);
+  if (URGENT_RE.test(t)) return true;
+  // A real question wakes us — but "how are you?" and "can you see my screen?" are questions too, and
+  // they were burning a turn each until the noise check was added here (not just in batchWorthATurn).
+  if (!(t.endsWith('?') && t.length > 25)) return false;
+  return !SMALLTALK_RE.test(t) && !TECH_NOISE_RE.test(t);
+}
+function batchWorthATurn(lines) {
+  const texts = lines.map(spokenText);
+  const hasContent = texts.some((t) => CONTENT_RE.test(t) || PR_RE.test(t) || URGENT_RE.test(t));
+  const allNoise = texts.every((t) => SMALLTALK_RE.test(t) || TECH_NOISE_RE.test(t));
+  return hasContent && !allNoise;
+}
+function queueForWake(session, line) {
+  let b = wakeBuf.get(session);
+  if (!b) { b = { lines: [], firstAt: 0, since: 0, window: WAKE_BASE_MS, lastAt: 0, timer: null }; wakeBuf.set(session, b); }
+  b.lines.push(line);
+  const now = Date.now();
+  if (!b.firstAt) b.firstAt = now;
+  if (!b.since) b.since = now;
+  // Back to fast cadence the moment anything real shows up — and cancel the pending long timer, otherwise
+  // a window widened to 90s during small talk would sit on the first meaningful line for up to 90s.
+  if (isUrgentLine(line) || CONTENT_RE.test(spokenText(line)) || PR_RE.test(spokenText(line))) {
+    b.window = WAKE_BASE_MS;
+    if (b.timer) { clearTimeout(b.timer); b.timer = null; }
+  }
+  scheduleWake(session);
+}
+function scheduleWake(session) {
+  const b = wakeBuf.get(session);
+  if (!b || !b.lines.length || b.timer) return;
+  const urgent = b.lines.some(isUrgentLine);
+  const dueAt = Math.max(urgent ? b.since : b.since + b.window, b.lastAt + WAKE_MIN_GAP_MS);
+  b.timer = setTimeout(() => { b.timer = null; evaluateWake(session); }, Math.max(0, dueAt - Date.now()));
+}
+function evaluateWake(session) {
+  const b = wakeBuf.get(session);
+  if (!b || !b.lines.length) return;
+  const chars = b.lines.reduce((n, l) => n + l.length, 0);
+  const stale = Date.now() - b.firstAt >= WAKE_FORCE_MS;
+  if (stale || chars >= WAKE_MAX_CHARS || b.lines.some(isUrgentLine) || batchWorthATurn(b.lines)) {
+    flushWake(session);
+    return;
+  }
+  // Nothing of substance yet: widen the window and keep the lines queued. Self-tuning — no lexicon needed
+  // to sit out a long stretch of chatter, and the WAKE_FORCE_MS ceiling bounds how long we stay quiet.
+  b.window = Math.min(WAKE_MAX_MS, b.window * 2);
+  b.since = Date.now();
+  scheduleWake(session);
+}
+function flushWake(session) {
+  const b = wakeBuf.get(session);
   if (!b) return;
   if (b.timer) { clearTimeout(b.timer); b.timer = null; }
-  if (b.lines.length) {
-    try { fs.appendFileSync(fileFor(session), b.lines.join('')); } catch (e) { console.error('[transcript] flush failed', e); }
-    b.lines = [];
-  }
-}
-function bufferCaption(session, line) {
-  let b = appendBuf.get(session);
-  if (!b) { b = { lines: [], timer: null }; appendBuf.set(session, b); }
-  b.lines.push(line);
-  const chars = b.lines.reduce((n, l) => n + l.length, 0);
-  if (FLUSH_CUE_RE.test(line) || chars >= MAX_BUF_CHARS) { flushAppend(session); return; }
-  if (!b.timer) b.timer = setTimeout(() => { b.timer = null; flushAppend(session); }, COALESCE_MS);
+  if (!b.lines.length) return;
+  try {
+    fs.appendFileSync(wakeFileFor(session), b.lines.join(''));
+    // One line per brain turn — this is the log to read when tuning the WAKE_* thresholds for a real call.
+    console.log(`[wake] ${session} +${b.lines.length} lines (window ${b.window}ms)`);
+  } catch (e) { console.error('[transcript] wake write failed', e); }
+  b.lines = []; b.firstAt = 0; b.since = 0; b.lastAt = Date.now(); b.window = WAKE_BASE_MS;
 }
 
 function cors(req, res) {
@@ -316,12 +386,10 @@ const server = http.createServer((req, res) => {
           console.log(`[transcript] new session → ${file}`);
         }
         if (line) {
-          const isChat = / \[chat\] /.test(line);
-          if (isChat) { flushAppend(session); fs.appendFileSync(file, line); } // discrete message → write now
-          else if (FILLER_RE.test(spokenText(line))) { /* pure filler → drop (don't wake the brain for "uh") */ }
-          else bufferCaption(session, line); // coalesce chatter; cue lines flush themselves
+          fs.appendFileSync(file, line); // the .txt is the complete record — nothing is ever dropped here
+          queueForWake(session, line);   // whether it's worth a turn is decided on the .wake channel
         } else {
-          flushAppend(session); // empty keepalive → push out anything pending
+          flushWake(session); // empty keepalive → push out anything pending
         }
         res.writeHead(204); res.end();
       } catch (e) {
@@ -436,8 +504,9 @@ const server = http.createServer((req, res) => {
             // Mic STT is the user (co-pilot) → 'You' (authorizes actions). tabCapture STT is remote
             // participants with no labels → mark unattributed so the brain never auto-authorizes from it.
             const who = src === 'mic' ? 'You' : '(unattributed)';
-            flushAppend(session); // drain any buffered DOM captions first so file order stays chronological
-            fs.appendFileSync(file, `[${hms}] ${who}: ${text}\n`);
+            const sttLine = `[${hms}] ${who}: ${text}\n`;
+            fs.appendFileSync(file, sttLine);
+            queueForWake(session, sttLine);
           } catch (_) {}
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -639,6 +708,21 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Everything the brain must check each turn, in ONE request and ONE line — /control + /mode + /autopilot
+  // + /suppress. Four JSON responses per turn would each land in the loop's context and be re-read on every
+  // later turn; plain text keeps that to a handful of tokens. Suppression texts appear only if there are any.
+  if (req.method === 'GET' && req.url.startsWith('/status')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const s = safeSession(u.searchParams.get('session'));
+    const ap = autopilot.get(s) || { create: false, postChat: false };
+    const sup = (suppress.get(s) || []).filter((e) => !e.ts || Date.now() - e.ts < SUPPRESS_TTL_MS);
+    const lines = [`state=${control.get(s) || 'running'} mode=${modes.get(s) || 'auto'} create=${ap.create ? 1 : 0} postChat=${ap.postChat ? 1 : 0}`];
+    for (const e of sup) lines.push(`suppress[${e.kind || 'any'}] ${e.text}`);
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end(lines.join('\n') + '\n');
+    return;
+  }
+
   // Panel -> server: wipe everything for one meeting (transcript, chat, mode, snapshots, in-memory).
   if (req.method === 'POST' && req.url === '/clear') {
     let body = '';
@@ -646,10 +730,10 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const s = safeSession(d.session);
-      for (const suf of ['.txt', '.chat.txt', '.mode.txt', '.summary.md']) { try { fs.unlinkSync(path.join(TRANSCRIPTS_DIR, s + suf)); } catch (_) {} }
+      for (const suf of ['.txt', '.wake', '.chat.txt', '.mode.txt', '.summary.md']) { try { fs.unlinkSync(path.join(TRANSCRIPTS_DIR, s + suf)); } catch (_) {} }
       try { fs.rmSync(path.join(SNAP_DIR, s), { recursive: true, force: true }); } catch (_) {}
-      { const b = appendBuf.get(s); if (b && b.timer) clearTimeout(b.timer); }
-      for (const m of [advice, chat, items, modes, edits, domReq, doms, dbgReq, dbgData, snapReq, brainPing, brainStatus, control, appendBuf, summaries, autopilot, callChat, callChatResult, takeover, drive, acts, actResults, suppress]) m.delete(s);
+      { const b = wakeBuf.get(s); if (b && b.timer) clearTimeout(b.timer); }
+      for (const m of [advice, chat, items, modes, edits, domReq, doms, dbgReq, dbgData, snapReq, brainPing, brainStatus, control, wakeBuf, summaries, autopilot, callChat, callChatResult, takeover, drive, acts, actResults, suppress]) m.delete(s);
       seenSessions.delete(s);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
@@ -790,8 +874,10 @@ const server = http.createServer((req, res) => {
       try {
         const file = fileFor(session);
         if (!seenSessions.has(session)) { seenSessions.add(session); fs.appendFileSync(file, `==== ${session} — started ${new Date().toISOString()} ====\n`); }
-        flushAppend(session); // drain buffered captions first so the imported block stays in order
-        fs.appendFileSync(file, `\n[${hms}] ===== PRE-JOIN CONTEXT (imported) =====\n${text}\n=================================================\n`);
+        const block = `\n[${hms}] ===== PRE-JOIN CONTEXT (imported) =====\n${text}\n=================================================\n`;
+        fs.appendFileSync(file, block);
+        queueForWake(session, block); // imported background is worth a turn
+        flushWake(session);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, chars: text.length }));
       } catch (e) { res.writeHead(500); res.end('write failed'); }
@@ -1008,9 +1094,10 @@ const server = http.createServer((req, res) => {
   res.writeHead(404); res.end('not found');
 });
 
-// Flush any buffered captions before dying (launchd reload / Ctrl-C) so the tail isn't lost on restart.
+// Flush queued wakes before dying (launchd reload / Ctrl-C) so a pending batch isn't lost on restart.
+// The .txt needs no flushing — it's written line by line.
 for (const sig of ['SIGTERM', 'SIGINT']) {
-  process.on(sig, () => { for (const s of appendBuf.keys()) flushAppend(s); process.exit(0); });
+  process.on(sig, () => { for (const s of wakeBuf.keys()) flushWake(s); process.exit(0); });
 }
 
 server.listen(PORT, '127.0.0.1', () => {

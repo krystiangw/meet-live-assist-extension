@@ -47,19 +47,82 @@ presentation edits (`/edit`, `/dom*`), debug (`/debug*`), brain heartbeat (`/bra
 into `<transcripts>/.mla-token` on first start; **paste it into the extension Options once** (and the brain
 reads the same file). Without it any website you visit could reach the localhost server.
 
-`server/transcript-server.js` here is a **version-controlled snapshot**. The **live** copy runs from
-`~/projects/meet-live-assist/meet-transcript/transcript-server.js` via launchd
-(`com.mla.meet-transcript-server`, also snapshotted in `server/`). Keep the two in sync, or repoint launchd
-at this repo copy to make it the single source. Requires `ffmpeg` (Homebrew) for TTS device routing;
-launchd's PATH lacks it, so the server uses an absolute `/opt/homebrew/bin/ffmpeg`.
+**Two files per meeting.** `/append` writes every caption to `<session>.txt` — the complete record, nothing
+dropped — and only appends a batch to `<session>.wake` when the batch is worth waking the brain for
+(decisions, blockers, your name, real questions, accumulated substance). The skill tails `.wake`, not `.txt`:
+that is what keeps a 40-minute call from costing hundreds of brain turns. A held-back batch is never lost —
+it rides along with the next wake, and a force-flush fires after `WAKE_FORCE_MS` regardless.
+
+### Stand up the server on a Mac
+
+```bash
+git clone https://github.com/krystiangw/meet-live-assist-extension.git
+cd meet-live-assist-extension
+MLA_DRY_RUN=1 ./server/install-server.sh   # optional: see the plan + generated plist, change nothing
+./server/install-server.sh                 # install as a launchd agent + start it
+```
+
+It resolves the machine-specific bits itself (node binary via `process.execPath` — a bare `which node` under
+fnm/nvm points at a per-shell shim that dies with the shell; Homebrew prefix for `ffmpeg`/`whisper-cli`, so
+Intel and Apple Silicon both work), writes `~/Library/LaunchAgents/com.mla.meet-transcript-server.plist`,
+waits for `/health`, then prints the auth token to paste into the extension Options.
+
+- **Only Node 20+ is required.** `ffmpeg` and `whisper-cli` are optional (`brew install ffmpeg whisper-cpp`);
+  without them the server still runs — TTS-into-the-call and local STT are the parts that go dark.
+- **Re-run it after `git pull`** — it is idempotent and restarts the service with the new code.
+- Override defaults with env vars: `TRANSCRIPTS_DIR=~/mla PORT=8849 ./server/install-server.sh`.
+  Default transcripts dir is `~/meet-live-assist/transcripts`, deliberately **outside** the repo — meeting
+  text and screenshots are PII and must not risk being committed.
+- The **brain** (the `meet-live-assist` skill) has the transcripts path baked in, so if you change
+  `TRANSCRIPTS_DIR` update the skill to match, or the session will tail a directory nobody writes to.
+
+Manual run instead of launchd (handy for debugging — logs to your terminal, `Ctrl-C` stops it for real):
+
+```bash
+PORT=8899 TRANSCRIPTS_DIR=/tmp/mla node server/transcript-server.js
+curl -s http://127.0.0.1:8899/health
+```
+
+**Operating it**
+
+| | |
+| --- | --- |
+| health | `curl -s http://127.0.0.1:8848/health` |
+| what the panel is asking of the brain | `curl -s -H "X-MLA-Token: $(cat <transcripts>/.mla-token)" "http://127.0.0.1:8848/status?session=<session>"` |
+| logs | `~/Library/Logs/meet-live-assist-server.log` |
+| restart | `launchctl kickstart -k gui/$UID/com.mla.meet-transcript-server` |
+| stop for real | `launchctl unload -w ~/Library/LaunchAgents/com.mla.meet-transcript-server.plist` |
+
+`KeepAlive` is on, so `kill`/`pkill` does **not** stop it — launchd restarts it within seconds (and you lose
+the in-memory wake buffer). ⚠ **Never restart it during a live call**: capture gaps, and the buffered batch
+dies with the process.
+
+**Config** (all optional, set in the plist's `EnvironmentVariables` or on the manual command line):
+
+| var | default | what it does |
+| --- | --- | --- |
+| `PORT` | `8848` | the extension has host permission for `127.0.0.1:8848` — changing it needs a manifest change |
+| `TRANSCRIPTS_DIR` | `<server-dir>/../transcripts` | where transcripts, snapshots and `.mla-token` live |
+| `RETENTION_DAYS` | `14` | purge transcripts + snapshots older than this (`0` = keep forever) |
+| `WAKE_BASE_MS` / `WAKE_MAX_MS` | `10000` / `90000` | wake-gate backoff window: starts here, doubles on an empty batch up to the max |
+| `WAKE_FORCE_MS` | `180000` | flush whatever is buffered after this long, gate or no gate |
+| `WAKE_MAX_CHARS` | `4000` | flush early once a batch gets this big |
+| `WAKE_MIN_GAP_MS` | `8000` | floor between two wakes |
+| `FFMPEG` / `WHISPER_CLI` / `WHISPER_MODEL` / `TTS_VOICE` | Homebrew paths / `Zosia` | TTS + STT plumbing |
+
+**Two copies of the server exist on Krystian's machine.** `server/transcript-server.js` here is the
+version-controlled one; the live launchd service historically ran
+`~/projects/meet-live-assist/meet-transcript/transcript-server.js`, which is **not** in any repo. Keep
+them in sync, or re-run `install-server.sh` to repoint launchd at this repo copy and make it the only source.
 
 ## Load it (unpacked)
 
-1. Make sure the transcript server is running (launchd autostart is already installed):
-   `curl -s http://127.0.0.1:8848/health` → `{"ok":true,...}`
+1. Make sure the transcript server is running — `curl -s http://127.0.0.1:8848/health` → `{"ok":true,...}`.
+   On a fresh Mac install it first: `./server/install-server.sh` (see *Stand up the server on a Mac* above).
 2. `chrome://extensions` → enable **Developer mode** → **Load unpacked** → pick this folder.
 3. Pin the extension; click its toolbar icon to open the side panel.
-4. Right-click the icon → **Options** → paste the **server token** (`cat ~/projects/meet-live-assist/transcripts/.mla-token`).
+4. Right-click the icon → **Options** → paste the **server token** (`cat <TRANSCRIPTS_DIR>/.mla-token`; the
+   installer prints it, and it is per-machine — a token from another Mac will be rejected).
    Optionally set TTS voices and your name(s) (for mention alerts). The panel's ⚙ shows a setup checklist.
 5. Disable the old Tampermonkey userscript to avoid double-capture.
 
