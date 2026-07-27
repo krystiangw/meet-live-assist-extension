@@ -114,10 +114,15 @@
     for (const s of SEL.region) { try { const el = document.querySelector(s); if (el) return el; } catch (_) {} }
     return null;
   }
+  // Returns the per-utterance blocks, or — when Google's block classes don't match — the region itself with
+  // fallback:true. The fallback element is CUMULATIVE (it holds the whole caption history), so callers must
+  // treat it as one growing stream, not as a new utterance each time it is re-rendered.
+  let usedRegionFallback = false;
   function blocksIn(region) {
     for (const s of SEL.block) {
-      try { const list = region.querySelectorAll(s); if (list && list.length) return Array.from(list); } catch (_) {}
+      try { const list = region.querySelectorAll(s); if (list && list.length) { usedRegionFallback = false; return Array.from(list); } } catch (_) {}
     }
+    usedRegionFallback = true;
     return region ? [region] : [];
   }
   function readBlock(block) {
@@ -156,7 +161,17 @@
     tr.lastFinal = now();
     // Emit only what hasn't been sent for this block (matters after priming, and for a block that keeps
     // growing past a forced mid-monologue commit).
-    const delta = (tr.sent && text.startsWith(tr.sent)) ? text.slice(tr.sent.length).trim() : text;
+    let delta = text;
+    if (tr.sent) {
+      if (text.startsWith(tr.sent)) delta = text.slice(tr.sent.length).trim();
+      else {
+        // ASR revised something earlier in a cumulative stream — emit from the first divergence, backed up
+        // to a word boundary, instead of re-sending the whole history.
+        let i = 0; const n = Math.min(tr.sent.length, text.length);
+        while (i < n && tr.sent[i] === text[i]) i++;
+        if (i > 40) { const sp = text.lastIndexOf(' ', i); delta = text.slice(sp > 0 ? sp : i).trim(); }
+      }
+    }
     tr.sent = text;
     const out = dropAlreadyEmitted(delta);
     if (!out) return;
@@ -214,12 +229,13 @@
         for (const el of blocksIn(region)) {
           const { speaker, text } = readBlock(el);
           if (!text || NOISE_RE.test(text)) continue;
-          let tr = trackers.find((t) => t.el === el);
+          let tr = usedRegionFallback ? trackers.find((t) => t.fallback) : trackers.find((t) => t.el === el);
+          if (tr && usedRegionFallback) tr.el = el; // same logical stream, new DOM node
           if (!tr) {
             // `sent` = text already handed to the SW. Empty for a normal new block; on a re-injection the
             // priming pass below fills it with whatever is ALREADY on screen, so the accumulated caption
             // history is not re-emitted as one giant "new" line (it was, live: 11 minutes in one line).
-            tr = { el, id: ++trackerId, ts: tsLabel(), text: '', sent: primed ? '' : text, lastChange: now(), lastFinal: now(), speaker: '', finalized: !primed };
+            tr = { el, id: ++trackerId, fallback: usedRegionFallback, ts: tsLabel(), text: '', sent: usedRegionFallback || !primed ? text : '', lastChange: now(), lastFinal: now(), speaker: '', finalized: !primed };
             trackers.push(tr);
           }
           if (speaker) tr.speaker = speaker;
@@ -233,7 +249,10 @@
         }
         for (let i = trackers.length - 1; i >= 0; i--) {
           const tr = trackers[i];
-          if (!document.contains(tr.el)) { finalize(tr); trackers.splice(i, 1); continue; }
+          if (!document.contains(tr.el)) {
+            if (tr.fallback) continue; // node swapped out under us; the stream lives on, keep its `sent`
+            finalize(tr); trackers.splice(i, 1); continue;
+          }
           const quiet = now() - tr.lastChange;
           const dueStable = SENT_END.test(tr.text) ? quiet >= FLUSH_SENT_MS : quiet >= FLUSH_MID_MS;
           if (tr.text && !tr.finalized && (dueStable || now() - tr.lastFinal >= MAX_UTTER_MS)) finalize(tr);
@@ -304,6 +323,7 @@
       started = true;
       trackers.length = 0;
       primed = false;
+      usedRegionFallback = false;
       emitted.clear();
       captionsHandled = false;
       regionSeenAt = now(); captureWarned = false; // grace period before the caption-region watchdog fires
