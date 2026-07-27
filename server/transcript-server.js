@@ -137,7 +137,7 @@ function purgeOld() {
   try {
     for (const f of fs.readdirSync(TRANSCRIPTS_DIR)) {
       if (f.startsWith('.')) continue; // never touch .mla-token etc.
-      if (!/\.(txt|md|wake)$/.test(f)) continue; // .txt / .chat.txt / .mode.txt / .summary.md / .wake only
+      if (!/\.(txt|md|wake|wakeall)$/.test(f)) continue; // .txt / .chat.txt / .mode.txt / .summary.md / .wake / .wakeall only
       const p = path.join(TRANSCRIPTS_DIR, f);
       try { if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p); } catch (_) {}
     }
@@ -258,6 +258,21 @@ const WAKE_MIN_GAP_MS = parseInt(process.env.WAKE_MIN_GAP_MS || '8000', 10); // 
 const WAKE_FORCE_MS = parseInt(process.env.WAKE_FORCE_MS || '180000', 10);   // even pure chatter lands eventually — never go blind longer
 const WAKE_MAX_CHARS = parseInt(process.env.WAKE_MAX_CHARS || '4000', 10);   // a burst this big is substance by volume alone
 const wakeBuf = new Map(); // session -> { lines, firstAt, since, window, lastAt, timer }
+
+// Per-session escape hatch: wake on EVERY line, small talk included, so `.wake` mirrors `.txt`. For calls
+// where the brain must see the verbatim flow (dictation, note-taking, judging the gate itself) — it costs a
+// turn per batch, which is exactly what the gate exists to avoid, so the gate stays the default.
+// Set via POST /wake-mode; WAKE_ALL=1 flips the default for the whole server.
+const WAKE_ALL_DEFAULT = process.env.WAKE_ALL === '1';
+const wakeAll = new Map(); // session -> boolean
+const wakeAllFileFor = (session) => path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.wakeall`);
+function isWakeAll(session) {
+  if (wakeAll.has(session)) return wakeAll.get(session);
+  // Survive a restart mid-call: the flag is a marker file, same as the meeting mode.
+  const on = fs.existsSync(wakeAllFileFor(session));
+  wakeAll.set(session, on || WAKE_ALL_DEFAULT);
+  return wakeAll.get(session);
+}
 
 // Wake NOW: decisions, blockers, someone calling Krystian (incl. the caption manglings of his name), and
 // real questions. This bypass is what keeps recall at 100% — the gating below only defers the rest.
@@ -388,6 +403,7 @@ const server = http.createServer((req, res) => {
         if (line) {
           fs.appendFileSync(file, line); // the .txt is the complete record — nothing is ever dropped here
           queueForWake(session, line);   // whether it's worth a turn is decided on the .wake channel
+          if (isWakeAll(session)) flushWake(session); // "collect everything" mode: no gate, no coalescing
         } else {
           flushWake(session); // empty keepalive → push out anything pending
         }
@@ -716,10 +732,36 @@ const server = http.createServer((req, res) => {
     const s = safeSession(u.searchParams.get('session'));
     const ap = autopilot.get(s) || { create: false, postChat: false };
     const sup = (suppress.get(s) || []).filter((e) => !e.ts || Date.now() - e.ts < SUPPRESS_TTL_MS);
-    const lines = [`state=${control.get(s) || 'running'} mode=${modes.get(s) || 'auto'} create=${ap.create ? 1 : 0} postChat=${ap.postChat ? 1 : 0}`];
+    const lines = [`state=${control.get(s) || 'running'} mode=${modes.get(s) || 'auto'} create=${ap.create ? 1 : 0} postChat=${ap.postChat ? 1 : 0} wake=${isWakeAll(s) ? 'all' : 'gated'}`];
     for (const e of sup) lines.push(`suppress[${e.kind || 'any'}] ${e.text}`);
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end(lines.join('\n') + '\n');
+    return;
+  }
+
+  // Wake mode: `gated` (default — only batches worth a turn reach .wake) or `all` (everything, small talk
+  // included). Panel or brain can flip it mid-call; a pending batch is flushed so nothing waits behind it.
+  if (req.method === 'POST' && req.url === '/wake-mode') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
+      const s = safeSession(d.session);
+      const on = d.all === true || d.all === 'true' || d.mode === 'all';
+      wakeAll.set(s, on);
+      try { if (on) fs.writeFileSync(wakeAllFileFor(s), '1'); else fs.unlinkSync(wakeAllFileFor(s)); } catch (_) {}
+      flushWake(s);
+      console.log(`[wake] ${s} mode=${on ? 'all' : 'gated'}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, mode: on ? 'all' : 'gated' }));
+    });
+    return;
+  }
+  if (req.method === 'GET' && req.url.startsWith('/wake-mode')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const s = safeSession(u.searchParams.get('session'));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ mode: isWakeAll(s) ? 'all' : 'gated' }));
     return;
   }
 
@@ -730,7 +772,8 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const s = safeSession(d.session);
-      for (const suf of ['.txt', '.wake', '.chat.txt', '.mode.txt', '.summary.md']) { try { fs.unlinkSync(path.join(TRANSCRIPTS_DIR, s + suf)); } catch (_) {} }
+      for (const suf of ['.txt', '.wake', '.wakeall', '.chat.txt', '.mode.txt', '.summary.md']) { try { fs.unlinkSync(path.join(TRANSCRIPTS_DIR, s + suf)); } catch (_) {} }
+      wakeAll.delete(s);
       try { fs.rmSync(path.join(SNAP_DIR, s), { recursive: true, force: true }); } catch (_) {}
       { const b = wakeBuf.get(s); if (b && b.timer) clearTimeout(b.timer); }
       for (const m of [advice, chat, items, modes, edits, domReq, doms, dbgReq, dbgData, snapReq, brainPing, brainStatus, control, wakeBuf, summaries, autopilot, callChat, callChatResult, takeover, drive, acts, actResults, suppress]) m.delete(s);

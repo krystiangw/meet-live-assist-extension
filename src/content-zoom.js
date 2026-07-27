@@ -24,8 +24,10 @@
              '[class*="subtitle" i]', '[class*="caption" i]'],
     block: ['[class*="lt-full-transcript__item" i]', '[class*="live-transcription-content" i]',
             '[class*="caption" i] li', '[class*="subtitle-item" i]'],
-    speaker: ['[class*="lt-full-transcript__title" i]', '[class*="speaker" i]', '[class*="name" i]'],
-    text: ['[class*="text" i]', '[class*="content" i]'],
+    // The full-transcript row keeps name, time and message in separate elements — target them exactly, or the
+    // fallback reads the whole row and the timestamp ends up recorded as speech.
+    speaker: ['[class*="lt-full-transcript__display-name" i]', '[class*="speaker" i]', '[class*="name" i]'],
+    text: ['[class*="lt-full-transcript__message" i]', '[class*="text" i]', '[class*="content" i]'],
     // Chat panel messages (opportunistic — only in the DOM while the chat panel is open).
     chatMsg: ['[class*="new-chat-message" i]', '[class*="chat-item" i]', '#chat-list [class*="message" i]'],
     chatSender: ['[class*="sender" i]', '[class*="chat-item__sender" i]'],
@@ -68,7 +70,7 @@
 
   let session = null, started = false, userPaused = false, sttPaused = false, scanning = false;
   const seenChatEls = new WeakSet(); let chatTick = 0; // meeting-chat dedup (Zoom messages carry no stable id)
-  let currentCode = null, regionSeenAt = 0, captureWarned = false, lineCount = 0, trackerId = 0;
+  let currentCode = null, regionSeenAt = 0, captureWarned = false, lineCount = 0, trackerId = 0, lastSpeaker = '';
   const trackers = [];
   const now = () => Date.now();
   const pad = (n) => String(n).padStart(2, '0');
@@ -146,6 +148,11 @@
         if (captureWarned) { captureWarned = false; send({ type: 'capture-health', ok: true }); }
         for (const el of blocksIn(region)) {
           const { speaker, text } = readBlock(el);
+          // Zoom groups consecutive utterances of one person under a single name header (hence the row class
+          // "…__title--first"), so continuation rows carry no speaker — inherit the last one seen. Kept across
+          // scans too: the virtualized list can scroll a continuation row into view before its header.
+          if (speaker) lastSpeaker = speaker;
+          const rowSpeaker = speaker || lastSpeaker;
           if (!text || NOISE_RE.test(text)) continue;
           let tr = trackers.find((t) => t.el === el);
           // The full-transcript list is React-virtualized: it recycles a row element for a different
@@ -160,7 +167,7 @@
             tr = null;
           }
           if (!tr) { tr = { el, id: ++trackerId, ts: tsLabel(), text: '', lastChange: now(), lastFinal: now(), speaker: '', finalized: false }; trackers.push(tr); }
-          if (speaker) tr.speaker = speaker;
+          if (rowSpeaker) tr.speaker = rowSpeaker;
           if (text !== tr.text) { tr.text = text; tr.lastChange = now(); tr.finalized = false; emitInterim(tr); }
         }
         for (let i = trackers.length - 1; i >= 0; i--) {
@@ -204,7 +211,7 @@
     const code = IS_TOP ? meetingCode() : currentCode;
     if (inCall && (!started || code !== currentCode)) {
       currentCode = code; started = true; lineCount = 0;
-      trackers.length = 0; regionSeenAt = now(); captureWarned = false;
+      trackers.length = 0; regionSeenAt = now(); captureWarned = false; lastSpeaker = '';
       if (IS_TOP) { session = buildSession(code); send({ type: 'session', session, code }); }
       startScan();
     } else if (!inCall && started) {
