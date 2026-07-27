@@ -11,12 +11,20 @@
 
   const GEN = (window.__mlaGen = (window.__mlaGen || 0) + 1);
   const isCurrent = () => window.__mlaGen === GEN;
+  // The Zoom web client can render the meeting UI (and its captions) in a child frame, so this script is
+  // injected into all frames. Only the top frame owns the session; child frames just scrape and forward
+  // lines, which the service worker stamps with the active session.
+  const IS_TOP = window.top === window;
 
+  // Zoom has two caption surfaces. The full-transcript panel ("Transkrypcja") is preferred because its rows
+  // carry speaker names; the bottom overlay carries none. Verified against a live us04 web client 2026-07-27.
   const SEL = {
-    region: ['[class*="live-transcription" i]', '[class*="closed-caption" i]', '[aria-label*="caption" i]',
+    region: ['[aria-label="Live Transcription List"]', '[class*="new-lt-list-container" i]',
+             '[class*="live-transcription" i]', '[class*="closed-caption" i]', '[aria-label*="caption" i]',
              '[class*="subtitle" i]', '[class*="caption" i]'],
-    block: ['[class*="live-transcription-content" i]', '[class*="caption" i] li', '[class*="subtitle-item" i]'],
-    speaker: ['[class*="speaker" i]', '[class*="name" i]'],
+    block: ['[class*="lt-full-transcript__item" i]', '[class*="live-transcription-content" i]',
+            '[class*="caption" i] li', '[class*="subtitle-item" i]'],
+    speaker: ['[class*="lt-full-transcript__title" i]', '[class*="speaker" i]', '[class*="name" i]'],
     text: ['[class*="text" i]', '[class*="content" i]'],
     // Chat panel messages (opportunistic — only in the DOM while the chat panel is open).
     chatMsg: ['[class*="new-chat-message" i]', '[class*="chat-item" i]', '#chat-list [class*="message" i]'],
@@ -91,6 +99,9 @@
       if (speaker && text.startsWith(speaker)) text = text.slice(speaker.length).trim();
       if (!speaker) { const s = splitSpeaker(text); if (s) { speaker = s.speaker; text = s.text; } }
     }
+    // Full-transcript rows bake the timestamp into the speaker title ("Krystian21:59:05"). Strip it only
+    // here — the raw title is what cuts the prefix off the row text above.
+    speaker = speaker.replace(/\s*\d{1,2}:\d{2}(:\d{2})?\s*$/, '').trim();
     return { speaker, text: normalizeGlossary(text) };
   }
   function tsLabel() { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
@@ -129,12 +140,21 @@
     if (!userPaused && !sttPaused) {
       const region = firstRegion();
       if (region) {
+        if (!badge) makeBadge(); // lazily, so the visible badge is the one in the frame that has captions
         regionSeenAt = now();
         if (captureWarned) { captureWarned = false; send({ type: 'capture-health', ok: true }); updateBadge(); }
         for (const el of blocksIn(region)) {
           const { speaker, text } = readBlock(el);
           if (!text || NOISE_RE.test(text)) continue;
           let tr = trackers.find((t) => t.el === el);
+          // The full-transcript list is React-virtualized: it recycles a row element for a different
+          // utterance. Reusing the tracker would reuse its line id, and the panel upserts by id — the new
+          // utterance would overwrite the old line. A wholesale text replacement (not an ASR revision that
+          // extends the text) means a recycled row, so retire the tracker and start a fresh id.
+          if (tr && tr.finalized && text !== tr.text && !text.startsWith(tr.text)) {
+            trackers.splice(trackers.indexOf(tr), 1);
+            tr = null;
+          }
           if (!tr) { tr = { el, id: ++trackerId, ts: tsLabel(), text: '', lastChange: now(), lastFinal: now(), speaker: '', finalized: false }; trackers.push(tr); }
           if (speaker) tr.speaker = speaker;
           if (text !== tr.text) { tr.text = text; tr.lastChange = now(); tr.finalized = false; emitInterim(tr); }
@@ -146,9 +166,17 @@
           const dueStable = SENT_END.test(tr.text) ? quiet >= FLUSH_SENT_MS : quiet >= FLUSH_MID_MS;
           if (tr.text && !tr.finalized && (dueStable || now() - tr.lastFinal >= MAX_UTTER_MS)) finalize(tr);
         }
-      } else if (started && regionSeenAt && now() - regionSeenAt > CAPTURE_WARN_MS && !captureWarned) {
+      } else if (started && IS_TOP && !window.frames.length && regionSeenAt
+                 && now() - regionSeenAt > CAPTURE_WARN_MS && !captureWarned) {
+        // Only warn from a frame that could plausibly hold the captions: with child frames present the
+        // captions may be in one of them, and a red "no captions" here would be a lie.
         captureWarned = true; send({ type: 'capture-health', ok: false, reason: 'no caption region' }); updateBadge();
       }
+    } else if (sttPaused) {
+      // STT owns the transcript while it runs. Keep the watchdog quiet instead of leaving a stale
+      // "no captions" warning that can never clear — it looks exactly like broken capture.
+      regionSeenAt = now();
+      if (captureWarned) { captureWarned = false; send({ type: 'capture-health', ok: true }); updateBadge(); }
     }
     setTimeout(scan, POLL_MS);
   }
@@ -188,16 +216,18 @@
   function startScan() { if (!scanning) { scanning = true; scan(); } }
   function tick() {
     if (!isCurrent()) return; // a newer instance owns capture now
-    const inCall = ZOOM_WC_RE.test(location.pathname);
-    const code = meetingCode();
+    // A child frame's URL need not carry /wc/, so it decides it is "in a call" by whether captions exist.
+    const inCall = IS_TOP ? ZOOM_WC_RE.test(location.pathname) : !!firstRegion();
+    const code = IS_TOP ? meetingCode() : currentCode;
     if (inCall && (!started || code !== currentCode)) {
-      currentCode = code; session = buildSession(code); started = true; lineCount = 0;
+      currentCode = code; started = true; lineCount = 0;
       trackers.length = 0; regionSeenAt = now(); captureWarned = false;
-      send({ type: 'session', session, code });
+      if (IS_TOP) { session = buildSession(code); send({ type: 'session', session, code }); }
       startScan(); updateBadge();
     } else if (!inCall && started) {
       started = false; session = null; currentCode = null; trackers.length = 0;
-      send({ type: 'session-end' }); updateBadge();
+      if (IS_TOP) send({ type: 'session-end' });
+      updateBadge();
     }
   }
 
@@ -253,6 +283,7 @@
   const boot = setInterval(() => {
     if (!document.body) return;
     clearInterval(boot);
-    makeBadge(); tick(); setInterval(tick, 1500);
+    if (IS_TOP && !window.frames.length) makeBadge(); // otherwise scan() creates it in whichever frame has captions
+    tick(); setInterval(tick, 1500);
   }, 800);
 })();
