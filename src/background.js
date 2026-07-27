@@ -294,6 +294,31 @@ async function startStt() {
   await chrome.storage.session.set({ mla_stt_on: true });
   try { chrome.tabs.sendMessage(tab.id, { type: 'capture-mode', captions: false }); } catch (_) {} // avoid dup transcript
 }
+// Heal an orphaned content script. Reloading the extension invalidates the injected script's context:
+// its chrome.* calls throw, `send()` swallows them, and it goes on scraping into the void — capture looks
+// fine and delivers nothing (this silently killed a real meeting's transcript). Chrome does NOT re-inject
+// into already-open tabs, so probe each call tab and re-inject where nobody answers. Safe against double
+// capture: content.js keeps a generation counter and older instances stand down.
+async function ensureCapture() {
+  const tabs = await chrome.tabs.query({ url: ['https://meet.google.com/*', 'https://*.zoom.us/wc/*'] });
+  if (!tabs.length) return { ok: false, reason: 'no call tab' };
+  const healed = [];
+  for (const t of tabs) {
+    const alive = await new Promise((resolve) => {
+      let done = false;
+      try {
+        chrome.tabs.sendMessage(t.id, { type: 'ping' }, (r) => { done = true; resolve(!!(r && r.ok)); });
+      } catch (_) { return resolve(false); }
+      setTimeout(() => { if (!done) resolve(false); }, 400); // no listener → callback never fires
+    });
+    if (alive) continue;
+    const file = /zoom\.us/.test(t.url || '') ? 'src/content-zoom.js' : 'src/content.js';
+    try { await chrome.scripting.executeScript({ target: { tabId: t.id }, files: [file] }); healed.push(t.id); }
+    catch (e) { return { ok: false, reason: String((e && e.message) || e) }; }
+  }
+  return { ok: true, tabs: tabs.length, healed: healed.length };
+}
+
 async function stopStt() {
   chrome.runtime.sendMessage({ type: 'offscreen-stop' });
   await chrome.storage.session.set({ mla_stt_on: false });
@@ -652,6 +677,9 @@ chrome.runtime.onConnect.addListener((port) => {
       const { session, buffer } = await loadState();
       const { mla_sharing, mla_lang, mla_paused } = await chrome.storage.session.get(['mla_sharing', 'mla_lang', 'mla_paused']);
       port.postMessage({ type: 'restore', session, buffer, sharing: !!mla_sharing, lang: mla_lang || null, paused: !!mla_paused });
+      port.postMessage({ type: 'capture-probe', ...(await ensureCapture()) }); // opening the panel heals a dead content script
+    } else if (m.type === 'ensure-capture') {
+      port.postMessage({ type: 'capture-probe', ...(await ensureCapture()) });
     } else if (m.type === 'snapshot-now') {
       captureSnapshot(!!m.auto);
     } else if (m.type === 'stt-start') {

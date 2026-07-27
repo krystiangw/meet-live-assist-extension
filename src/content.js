@@ -8,6 +8,13 @@
 (function () {
   'use strict';
 
+  // Reloading the extension orphans this script: its chrome.* calls throw, `send()` swallows them, and it
+  // keeps scraping into the void — capture looks alive but nothing arrives (silent, and it cost us a real
+  // meeting). The SW heals that by re-injecting; this generation counter makes that safe, because an older
+  // instance stands down as soon as a newer one loads. Exactly one instance ever captures.
+  const GEN = (window.__mlaGen = (window.__mlaGen || 0) + 1);
+  const isCurrent = () => window.__mlaGen === GEN;
+
   // ---- SELECTORS (update here if Google changes the DOM) -------------------
   const SEL = {
     region: ['[jsname="dsyhDe"]', '.a4cQT', 'div[aria-label="Captions"]', '.iOzk7'],
@@ -163,7 +170,7 @@
 
   // ---- SCAN LOOP -----------------------------------------------------------
   function scan() {
-    if (!started) { scanning = false; return; }
+    if (!started || !isCurrent()) { scanning = false; return; } // stand down if a newer instance took over
     if (++chatTick % 8 === 0) { try { scanChat(); } catch (_) {} } // ~every 1.6s, independent of captions
     if (!sttPaused) {
       const region = firstRegion();
@@ -242,6 +249,7 @@
   function startScan() { if (!scanning) { scanning = true; scan(); } }
 
   function tick() {
+    if (!isCurrent()) return; // a newer instance owns capture now
     const code = meetingCode();
     const inCall = MEETING_CODE_RE.test(code);
     if (inCall && (!started || code !== currentCode)) {
@@ -411,6 +419,7 @@
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!msg) return;
+    if (msg.type === 'ping') { sendResponse({ ok: true, gen: GEN, started, session }); return; } // liveness probe from the SW
     if (msg.type === 'capture-mode') { sttPaused = (msg.captions === false); sendResponse({ ok: true }); return; }
     if (msg.type === 'grab-context') { sendResponse({ text: grabContext() }); return; }
     if (msg.type === 'call-chat') { postToCallChat(msg.text, msg.seq); sendResponse({ ok: true }); return; }

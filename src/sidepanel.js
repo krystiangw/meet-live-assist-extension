@@ -970,6 +970,13 @@ function onMessage(msg) {
       setTimeout(() => { el.hidden = true; }, 3000);
       break;
     }
+    // Result of the SW's liveness probe (sent on panel open, and on demand). Without this the panel just
+    // said "idle" while an orphaned content script scraped into the void — no way to tell from the UI.
+    case 'capture-probe':
+      if (msg.ok && msg.healed) setStatus(capEl, 'capture restored', 'ok');
+      else if (!msg.ok && msg.reason === 'no call tab') setStatus(capEl, 'no Meet/Zoom tab', 'idle');
+      else if (!msg.ok) setStatus(capEl, `⚠ capture: ${msg.reason}`, 'bad');
+      break;
     case 'capture-health':
       if (!msg.ok) setStatus(capEl, '⚠ no captions — turn on CC / check language', 'bad');
       else setStatus(capEl, 'capturing', 'ok');
@@ -1225,6 +1232,21 @@ chrome.storage.local.get(['serverUrl', 'ttsVoicePl', 'ttsVoiceEn', 'mla_mode', '
   fetchHealth(); // first-run checklist (auto-opens once if something's missing)
   pollServerHealth();
   setInterval(pollServerHealth, 5000);
+
+// Capture watchdog: if no session appears shortly after the panel opens, the content script is missing or
+// orphaned (a reloaded extension is never re-injected into open tabs). Ask the SW to re-probe, then say
+// plainly what to do — a silent "idle" pill cost us a whole meeting's transcript.
+let captureRetried = false;
+setTimeout(function checkCapture() {
+  if (currentSession) return;
+  if (!captureRetried) {
+    captureRetried = true;
+    try { port.postMessage({ type: 'ensure-capture' }); } catch (_) {}
+    setTimeout(checkCapture, 6000);
+    return;
+  }
+  if (!currentSession) setStatus(capEl, '⚠ no capture — reload the Meet tab (⌘R)', 'bad');
+}, 8000);
 });
 // Pick up token / names edited in options without reopening the panel.
 chrome.storage.onChanged.addListener((ch, area) => {
