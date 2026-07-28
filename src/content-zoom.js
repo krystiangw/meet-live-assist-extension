@@ -54,6 +54,8 @@
     [/\bgen[ -]?(\d)\b/gi, 'gen$1'],
   ];
   const normalizeGlossary = (s) => { let o = s; for (const [re, to] of GLOSSARY) o = o.replace(re, to); return o; };
+  // For comparing two ASR revisions of the same utterance: punctuation and case carry no signal there.
+  const norm = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
   // "Name: caption" heuristic — only treat the prefix as a speaker if it looks like a display name
   // (1–4 capitalized words), never for ordinary prose that happens to contain a colon.
@@ -162,10 +164,12 @@
           // utterance. Reusing the tracker would reuse its line id, and the panel upserts by id — the new
           // utterance would overwrite the old line. A wholesale text replacement (not an ASR revision that
           // extends the text) means a recycled row, so retire the tracker and start a fresh id.
-          // Compare against the previous text without its trailing punctuation: the ASR revises
-          // "Bardzo serde." into "Bardzo serdecznie.", which is a continuation, not a recycled row.
-          const prevStem = tr ? tr.text.replace(/[\s.,!?…]+$/, '') : '';
-          if (tr && tr.finalized && text !== tr.text && !text.startsWith(prevStem)) {
+          // Is the new text a revision of the same utterance, or a recycled row? Compare punctuation- and
+          // case-insensitively, minus the last word: Zoom's ASR rewrites mid-sentence punctuation and
+          // re-spells the trailing word ("Dobry wszystkim, jak mnie. Słych." → "Dobry wszystkim. Jak mnie
+          // słychać."). A literal prefix test calls that a new row and the line gets emitted twice.
+          const prevStem = tr ? norm(tr.text).replace(/\s*\S*$/, '') : '';
+          if (tr && tr.finalized && text !== tr.text && prevStem && !norm(text).startsWith(prevStem)) {
             trackers.splice(trackers.indexOf(tr), 1);
             tr = null;
           }

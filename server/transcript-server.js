@@ -391,6 +391,9 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
+      // Refuse a session-less append instead of letting safeSession() mint `meeting_<timestamp>`: that turned
+      // every line of a call into its own transcript file when the caller lost track of the session.
+      if (!String(data.session || '').trim()) { res.writeHead(400); return res.end('missing session'); }
       const session = safeSession(data.session);
       const line = typeof data.line === 'string' ? data.line : '';
       const file = fileFor(session);

@@ -603,7 +603,25 @@ async function handleDebugDo(kind) {
 }
 
 // ---- content script -> SW ------------------------------------------------
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+// Lines scraped in a child frame carry no session (only the top frame owns one). Resolve it here from the
+// sender tab's URL — if a session-less line reaches the server, it invents one per REQUEST
+// (`meeting_<timestamp>`), so every single line became its own transcript file.
+async function resolveSession(sender) {
+  const { mla_session } = await chrome.storage.session.get('mla_session');
+  if (mla_session) return mla_session;
+  const m = /\/wc\/(\d{8,12})/.exec((sender && sender.tab && sender.tab.url) || '');
+  const code = m ? `zoom-${m[1]}` : 'zoom-wc';
+  const d = new Date();
+  const session = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}_${code}`;
+  await saveState(session, []);
+  await postToServer(session, '');
+  await chrome.storage.session.set({ mla_active: true, mla_paused: false });
+  setActionState('live');
+  broadcast({ type: 'session', session, code });
+  return session;
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     if (msg.type === 'session') {
       // A genuinely new session started (Meet/Zoom join or rejoin). Stop any active STT first so a co-pilot
@@ -624,12 +642,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       // the file/brain (dedup + delta) is serialized behind capQueue so concurrent cap-finals don't race.
       // Enqueue SYNCHRONOUSLY (before any await) so cap-final file order is preserved; persistCapFinal
       // itself drops the write while paused. Broadcast is upsert-by-id, so gating it async is harmless.
-      capQueue = capQueue.then(() => persistCapFinal(msg)).catch(() => {});
+      // Resolve inside the queued thunk, not before it: enqueuing must stay synchronous to keep file order.
+      capQueue = capQueue.then(async () => {
+        if (!msg.session) msg.session = await resolveSession(sender);
+        return persistCapFinal(msg);
+      }).catch(() => {});
       if (!(await isPaused())) broadcast({ type: 'cap-final', ts: msg.ts, speaker: msg.speaker, text: msg.text, id: msg.id });
     } else if (msg.type === 'chat-in') {
       // Meeting-chat message → feed the brain as a distinct [chat] line + mirror to the panel transcript.
-      const { mla_session } = await chrome.storage.session.get('mla_session');
-      const sess = msg.session || mla_session;
+      const sess = msg.session || (await resolveSession(sender));
       if (sess) {
         // Enqueue synchronously (order-safe); the thunk skips the write while paused.
         capQueue = capQueue.then(async () => { if (await isPaused()) return; return postToServer(sess, `[${msg.ts}] [chat] ${msg.sender}: ${msg.text}\n`); }).catch(() => {});
