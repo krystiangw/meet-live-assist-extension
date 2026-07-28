@@ -27,6 +27,7 @@
     // The full-transcript row keeps name, time and message in separate elements — target them exactly, or the
     // fallback reads the whole row and the timestamp ends up recorded as speech.
     speaker: ['[class*="lt-full-transcript__display-name" i]', '[class*="speaker" i]', '[class*="name" i]'],
+    avatar: ['[class*="lt-full-transcript__avatar" i]'],
     text: ['[class*="lt-full-transcript__message" i]', '[class*="text" i]', '[class*="content" i]'],
     // Chat panel messages (opportunistic — only in the DOM while the chat panel is open).
     chatMsg: ['[class*="new-chat-message" i]', '[class*="chat-item" i]', '#chat-list [class*="message" i]'],
@@ -76,6 +77,12 @@
   let session = null, started = false, userPaused = false, sttPaused = false, scanning = false;
   const seenChatEls = new WeakSet(); let chatTick = 0; // meeting-chat dedup (Zoom messages carry no stable id)
   let currentCode = null, regionSeenAt = 0, captureWarned = false, lineCount = 0, trackerId = 0, lastSpeaker = '';
+  // Zoom attributes rows per PARTICIPANT, not per name: two people can share a display name (a second device
+  // joined as the same user) and are told apart only by the avatar — a photo <img src> vs a coloured letter.
+  // Key on both so they stay separate streams, and label the second one "Name (2)".
+  // Caveat: if Zoom ever swaps one participant's avatar mid-call (photo fails to load), that person splits
+  // into two labels. Conflating two speakers is the worse error, so this errs the other way.
+  const speakerLabels = new Map(); // "name|avatar" -> label
   const trackers = [];
   const now = () => Date.now();
   const pad = (n) => String(n).padStart(2, '0');
@@ -96,6 +103,25 @@
     const kids = Array.from(region.children || []).filter((el) => (el.textContent || '').trim());
     return kids.length ? kids : [region];
   }
+  function avatarFingerprint(el) {
+    if (!el) return '';
+    const src = el.getAttribute && el.getAttribute('src');
+    if (src) return `img:${String(src).slice(-32)}`;
+    const style = (el.getAttribute && el.getAttribute('style')) || '';
+    const bg = /background-color:\s*([^;]+)/i.exec(style);
+    return `ltr:${(el.textContent || '').trim()}:${bg ? bg[1].trim() : ''}`;
+  }
+  function labelFor(name, fingerprint) {
+    if (!name) return '';
+    const key = `${name}|${fingerprint}`;
+    const known = speakerLabels.get(key);
+    if (known) return known;
+    let taken = 0;
+    for (const v of speakerLabels.values()) if (v === name || v.startsWith(`${name} (`)) taken++;
+    const label = taken ? `${name} (${taken + 1})` : name;
+    speakerLabels.set(key, label);
+    return label;
+  }
   function readBlock(block) {
     const spkEl = firstMatch(block, SEL.speaker);
     const txtEl = firstMatch(block, SEL.text);
@@ -112,6 +138,7 @@
     speaker = speaker.replace(/\s*\d{1,2}:\d{2}(:\d{2})?\s*$/, '').trim();
     // A letter avatar is part of the title element, so its initial lands in front of the name ("KKrystian").
     speaker = speaker.replace(/^(\p{Lu})\1(?=\p{Ll})/u, '$1');
+    if (speaker) speaker = labelFor(speaker, avatarFingerprint(firstMatch(block, SEL.avatar)));
     return { speaker, text: normalizeGlossary(text) };
   }
   function tsLabel() { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; }
@@ -218,7 +245,7 @@
     const code = IS_TOP ? meetingCode() : currentCode;
     if (inCall && (!started || code !== currentCode)) {
       currentCode = code; started = true; lineCount = 0;
-      trackers.length = 0; regionSeenAt = now(); captureWarned = false; lastSpeaker = '';
+      trackers.length = 0; regionSeenAt = now(); captureWarned = false; lastSpeaker = ''; speakerLabels.clear();
       if (IS_TOP) { session = buildSession(code); send({ type: 'session', session, code }); }
       startScan();
     } else if (!inCall && started) {
