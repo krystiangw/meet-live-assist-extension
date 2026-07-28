@@ -30,7 +30,7 @@ const WHISPER_MODEL = process.env.WHISPER_MODEL || `${os.homedir()}/.local/share
 const WHISPER_PROMPT = process.env.WHISPER_PROMPT
   || 'Angular, Flagsmith, feature flag, code review, pull request, Jira, backend, frontend, deploy, release, sprint, story points.';
 // whisper emits these for silence/music — drop them.
-const STT_NOISE = /^\s*(\[[^\]]*\]|\([^)]*\)|>>|[-–—*~.…\s]+)?\s*$/;
+const STT_NOISE = /^\s*(\[[^\]]*\]|\([^)]*\)|\*[^*]*\*|>>|[-–—*~.…\s]+)?\s*$/; // incl. whisper's *sniff*-style annotations
 
 // Whisper does not return "nothing" for a chunk with no speech — it invents filler. On a quiet mic it
 // produced "Thank you." and "... ... ... ..." on a live call, which would fill an interview transcript with
@@ -39,7 +39,7 @@ const STT_NOISE = /^\s*(\[[^\]]*\]|\([^)]*\)|>>|[-–—*~.…\s]+)?\s*$/;
 const STT_MIN_PEAK_DB = parseFloat(process.env.STT_MIN_PEAK_DB || '-30');   // below this, treat as no speech
 const STT_QUIET_PEAK_DB = parseFloat(process.env.STT_QUIET_PEAK_DB || '-18'); // "Okay."-class filler only here
 // Boilerplate whisper hallucinates on silence, in every language it was trained on subtitles for.
-const STT_HALLUCINATION_RE = /^(?:\.{2,}|…)+[\s.…]*$|amara\.org|subtitles? (?:by|created)|thanks? for watching|napisy (?:stworzone|utworzone)|transcription by|^to be continued[.…!\s]*$|продолжение следует|субтитр|dimatorzok/i;
+const STT_HALLUCINATION_RE = /^(?:\.{2,}|…)+[\s.…]*$|amara\.org|subtitles? (?:by|created)|thanks? for watching|napisy (?:stworzone|utworzone)|transcription by|^to be continued[.…!\s]*$|^credits[.!\s]*$|продолжение следует|субтитр|dimatorzok/i;
 
 // Wrong-script guard. Whisper answers low-confidence audio with boilerplate from its subtitle training data,
 // and on a quiet Polish call that came out in Russian ("Смотрите", "Субтитры создавал DimaTorzok"). Chasing
@@ -133,6 +133,9 @@ function confidentSegments(json) {
   const segs = Array.isArray(json && json.segments) ? json.segments : [];
   const kept = [];
   for (const seg of segs) {
+    // The same per-segment noise filter the CLI path applies while joining lines: whisper emits non-speech
+    // annotations ("*sniff*", "[music]") as segments of their own, and they are not speech.
+    if (STT_NOISE.test(String(seg.text || ''))) continue;
     const words = Array.isArray(seg.words) ? seg.words.filter((w) => typeof w.probability === 'number') : [];
     const conf = words.length
       ? words.reduce((a, w) => a + w.probability, 0) / words.length
