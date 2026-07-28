@@ -604,7 +604,13 @@ const server = http.createServer((req, res) => {
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       // Refuse a session-less append instead of letting safeSession() mint `meeting_<timestamp>`: that turned
       // every line of a call into its own transcript file when the caller lost track of the session.
-      if (!String(data.session || '').trim()) { res.writeHead(400); return res.end('missing session'); }
+      // Also reject the literal strings a broken caller sends: a template that interpolated an undefined
+      // variable produced session="undefined", the server dutifully created `undefined.txt`, and it then
+      // became the newest transcript — which is what the brain pins. One hour of a real interview landed
+      // there while the panel, holding no session at all, could not display a single line of advice.
+      if (!/\S/.test(String(data.session || '')) || /^(undefined|null|NaN)$/i.test(String(data.session).trim())) {
+        res.writeHead(400); return res.end('missing or invalid session');
+      }
       const session = safeSession(data.session);
       const line = typeof data.line === 'string' ? data.line : '';
       const file = fileFor(session);
@@ -711,7 +717,11 @@ const server = http.createServer((req, res) => {
   // Extension -> server: transcribe a tab-audio chunk locally (whisper.cpp) and append to the transcript.
   if (req.method === 'POST' && (req.url === '/stt' || req.url.startsWith('/stt?'))) { // not /stt-lang
     const u = new URL(req.url, 'http://127.0.0.1');
-    const session = safeSession(u.searchParams.get('session'));
+    const rawSession = String(u.searchParams.get('session') || '').trim();
+    if (!rawSession || /^(undefined|null|NaN)$/i.test(rawSession)) {
+      res.writeHead(400); return res.end('missing or invalid session'); // see /append — no phantom sessions
+    }
+    const session = safeSession(rawSession);
     // A session pin wins over whatever the extension sends — the panel has no Zoom language selector.
     const lang = sttLangs.get(session) || (u.searchParams.get('lang') || 'auto').slice(0, 5);
     const src = u.searchParams.get('src') === 'mic' ? 'mic' : 'tab';

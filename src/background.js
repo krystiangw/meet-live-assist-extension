@@ -19,7 +19,14 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => 
 // Heartbeat: alarms fire even after the SW was unloaded, waking it back up.
 chrome.runtime.onInstalled.addListener(() => { chrome.alarms.create('heartbeat', { periodInMinutes: 0.5 }); refreshBadge(); });
 chrome.runtime.onStartup.addListener(() => { chrome.alarms.create('heartbeat', { periodInMinutes: 0.5 }); refreshBadge(); });
-chrome.alarms.onAlarm.addListener(() => { refreshBadge(); }); // wake-only keepalive + keep the toolbar badge honest
+chrome.alarms.onAlarm.addListener(async () => {
+  refreshBadge();
+  // Heal an orphaned content script even when the panel never reconnects. Reloading the extension leaves the
+  // injected script dead in already-open tabs, and healing only on panel `hello` means a call joined before
+  // the reload never gets a session — capture then has no identity and the panel stays blank.
+  const { mla_session } = await chrome.storage.session.get('mla_session');
+  if (!mla_session) { try { await ensureCapture(); } catch (_) {} }
+});
 
 // The toolbar icon reflects session state even when the panel is hidden, so you can close the
 // panel and still see the session is live: no badge = idle, green = capturing, blue = an assistant
@@ -289,8 +296,12 @@ async function startStt() {
   try { streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id }); }
   catch (e) { broadcast({ type: 'stt', on: false, reason: String(e && e.message || e) }); return; }
   await ensureOffscreen();
-  const { mla_session, mla_lang } = await chrome.storage.session.get(['mla_session', 'mla_lang']);
-  const common = { session: mla_session, lang: mla_lang || 'auto', serverUrl: await getServerUrl(), token: await getToken() };
+  const { mla_lang } = await chrome.storage.session.get('mla_lang');
+  // Never start recording without a session identity. Without this the chunk URL interpolated `undefined`,
+  // the server created an `undefined` transcript, and the panel — which had no session either — could not
+  // show a single line of advice while an hour-long interview was being captured into that phantom file.
+  const session = await resolveSession({ tab });
+  const common = { session, lang: mla_lang || 'auto', serverUrl: await getServerUrl(), token: await getToken() };
   // Both sources: tabCapture is the remote participants only (it never includes your own mic), so without
   // the mic half a caption-less call would record everyone except the user.
   chrome.runtime.sendMessage({ type: 'offscreen-start', source: 'tab', streamId, ...common });
@@ -613,8 +624,12 @@ async function handleDebugDo(kind) {
 async function resolveSession(sender) {
   const { mla_session } = await chrome.storage.session.get('mla_session');
   if (mla_session) return mla_session;
-  const m = /\/wc\/(\d{8,12})/.exec((sender && sender.tab && sender.tab.url) || '');
-  const code = m ? `zoom-${m[1]}` : 'zoom-wc';
+  // Derive the code from whichever platform the tab is on; a Zoom-shaped fallback on a Meet call would
+  // name the session after the wrong platform and split it from what the content script writes.
+  const url = (sender && sender.tab && sender.tab.url) || '';
+  const zoom = /\/wc\/(\d{8,12})/.exec(url);
+  const meet = /meet\.google\.com\/([a-z]{3}-[a-z]{4}-[a-z]{3})/i.exec(url);
+  const code = zoom ? `zoom-${zoom[1]}` : (meet ? meet[1] : 'call');
   const d = new Date();
   const session = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}_${code}`;
   await saveState(session, []);
