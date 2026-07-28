@@ -683,7 +683,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const d = new Date();
         const ts = [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
         // Mic STT is the user (Krystian → 'You'); tabCapture STT is remote participants (unattributed).
-        broadcast({ type: 'line', ts, speaker: msg.source === 'mic' ? 'You' : '(unattributed)', text: msg.text });
+        // The server owns the label (it knows the session's configured remote name); fall back only if absent.
+        broadcast({ type: 'line', ts, speaker: msg.speaker || (msg.source === 'mic' ? 'You' : '(unattributed)'), text: msg.text });
       }
     } else if (msg.type === 'stt-status') {
       broadcast({ type: 'stt', on: !!msg.on });

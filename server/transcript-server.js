@@ -201,6 +201,10 @@ function transcribe(inputFile, lang, done) {
         fs.unlink(inputFile, () => {}); fs.unlink(wav, () => {});
         if (e2) return done(e2);
         if (!text) return done(null, '');
+        // Whisper prefixes dialogue dashes ("- Yeah."), which made the filler patterns miss — they anchor
+        // on the whole line.
+        text = text.replace(/^[-–—>\s]+/, '');
+        if (!text) return done(null, '');
         if (STT_HALLUCINATION_RE.test(text)) { console.log(`[stt] dropped boilerplate (${peak}dB): ${text}`); return done(null, ''); }
         if (isWrongScript(text, lang)) { console.log(`[stt] dropped wrong-script output (lang=${lang}, ${peak}dB): ${text}`); return done(null, ''); }
         if (STT_FILLER_ALWAYS_RE.test(text)) { console.log(`[stt] dropped hesitation (${peak}dB): ${text}`); return done(null, ''); }
@@ -743,8 +747,10 @@ const server = http.createServer((req, res) => {
             queueForWake(session, sttLine);
           } catch (_) {}
         }
+        // Return the label too: the panel used to hardcode '(unattributed)' for tab audio and so showed a
+        // different speaker than the transcript the brain reads.
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ text: text || '' }));
+        res.end(JSON.stringify({ text: text || '', speaker: src === 'mic' ? 'You' : (remoteNames.get(session) || '(unattributed)') }));
       });
     });
     return;

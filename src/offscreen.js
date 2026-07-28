@@ -63,7 +63,7 @@ async function transcribeChunk(kind, blob) {
   try {
     const url = `${cfg.serverUrl}/stt?session=${encodeURIComponent(cfg.session)}&lang=${encodeURIComponent(cfg.lang || 'auto')}&src=${kind}`;
     const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-MLA-Token': cfg.token || '' }, body: blob });
-    if (r.ok) { const { text } = await r.json(); if (text) chrome.runtime.sendMessage({ type: 'stt-line', text, source: kind }); }
+    if (r.ok) { const { text, speaker } = await r.json(); if (text) chrome.runtime.sendMessage({ type: 'stt-line', text, speaker, source: kind }); }
   } catch (_) { /* server down */ }
 }
 
