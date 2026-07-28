@@ -32,24 +32,57 @@ const WHISPER_PROMPT = process.env.WHISPER_PROMPT
 // whisper emits these for silence/music — drop them.
 const STT_NOISE = /^\s*(\[[^\]]*\]|\([^)]*\)|>>|\.|…)?\s*$/;
 
+// Whisper does not return "nothing" for a chunk with no speech — it invents filler. On a quiet mic it
+// produced "Thank you." and "... ... ... ..." on a live call, which would fill an interview transcript with
+// phantom lines. Two nets: skip silent chunks before whisper runs at all (peak level), then drop the
+// boilerplate it emits anyway. Thresholds are env-tunable because mic levels differ per machine.
+const STT_MIN_PEAK_DB = parseFloat(process.env.STT_MIN_PEAK_DB || '-30');   // below this, treat as no speech
+const STT_QUIET_PEAK_DB = parseFloat(process.env.STT_QUIET_PEAK_DB || '-22'); // "Okay."-class filler only here
+// Boilerplate whisper hallucinates on silence, in every language it was trained on subtitles for.
+const STT_HALLUCINATION_RE = /^(?:\.{2,}|…)+[\s.…]*$|amara\.org|subtitles? (?:by|created)|thanks? for watching|napisy (?:stworzone|utworzone)|transcription by/i;
+// Short generic phrases that are real speech sometimes — dropped only when the audio was near-silent.
+const STT_FILLER_RE = /^(thank you|thanks|bye|okay|ok|yeah|mhm|dziękuję|dzięki|okej|dobrze)[.!…]*$/i;
+
+// Peak level of a decoded wav, in dBFS (0 = full scale). null when ffmpeg gives us nothing to parse.
+function peakDb(wav, done) {
+  execFile(FFMPEG, ['-hide_banner', '-nostats', '-i', wav, '-af', 'volumedetect', '-f', 'null', '-'],
+    { maxBuffer: 1 << 20 }, (err, _stdout, stderr) => {
+      if (err) return done(null);
+      const m = /max_volume:\s*(-?\d+(?:\.\d+)?) dB/.exec(String(stderr || ''));
+      done(m ? parseFloat(m[1]) : null);
+    });
+}
+
 // Transcribe one audio chunk (any ffmpeg-decodable format) → text. lang: 'en'|'pl'|'auto'.
 function transcribe(inputFile, lang, done) {
   const wav = `${inputFile}.16k.wav`;
   execFile(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-i', inputFile, '-ar', '16000', '-ac', '1', '-y', wav], (e1) => {
     if (e1) { fs.unlink(inputFile, () => {}); return done(e1); }
-    // Bias the decoder toward our jargon. Measured on a Polish sample with English terms: without it
-    // "Flagsmith" came out "flagship" and "pull requeście" as "pulrek feście"; with it both are correct,
-    // and a pure-Polish sample is unaffected. Polish speech with English technical terms is the hard case.
-    const args = ['-m', WHISPER_MODEL, '-f', wav, '-l', lang || 'auto', '-nt', '-np', '-t', '4'];
-    if (WHISPER_PROMPT) args.push('--prompt', WHISPER_PROMPT);
-    execFile(WHISPER_CLI, args,
-      { maxBuffer: 4 * 1024 * 1024 }, (e2, stdout) => {
+    peakDb(wav, (peak) => {
+      if (peak !== null && peak < STT_MIN_PEAK_DB) {
         fs.unlink(inputFile, () => {}); fs.unlink(wav, () => {});
-        if (e2) return done(e2);
-        const text = String(stdout || '').split('\n').map((l) => l.trim())
-          .filter((l) => l && !STT_NOISE.test(l)).join(' ').trim();
-        done(null, text);
-      });
+        return done(null, ''); // no speech in this chunk — running whisper on it only invents filler
+      }
+      // Bias the decoder toward our jargon. Measured on a Polish sample with English terms: without it
+      // "Flagsmith" came out "flagship" and "pull requeście" as "pulrek feście"; with it both are correct,
+      // and a pure-Polish sample is unaffected. Polish speech with English technical terms is the hard case.
+      const args = ['-m', WHISPER_MODEL, '-f', wav, '-l', lang || 'auto', '-nt', '-np', '-t', '4'];
+      if (WHISPER_PROMPT) args.push('--prompt', WHISPER_PROMPT);
+      execFile(WHISPER_CLI, args,
+        { maxBuffer: 4 * 1024 * 1024 }, (e2, stdout) => {
+          fs.unlink(inputFile, () => {}); fs.unlink(wav, () => {});
+          if (e2) return done(e2);
+          const text = String(stdout || '').split('\n').map((l) => l.trim())
+            .filter((l) => l && !STT_NOISE.test(l)).join(' ').trim();
+          if (!text) return done(null, '');
+          if (STT_HALLUCINATION_RE.test(text)) { console.log(`[stt] dropped boilerplate (${peak}dB): ${text}`); return done(null, ''); }
+          if (STT_FILLER_RE.test(text) && peak !== null && peak < STT_QUIET_PEAK_DB) {
+            console.log(`[stt] dropped filler on quiet audio (${peak}dB): ${text}`);
+            return done(null, '');
+          }
+          done(null, text);
+        });
+    });
   });
 }
 
