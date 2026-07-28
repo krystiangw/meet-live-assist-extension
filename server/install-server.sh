@@ -35,6 +35,15 @@ NODE_MAJOR=$(node -e 'process.stdout.write(String(process.versions.node.split(".
 FFMPEG_BIN=$(command -v ffmpeg || true)
 WHISPER_BIN=$(command -v whisper-cli || true)
 
+# Pick the best installed whisper model. This is not a nicety: on 6-second chunks `base` both mistranscribes
+# non-English speech and mis-identifies the language, which is exactly the case STT exists to cover (a call
+# with no captions, possibly switching languages mid-sentence).
+WHISPER_MODEL_PATH=""
+for m in large-v3-turbo large-v3 medium small base; do
+  cand="$HOME/.local/share/whisper/ggml-$m.bin"
+  [ -f "$cand" ] && { WHISPER_MODEL_PATH="$cand"; break; }
+done
+
 node --check "$SERVER_JS" || die "$SERVER_JS failed a syntax check"
 
 xml_entry() { printf '    <key>%s</key>\n    <string>%s</string>\n' "$1" "$2"; }
@@ -61,6 +70,7 @@ PLIST_HEAD
   xml_entry TRANSCRIPTS_DIR "$TRANSCRIPTS_DIR"
   [ -n "$FFMPEG_BIN" ] && xml_entry FFMPEG "$FFMPEG_BIN"
   [ -n "$WHISPER_BIN" ] && xml_entry WHISPER_CLI "$WHISPER_BIN"
+  [ -n "$WHISPER_MODEL_PATH" ] && xml_entry WHISPER_MODEL "$WHISPER_MODEL_PATH"
   cat <<PLIST_TAIL
   </dict>
 
@@ -85,6 +95,7 @@ printf 'port          %s\n' "$PORT"
 printf 'log           %s\n' "$LOG_FILE"
 printf 'ffmpeg        %s\n' "${FFMPEG_BIN:-— missing (TTS into the call disabled)}"
 printf 'whisper-cli   %s\n' "${WHISPER_BIN:-— missing (local STT disabled)}"
+printf 'whisper model %s\n' "${WHISPER_MODEL_PATH:-— none in ~/.local/share/whisper (STT will fail)}"
 
 if [ "$DRY" = 1 ]; then
   printf '\n--- would write %s ---\n' "$PLIST"

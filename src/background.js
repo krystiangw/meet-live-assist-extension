@@ -290,7 +290,11 @@ async function startStt() {
   catch (e) { broadcast({ type: 'stt', on: false, reason: String(e && e.message || e) }); return; }
   await ensureOffscreen();
   const { mla_session, mla_lang } = await chrome.storage.session.get(['mla_session', 'mla_lang']);
-  chrome.runtime.sendMessage({ type: 'offscreen-start', streamId, session: mla_session, lang: mla_lang || 'auto', serverUrl: await getServerUrl(), token: await getToken() });
+  const common = { session: mla_session, lang: mla_lang || 'auto', serverUrl: await getServerUrl(), token: await getToken() };
+  // Both sources: tabCapture is the remote participants only (it never includes your own mic), so without
+  // the mic half a caption-less call would record everyone except the user.
+  chrome.runtime.sendMessage({ type: 'offscreen-start', source: 'tab', streamId, ...common });
+  chrome.runtime.sendMessage({ type: 'offscreen-start', source: 'mic', ...common });
   await chrome.storage.session.set({ mla_stt_on: true });
   try { chrome.tabs.sendMessage(tab.id, { type: 'capture-mode', captions: false }, () => void chrome.runtime.lastError); } catch (_) {} // avoid dup transcript
 }
@@ -684,7 +688,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     } else if (msg.type === 'stt-status') {
       broadcast({ type: 'stt', on: !!msg.on });
     } else if (msg.type === 'stt-error') {
-      broadcast({ type: 'stt', on: false, reason: msg.reason });
+      // One source failing (typically a blocked mic) leaves the other recording — don't report STT as off,
+      // or the panel would claim nothing is being captured while the remote side still is.
+      broadcast({ type: 'stt', on: !msg.fatal, reason: msg.source ? `${msg.source}: ${msg.reason}` : msg.reason });
     }
     sendResponse({ ok: true });
   })();

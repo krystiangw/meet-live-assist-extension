@@ -1,17 +1,19 @@
 // Offscreen document — the only place that can consume a tabCapture MediaStream in MV3.
-// Records the Meet tab audio in ~6s complete WebM chunks and POSTs each to the local server's
-// /stt (whisper.cpp). Each chunk is a full file (start/stop per chunk) so it decodes standalone.
-
-let stream = null;
-let recorder = null;
-let audioCtx = null;
-let active = false;
-let cfg = null;
+// Records audio in ~6s complete WebM chunks and POSTs each to the local server's /stt (whisper.cpp).
+// Each chunk is a full file (start/stop per chunk) so it decodes standalone.
+//
+// Two sources can run at once, which is what makes STT a usable caption fallback: `tab` carries the
+// REMOTE participants (tabCapture never includes your own mic) and `mic` carries the user. The server
+// labels them differently ('(unattributed)' vs 'You'), so attribution — and with it the rule that only
+// the user can authorize actions — survives a call with no captions at all.
 
 const CHUNK_MS = 6000;
 const MIN_BYTES = 4000; // skip near-silent tiny blobs
 
-// Pick a container the tab-capture stream can actually record; 'audio/webm' alone can be rejected
+const sources = new Map(); // 'tab' | 'mic' -> { stream, recorder, audioCtx, active }
+let cfg = null;
+
+// Pick a container the capture stream can actually record; 'audio/webm' alone can be rejected
 // (NotSupportedError on start) depending on the Chrome build. '' = let the browser choose.
 function pickMime() {
   for (const t of ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']) {
@@ -21,70 +23,99 @@ function pickMime() {
 }
 let mime = '';
 
-async function start(streamId, config) {
-  if (active) return;
-  cfg = config;
-  try {
-    stream = config.source === 'mic'
-      ? await navigator.mediaDevices.getUserMedia({ audio: true }) // co-pilot: hear the user's microphone
-      : await navigator.mediaDevices.getUserMedia({ audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId } } });
-  } catch (e) {
-    chrome.runtime.sendMessage({ type: 'stt-error', reason: config.source === 'mic' ? 'microphone blocked — enable it in the extension Options' : String(e && e.message || e) });
-    return;
-  }
-  // tabCapture mutes the tab locally — re-route to speakers so the user still hears the call. Mic needs no reroute.
-  if (config.source !== 'mic') {
-    audioCtx = new AudioContext();
-    audioCtx.createMediaStreamSource(stream).connect(audioCtx.destination);
-  }
-  mime = pickMime();
-  active = true;
-  chrome.runtime.sendMessage({ type: 'stt-status', on: true });
-  loop();
+function anyActive() {
+  for (const s of sources.values()) if (s.active) return true;
+  return false;
 }
 
-async function transcribeChunk(blob) {
+async function startSource(kind, streamId, config) {
+  if (sources.has(kind)) return; // already recording this source
+  cfg = config;
+  let stream;
   try {
-    const url = `${cfg.serverUrl}/stt?session=${encodeURIComponent(cfg.session)}&lang=${encodeURIComponent(cfg.lang || 'auto')}&src=${cfg.source || 'tab'}`;
+    stream = kind === 'mic'
+      ? await navigator.mediaDevices.getUserMedia({ audio: true })
+      : await navigator.mediaDevices.getUserMedia({ audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId } } });
+  } catch (e) {
+    // One source failing must not take the other down — tab-only (or mic-only) is still useful.
+    chrome.runtime.sendMessage({
+      type: 'stt-error', source: kind, fatal: !anyActive(),
+      reason: kind === 'mic' ? 'microphone blocked — allow it for the extension' : String((e && e.message) || e),
+    });
+    return;
+  }
+  const entry = { stream, recorder: null, audioCtx: null, active: true };
+  // tabCapture mutes the tab locally — re-route to speakers so the user still hears the call. Mic needs no reroute.
+  if (kind !== 'mic') {
+    entry.audioCtx = new AudioContext();
+    entry.audioCtx.createMediaStreamSource(stream).connect(entry.audioCtx.destination);
+  }
+  sources.set(kind, entry);
+  mime = mime || pickMime();
+  chrome.runtime.sendMessage({ type: 'stt-status', on: true, source: kind });
+  loop(kind);
+}
+
+async function transcribeChunk(kind, blob) {
+  try {
+    const url = `${cfg.serverUrl}/stt?session=${encodeURIComponent(cfg.session)}&lang=${encodeURIComponent(cfg.lang || 'auto')}&src=${kind}`;
     const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-MLA-Token': cfg.token || '' }, body: blob });
-    if (r.ok) { const { text } = await r.json(); if (text) chrome.runtime.sendMessage({ type: 'stt-line', text, source: cfg.source }); }
+    if (r.ok) { const { text } = await r.json(); if (text) chrome.runtime.sendMessage({ type: 'stt-line', text, source: kind }); }
   } catch (_) { /* server down */ }
 }
 
-function loop() {
-  if (!active || !stream) return;
+function loop(kind) {
+  const entry = sources.get(kind);
+  if (!entry || !entry.active || !entry.stream) return;
   const parts = [];
   let rec;
-  try { rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream); }
-  catch (e) { active = false; chrome.runtime.sendMessage({ type: 'stt-error', reason: String(e && e.message || e) }); return; }
-  recorder = rec;
+  try { rec = mime ? new MediaRecorder(entry.stream, { mimeType: mime }) : new MediaRecorder(entry.stream); }
+  catch (e) {
+    entry.active = false;
+    chrome.runtime.sendMessage({ type: 'stt-error', source: kind, fatal: !anyActive(), reason: String((e && e.message) || e) });
+    return;
+  }
+  entry.recorder = rec;
   rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
-  rec.onerror = (e) => { const err = (e && e.error) || {}; chrome.runtime.sendMessage({ type: 'stt-error', reason: String(err.message || err.name || 'recorder error') }); };
+  rec.onerror = (e) => {
+    const err = (e && e.error) || {};
+    chrome.runtime.sendMessage({ type: 'stt-error', source: kind, fatal: false, reason: String(err.message || err.name || 'recorder error') });
+  };
   rec.onstop = () => {
     const blob = new Blob(parts, { type: mime || 'audio/webm' });
     // Restart on a fresh tick (not synchronously inside onstop) so the previous recorder fully releases the
-    // tab stream before we start the next one — starting it synchronously throws NotSupportedError.
-    if (active) setTimeout(loop, 0);
-    if (blob.size > MIN_BYTES) transcribeChunk(blob); // fire-and-forget; runs in parallel with recording
+    // stream before we start the next one — starting it synchronously throws NotSupportedError.
+    if (entry.active) setTimeout(() => loop(kind), 0);
+    if (blob.size > MIN_BYTES) transcribeChunk(kind, blob); // fire-and-forget; runs in parallel with recording
   };
   // Start after handlers are attached (so onerror catches start failures too), guarded so a throw
   // becomes a reported stt-error instead of an uncaught rejection.
   try { rec.start(); }
-  catch (e) { active = false; chrome.runtime.sendMessage({ type: 'stt-error', reason: String(e && e.message || e) }); return; }
-  // Reference THIS recorder (not the shared module var, which the next loop reassigns).
+  catch (e) {
+    entry.active = false;
+    chrome.runtime.sendMessage({ type: 'stt-error', source: kind, fatal: !anyActive(), reason: String((e && e.message) || e) });
+    return;
+  }
+  // Reference THIS recorder (not entry.recorder, which the next loop reassigns).
   setTimeout(() => { try { if (rec.state !== 'inactive') rec.stop(); } catch (_) {} }, CHUNK_MS);
 }
 
-function stop() {
-  active = false;
-  try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch (_) {}
-  try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
-  try { if (audioCtx) audioCtx.close(); } catch (_) {}
-  stream = null; recorder = null; audioCtx = null;
+function stopSource(kind) {
+  const entry = sources.get(kind);
+  if (!entry) return;
+  entry.active = false;
+  try { if (entry.recorder && entry.recorder.state !== 'inactive') entry.recorder.stop(); } catch (_) {}
+  try { entry.stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+  try { if (entry.audioCtx) entry.audioCtx.close(); } catch (_) {}
+  sources.delete(kind);
+}
+
+function stopAll() {
+  for (const kind of Array.from(sources.keys())) stopSource(kind);
   chrome.runtime.sendMessage({ type: 'stt-status', on: false });
 }
 
 chrome.runtime.onMessage.addListener((m) => {
-  if (m.type === 'offscreen-start') start(m.streamId, m);
-  else if (m.type === 'offscreen-stop') stop();
+  if (m.type === 'offscreen-start') startSource(m.source === 'mic' ? 'mic' : 'tab', m.streamId, m);
+  else if (m.type === 'offscreen-stop') { if (m.source) stopSource(m.source); else stopAll(); }
 });
