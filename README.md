@@ -160,6 +160,14 @@ closes the "any website can drive the localhost server" hole. Build the store zi
 
 ## Roadmap
 
+- **Mute-aware mic capture** (deferred 2026-07-28 — idea worth keeping). Muting yourself in Zoom does not stop
+  the OS microphone, so the `mic` STT channel keeps recording asides nobody in the call heard, and the brain
+  treats them as things you said in the meeting. Don't drop them — **label them** `You (muted):` so muting
+  becomes a deliberate private voice channel to the assistant (still authorizes actions; never quotable as
+  something said to the room). Open question is only how to read the state: the toolbar button is localized
+  ("Wyłącz wyciszenie" / "Unmute"), so it needs a state attribute or an icon class, not a text match — the same
+  fragility that already bit the caption selectors.
+
 - **Auth north-star (product):** user authorizes a provider (Claude, later ChatGPT) in the extension's
   settings and it "just works." Reality: the Agent SDK / API is **API-key based, not account-OAuth**, and a
   pure extension can't run the MCP agent brain (needs Node). So the full-brain path needs a local bridge or a
