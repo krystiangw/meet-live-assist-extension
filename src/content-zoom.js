@@ -40,7 +40,10 @@
   const SENT_END = /[.!?…]["')\]]?\s*$/;
   const POLL_MS = 200;
   const CAPTURE_WARN_MS = 12000;
-  const ZOOM_WC_RE = /\/wc\//;
+  // A call is /wc/<numeric meeting id>/…; /wc/home is the web client's landing page. Treating that as a
+  // meeting created an empty `…_zoom-home` session — which then shadowed the real meeting, because the brain
+  // pins the newest transcript file.
+  const ZOOM_MEETING_RE = /\/wc\/(\d{8,12})(?:\/|$)/;
   const NOISE_RE = /^(show captions|hide captions|captions|save|more|settings|napisy (są )?włączone|captions (are )?(enabled|on)|transkrypcja (jest )?włączona)$/i;
 
   const GLOSSARY = [
@@ -193,8 +196,8 @@
   }
 
   function meetingCode() {
-    const m = /\/wc\/([A-Za-z0-9]+)/.exec(location.pathname);
-    return m ? `zoom-${m[1].slice(0, 12)}` : 'zoom-wc';
+    const m = ZOOM_MEETING_RE.exec(location.pathname);
+    return m ? `zoom-${m[1]}` : 'zoom-wc';
   }
   function buildSession(code) {
     const d = new Date();
@@ -207,7 +210,7 @@
   function tick() {
     if (!isCurrent()) return; // a newer instance owns capture now
     // A child frame's URL need not carry /wc/, so it decides it is "in a call" by whether captions exist.
-    const inCall = IS_TOP ? ZOOM_WC_RE.test(location.pathname) : !!firstRegion();
+    const inCall = IS_TOP ? ZOOM_MEETING_RE.test(location.pathname) : !!firstRegion();
     const code = IS_TOP ? meetingCode() : currentCode;
     if (inCall && (!started || code !== currentCode)) {
       currentCode = code; started = true; lineCount = 0;
