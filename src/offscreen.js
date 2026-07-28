@@ -1,5 +1,5 @@
 // Offscreen document — the only place that can consume a tabCapture MediaStream in MV3.
-// Records audio in ~6s complete WebM chunks and POSTs each to the local server's /stt (whisper.cpp).
+// Records audio in short complete WebM chunks (CHUNK_MS) and POSTs each to the local server's /stt.
 // Each chunk is a full file (start/stop per chunk) so it decodes standalone.
 //
 // Two sources can run at once, which is what makes STT a usable caption fallback: `tab` carries the
@@ -7,7 +7,10 @@
 // labels them differently ('(unattributed)' vs 'You'), so attribution — and with it the rule that only
 // the user can authorize actions — survives a call with no captions at all.
 
-const CHUNK_MS = 6000;
+// 4s, not 6: whisper costs the same per call regardless of chunk length (measured 1.5s for both a 2s and a
+// 6s chunk — the model load dominates), so a shorter chunk buys ~1.5s of latency at the price of more calls.
+// Worth it now that the model stays resident server-side; 2s chunks were measurably worse ("wandelskich").
+const CHUNK_MS = 4000;
 const MIN_BYTES = 4000; // skip near-silent tiny blobs
 
 const sources = new Map(); // 'tab' | 'mic' -> { stream, recorder, audioCtx, active }

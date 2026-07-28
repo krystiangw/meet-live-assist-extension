@@ -19,7 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 
 // ffmpeg lives in Homebrew; launchd's PATH doesn't include it, so use an absolute path.
 const FFMPEG = process.env.FFMPEG || '/opt/homebrew/bin/ffmpeg';
@@ -50,6 +50,94 @@ const STT_FILLER_ALWAYS_RE = /^(mhm+|hmm+|uh+|um+|aha|gracias|merci|danke|grazie
 // the board depends on, and throwing it away silently would lose agreements.
 const STT_FILLER_QUIET_RE = /^(thank you|thanks|bye|okay|ok|yeah|yes|no|dziękuję|dzięki|okej|dobrze|tak|nie)[.!…]*$/i;
 
+// whisper-cli reloads the 1.5GB model on EVERY chunk: measured 1.55s per 6s chunk of which most is the
+// load (a 2s chunk costs the same), and ~2GB allocated 20×/minute with two channels running. whisper-server
+// keeps the model resident → 1.0s per chunk and one steady 1.8GB process.
+// Started lazily on the first chunk (so an idle machine holds no model) and reaped when STT goes quiet;
+// while it warms up, and if it ever fails, chunks go through the CLI — STT must not depend on it.
+const WHISPER_SERVER_BIN = process.env.WHISPER_SERVER || '/opt/homebrew/bin/whisper-server';
+const WHISPER_SERVER_PORT = parseInt(process.env.WHISPER_SERVER_PORT || '8859', 10);
+const WHISPER_IDLE_MS = parseInt(process.env.WHISPER_IDLE_MS || '600000', 10); // free the model after 10 min idle
+const ws = { proc: null, ready: false, failed: false, lastUse: 0 };
+
+function whisperServerHealthy(done) {
+  const req = http.request({ host: '127.0.0.1', port: WHISPER_SERVER_PORT, path: '/', method: 'GET', timeout: 800 },
+    (res) => { res.resume(); done(true); });
+  req.on('error', () => done(false));
+  req.on('timeout', () => { req.destroy(); done(false); });
+  req.end();
+}
+
+function ensureWhisperServer() {
+  if (ws.proc || ws.failed) return;
+  if (!fs.existsSync(WHISPER_SERVER_BIN) || !fs.existsSync(WHISPER_MODEL)) { ws.failed = true; return; }
+  try {
+    ws.proc = spawn(WHISPER_SERVER_BIN, ['-m', WHISPER_MODEL, '--port', String(WHISPER_SERVER_PORT), '-t', '4'],
+      { stdio: 'ignore' });
+  } catch (_) { ws.failed = true; return; }
+  ws.proc.on('exit', () => { ws.proc = null; ws.ready = false; });
+  console.log(`[stt] starting whisper-server on :${WHISPER_SERVER_PORT} (${path.basename(WHISPER_MODEL)})`);
+  let tries = 0;
+  const poll = setInterval(() => {
+    if (!ws.proc) return clearInterval(poll);
+    whisperServerHealthy((ok) => {
+      if (ok) { ws.ready = true; clearInterval(poll); console.log('[stt] whisper-server ready'); }
+      else if (++tries > 30) { clearInterval(poll); ws.failed = true; console.log('[stt] whisper-server did not come up — staying on the CLI'); }
+    });
+  }, 1000);
+}
+
+setInterval(() => {
+  if (ws.proc && ws.lastUse && Date.now() - ws.lastUse > WHISPER_IDLE_MS) {
+    console.log('[stt] whisper-server idle — stopping to free the model');
+    try { ws.proc.kill(); } catch (_) {}
+    ws.proc = null; ws.ready = false;
+  }
+}, 60000);
+
+function whisperArgs(wav, lang) {
+  const args = ['-m', WHISPER_MODEL, '-f', wav, '-l', lang || 'auto', '-nt', '-np', '-t', '4'];
+  if (WHISPER_PROMPT) args.push('--prompt', WHISPER_PROMPT);
+  return args;
+}
+// Join segments WITHOUT adding separators: whisper starts each segment with its own leading space, and it
+// also splits mid-word ("Flag\nsmith" for Flagsmith), where an inserted space would corrupt the word.
+const joinWhisper = (s) => String(s || '').split('\n')
+  .filter((l) => !STT_NOISE.test(l)).join('').replace(/\s+/g, ' ').trim();
+
+function whisperViaCli(wav, lang, done) {
+  execFile(WHISPER_CLI, whisperArgs(wav, lang), { maxBuffer: 4 * 1024 * 1024 },
+    (err, stdout) => (err ? done(err) : done(null, joinWhisper(stdout))));
+}
+
+function whisperViaServer(wav, lang, done) {
+  const form = new FormData();
+  form.append('file', new Blob([fs.readFileSync(wav)]), path.basename(wav));
+  form.append('response_format', 'text');
+  form.append('temperature', '0');
+  // Always send the language, 'auto' included, and pin translate=false: omitting the field made
+  // whisper-server return an ENGLISH TRANSLATION of Polish speech instead of a Polish transcript.
+  form.append('language', lang || 'auto');
+  form.append('translate', 'false');
+  if (WHISPER_PROMPT) form.append('prompt', WHISPER_PROMPT);
+  fetch(`http://127.0.0.1:${WHISPER_SERVER_PORT}/inference`, { method: 'POST', body: form })
+    .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`whisper-server ${r.status}`))))
+    .then((t) => done(null, joinWhisper(t)))
+    .catch((e) => done(e));
+}
+
+function whisperText(wav, lang, done) {
+  ws.lastUse = Date.now();
+  ensureWhisperServer();
+  if (!ws.ready) return whisperViaCli(wav, lang, done);
+  whisperViaServer(wav, lang, (err, text) => {
+    if (!err) return done(null, text);
+    console.log(`[stt] whisper-server failed (${err.message}) — falling back to the CLI for this chunk`);
+    ws.ready = false; // re-checked on the next chunk; a crashed server must not black-hole transcription
+    whisperViaCli(wav, lang, done);
+  });
+}
+
 // Peak level of a decoded wav, in dBFS (0 = full scale). null when ffmpeg gives us nothing to parse.
 function peakDb(wav, done) {
   execFile(FFMPEG, ['-hide_banner', '-nostats', '-i', wav, '-af', 'volumedetect', '-f', 'null', '-'],
@@ -70,26 +158,18 @@ function transcribe(inputFile, lang, done) {
         fs.unlink(inputFile, () => {}); fs.unlink(wav, () => {});
         return done(null, ''); // no speech in this chunk — running whisper on it only invents filler
       }
-      // Bias the decoder toward our jargon. Measured on a Polish sample with English terms: without it
-      // "Flagsmith" came out "flagship" and "pull requeście" as "pulrek feście"; with it both are correct,
-      // and a pure-Polish sample is unaffected. Polish speech with English technical terms is the hard case.
-      const args = ['-m', WHISPER_MODEL, '-f', wav, '-l', lang || 'auto', '-nt', '-np', '-t', '4'];
-      if (WHISPER_PROMPT) args.push('--prompt', WHISPER_PROMPT);
-      execFile(WHISPER_CLI, args,
-        { maxBuffer: 4 * 1024 * 1024 }, (e2, stdout) => {
-          fs.unlink(inputFile, () => {}); fs.unlink(wav, () => {});
-          if (e2) return done(e2);
-          const text = String(stdout || '').split('\n').map((l) => l.trim())
-            .filter((l) => l && !STT_NOISE.test(l)).join(' ').trim();
-          if (!text) return done(null, '');
-          if (STT_HALLUCINATION_RE.test(text)) { console.log(`[stt] dropped boilerplate (${peak}dB): ${text}`); return done(null, ''); }
-          if (STT_FILLER_ALWAYS_RE.test(text)) { console.log(`[stt] dropped hesitation (${peak}dB): ${text}`); return done(null, ''); }
-          if (STT_FILLER_QUIET_RE.test(text) && peak !== null && peak < STT_QUIET_PEAK_DB) {
-            console.log(`[stt] dropped filler on quiet audio (${peak}dB): ${text}`);
-            return done(null, '');
-          }
-          done(null, text);
-        });
+      whisperText(wav, lang, (e2, text) => {
+        fs.unlink(inputFile, () => {}); fs.unlink(wav, () => {});
+        if (e2) return done(e2);
+        if (!text) return done(null, '');
+        if (STT_HALLUCINATION_RE.test(text)) { console.log(`[stt] dropped boilerplate (${peak}dB): ${text}`); return done(null, ''); }
+        if (STT_FILLER_ALWAYS_RE.test(text)) { console.log(`[stt] dropped hesitation (${peak}dB): ${text}`); return done(null, ''); }
+        if (STT_FILLER_QUIET_RE.test(text) && peak !== null && peak < STT_QUIET_PEAK_DB) {
+          console.log(`[stt] dropped filler on quiet audio (${peak}dB): ${text}`);
+          return done(null, '');
+        }
+        done(null, text);
+      });
     });
   });
 }
