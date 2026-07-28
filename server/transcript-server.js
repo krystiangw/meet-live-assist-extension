@@ -30,20 +30,25 @@ const WHISPER_MODEL = process.env.WHISPER_MODEL || `${os.homedir()}/.local/share
 const WHISPER_PROMPT = process.env.WHISPER_PROMPT
   || 'Angular, Flagsmith, feature flag, code review, pull request, Jira, backend, frontend, deploy, release, sprint, story points.';
 // whisper emits these for silence/music — drop them.
-const STT_NOISE = /^\s*(\[[^\]]*\]|\([^)]*\)|>>|\.|…)?\s*$/;
+const STT_NOISE = /^\s*(\[[^\]]*\]|\([^)]*\)|>>|[-–—*~.…\s]+)?\s*$/;
 
 // Whisper does not return "nothing" for a chunk with no speech — it invents filler. On a quiet mic it
 // produced "Thank you." and "... ... ... ..." on a live call, which would fill an interview transcript with
 // phantom lines. Two nets: skip silent chunks before whisper runs at all (peak level), then drop the
 // boilerplate it emits anyway. Thresholds are env-tunable because mic levels differ per machine.
 const STT_MIN_PEAK_DB = parseFloat(process.env.STT_MIN_PEAK_DB || '-30');   // below this, treat as no speech
-const STT_QUIET_PEAK_DB = parseFloat(process.env.STT_QUIET_PEAK_DB || '-22'); // "Okay."-class filler only here
+const STT_QUIET_PEAK_DB = parseFloat(process.env.STT_QUIET_PEAK_DB || '-18'); // "Okay."-class filler only here
 // Boilerplate whisper hallucinates on silence, in every language it was trained on subtitles for.
 const STT_HALLUCINATION_RE = /^(?:\.{2,}|…)+[\s.…]*$|amara\.org|subtitles? (?:by|created)|thanks? for watching|napisy (?:stworzone|utworzone)|transcription by/i;
 // Short generic phrases that are real speech sometimes — dropped only when the audio was near-silent.
 // The thank-yous span languages because whisper falls back to whatever language it guessed for the silence:
 // a quiet Polish call produced "Thank you." and "Gracias.", and a quiet tab channel produced "Uh...".
-const STT_FILLER_RE = /^(thank you|thanks|bye|okay|ok|yeah|mhm+|hmm+|uh+|um+|aha|gracias|merci|danke|grazie|obrigad[oa]|спасибо|dziękuję|dzięki|okej|dobrze)[.!…]*$/i;
+// Always noise: hesitation sounds carry nothing, and a thank-you in a language nobody is speaking is a
+// pure artifact (a Polish call produced "Gracias.").
+const STT_FILLER_ALWAYS_RE = /^(mhm+|hmm+|uh+|um+|aha|gracias|merci|danke|grazie|obrigad[oa]|спасибо)[.!…]*$/i;
+// Real speech at a normal level, so only dropped on quiet audio — "okay" after a proposal is a decision cue
+// the board depends on, and throwing it away silently would lose agreements.
+const STT_FILLER_QUIET_RE = /^(thank you|thanks|bye|okay|ok|yeah|yes|no|dziękuję|dzięki|okej|dobrze|tak|nie)[.!…]*$/i;
 
 // Peak level of a decoded wav, in dBFS (0 = full scale). null when ffmpeg gives us nothing to parse.
 function peakDb(wav, done) {
@@ -78,7 +83,8 @@ function transcribe(inputFile, lang, done) {
             .filter((l) => l && !STT_NOISE.test(l)).join(' ').trim();
           if (!text) return done(null, '');
           if (STT_HALLUCINATION_RE.test(text)) { console.log(`[stt] dropped boilerplate (${peak}dB): ${text}`); return done(null, ''); }
-          if (STT_FILLER_RE.test(text) && peak !== null && peak < STT_QUIET_PEAK_DB) {
+          if (STT_FILLER_ALWAYS_RE.test(text)) { console.log(`[stt] dropped hesitation (${peak}dB): ${text}`); return done(null, ''); }
+          if (STT_FILLER_QUIET_RE.test(text) && peak !== null && peak < STT_QUIET_PEAK_DB) {
             console.log(`[stt] dropped filler on quiet audio (${peak}dB): ${text}`);
             return done(null, '');
           }
@@ -308,6 +314,24 @@ const wakeBuf = new Map(); // session -> { lines, firstAt, since, window, lastAt
 const WAKE_ALL_DEFAULT = process.env.WAKE_ALL === '1';
 const wakeAll = new Map(); // session -> boolean
 const remoteNames = new Map(); // session -> display name for tab-audio STT lines (1:1 only)
+
+// Cross-channel echo guard. The two STT channels can hear the same speech: if the other side has no
+// headphones, the user's voice returns through their mic into the tab channel (measured on a live call with
+// a second device in the room — the same utterance landed as both 'You' and the remote speaker). Keep a
+// short window of recent lines per session and drop one that just arrived on the OTHER channel.
+const STT_ECHO_MS = parseInt(process.env.STT_ECHO_MS || '9000', 10);
+const sttRecent = new Map(); // session -> [{ at, src, norm }]
+const normStt = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+function isSttEcho(session, src, text) {
+  const norm = normStt(text);
+  if (norm.length < 12) return false; // too short to tell an echo from a genuine "yes, exactly"
+  const now = Date.now();
+  const recent = (sttRecent.get(session) || []).filter((e) => now - e.at < STT_ECHO_MS);
+  const echo = recent.some((e) => e.src !== src && (e.norm.includes(norm) || norm.includes(e.norm)));
+  recent.push({ at: now, src, norm });
+  sttRecent.set(session, recent);
+  return echo;
+}
 const wakeAllFileFor = (session) => path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.wakeall`);
 function isWakeAll(session) {
   if (wakeAll.has(session)) return wakeAll.get(session);
@@ -557,6 +581,11 @@ const server = http.createServer((req, res) => {
       try { fs.writeFileSync(tmp, Buffer.concat(chunks)); } catch (_) { res.writeHead(500); return res.end('write'); }
       transcribe(tmp, lang, (err, text) => {
         if (err) { res.writeHead(500); return res.end('stt failed'); }
+        if (text && isSttEcho(session, src, text)) {
+          console.log(`[stt] dropped echo on ${src}: ${text.slice(0, 60)}`);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ text: '' }));
+        }
         if (text) {
           const d = new Date();
           const hms = [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
