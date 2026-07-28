@@ -41,7 +41,9 @@ const STT_QUIET_PEAK_DB = parseFloat(process.env.STT_QUIET_PEAK_DB || '-22'); //
 // Boilerplate whisper hallucinates on silence, in every language it was trained on subtitles for.
 const STT_HALLUCINATION_RE = /^(?:\.{2,}|…)+[\s.…]*$|amara\.org|subtitles? (?:by|created)|thanks? for watching|napisy (?:stworzone|utworzone)|transcription by/i;
 // Short generic phrases that are real speech sometimes — dropped only when the audio was near-silent.
-const STT_FILLER_RE = /^(thank you|thanks|bye|okay|ok|yeah|mhm|dziękuję|dzięki|okej|dobrze)[.!…]*$/i;
+// The thank-yous span languages because whisper falls back to whatever language it guessed for the silence:
+// a quiet Polish call produced "Thank you." and "Gracias.", and a quiet tab channel produced "Uh...".
+const STT_FILLER_RE = /^(thank you|thanks|bye|okay|ok|yeah|mhm+|hmm+|uh+|um+|aha|gracias|merci|danke|grazie|obrigad[oa]|спасибо|dziękuję|dzięki|okej|dobrze)[.!…]*$/i;
 
 // Peak level of a decoded wav, in dBFS (0 = full scale). null when ffmpeg gives us nothing to parse.
 function peakDb(wav, done) {
@@ -305,6 +307,7 @@ const wakeBuf = new Map(); // session -> { lines, firstAt, since, window, lastAt
 // Set via POST /wake-mode; WAKE_ALL=1 flips the default for the whole server.
 const WAKE_ALL_DEFAULT = process.env.WAKE_ALL === '1';
 const wakeAll = new Map(); // session -> boolean
+const remoteNames = new Map(); // session -> display name for tab-audio STT lines (1:1 only)
 const wakeAllFileFor = (session) => path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.wakeall`);
 function isWakeAll(session) {
   if (wakeAll.has(session)) return wakeAll.get(session);
@@ -564,8 +567,10 @@ const server = http.createServer((req, res) => {
               fs.appendFileSync(file, `==== ${session} — started ${new Date().toISOString()} ====\n`);
             }
             // Mic STT is the user (co-pilot) → 'You' (authorizes actions). tabCapture STT is remote
-            // participants with no labels → mark unattributed so the brain never auto-authorizes from it.
-            const who = src === 'mic' ? 'You' : '(unattributed)';
+            // participants; whisper does no diarization, so there is no name to attach — unless the user
+            // named the other side for this session (POST /remote-name), which is exact in a 1:1 and wrong
+            // the moment a third person joins. Either way it is NOT the user, so it still authorizes nothing.
+            const who = src === 'mic' ? 'You' : (remoteNames.get(session) || '(unattributed)');
             const sttLine = `[${hms}] ${who}: ${text}\n`;
             fs.appendFileSync(file, sttLine);
             queueForWake(session, sttLine);
@@ -778,10 +783,27 @@ const server = http.createServer((req, res) => {
     const s = safeSession(u.searchParams.get('session'));
     const ap = autopilot.get(s) || { create: false, postChat: false };
     const sup = (suppress.get(s) || []).filter((e) => !e.ts || Date.now() - e.ts < SUPPRESS_TTL_MS);
-    const lines = [`state=${control.get(s) || 'running'} mode=${modes.get(s) || 'auto'} create=${ap.create ? 1 : 0} postChat=${ap.postChat ? 1 : 0} wake=${isWakeAll(s) ? 'all' : 'gated'}`];
+    const lines = [`state=${control.get(s) || 'running'} mode=${modes.get(s) || 'auto'} create=${ap.create ? 1 : 0} postChat=${ap.postChat ? 1 : 0} wake=${isWakeAll(s) ? 'all' : 'gated'}${remoteNames.get(s) ? ` remote=${remoteNames.get(s)}` : ''}`];
     for (const e of sup) lines.push(`suppress[${e.kind || 'any'}] ${e.text}`);
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end(lines.join('\n') + '\n');
+    return;
+  }
+
+  // Who the tab-audio STT lines belong to. Only meaningful in a 1:1 (whisper does no diarization); with a
+  // third participant the label would be plain wrong, so it is opt-in per session and never inferred.
+  if (req.method === 'POST' && req.url === '/remote-name') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
+      const s = safeSession(d.session);
+      const name = String(d.name || '').replace(/[\r\n:]/g, ' ').trim().slice(0, 40);
+      if (name) remoteNames.set(s, name); else remoteNames.delete(s);
+      console.log(`[stt] ${s} remote name = ${name || '(unattributed)'}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, name: name || null }));
+    });
     return;
   }
 
@@ -820,6 +842,7 @@ const server = http.createServer((req, res) => {
       const s = safeSession(d.session);
       for (const suf of ['.txt', '.wake', '.wakeall', '.chat.txt', '.mode.txt', '.summary.md']) { try { fs.unlinkSync(path.join(TRANSCRIPTS_DIR, s + suf)); } catch (_) {} }
       wakeAll.delete(s);
+      remoteNames.delete(s);
       try { fs.rmSync(path.join(SNAP_DIR, s), { recursive: true, force: true }); } catch (_) {}
       { const b = wakeBuf.get(s); if (b && b.timer) clearTimeout(b.timer); }
       for (const m of [advice, chat, items, modes, edits, domReq, doms, dbgReq, dbgData, snapReq, brainPing, brainStatus, control, wakeBuf, summaries, autopilot, callChat, callChatResult, takeover, drive, acts, actResults, suppress]) m.delete(s);
