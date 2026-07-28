@@ -39,7 +39,7 @@ const STT_NOISE = /^\s*(\[[^\]]*\]|\([^)]*\)|\*[^*]*\*|>>|[-–—*~.…\s]+)?\s
 const STT_MIN_PEAK_DB = parseFloat(process.env.STT_MIN_PEAK_DB || '-30');   // below this, treat as no speech
 const STT_QUIET_PEAK_DB = parseFloat(process.env.STT_QUIET_PEAK_DB || '-18'); // "Okay."-class filler only here
 // Boilerplate whisper hallucinates on silence, in every language it was trained on subtitles for.
-const STT_HALLUCINATION_RE = /^(?:\.{2,}|…)+[\s.…]*$|amara\.org|subtitles? (?:by|created)|thanks? for watching|napisy (?:stworzone|utworzone)|transcription by|^to be continued[.…!\s]*$|^credits[.!\s]*$|продолжение следует|субтитр|dimatorzok/i;
+const STT_HALLUCINATION_RE = /^(?:\.{2,}|…)+[\s.…]*$|amara\.org|subtitles? (?:by|created)|thanks? for watching|dzięku(?:ję|je) za (?:ogl[ąa]danie|uwag[ęe])|napisy (?:stworzone|utworzone)|transcription by|^to be continued[.…!\s]*$|^credits[.!\s]*$|продолжение следует|субтитр|dimatorzok/i;
 
 // Wrong-script guard. Whisper answers low-confidence audio with boilerplate from its subtitle training data,
 // and on a quiet Polish call that came out in Russian ("Смотрите", "Субтитры создавал DimaTorzok"). Chasing
