@@ -27,6 +27,8 @@ const FFMPEG = process.env.FFMPEG || '/opt/homebrew/bin/ffmpeg';
 // Local speech-to-text (whisper.cpp) — fully offline, no subscription.
 const WHISPER_CLI = process.env.WHISPER_CLI || '/opt/homebrew/bin/whisper-cli';
 const WHISPER_MODEL = process.env.WHISPER_MODEL || `${os.homedir()}/.local/share/whisper/ggml-base.bin`;
+const WHISPER_PROMPT = process.env.WHISPER_PROMPT
+  || 'Angular, Flagsmith, feature flag, code review, pull request, Jira, backend, frontend, deploy, release, sprint, story points.';
 // whisper emits these for silence/music — drop them.
 const STT_NOISE = /^\s*(\[[^\]]*\]|\([^)]*\)|>>|\.|…)?\s*$/;
 
@@ -35,7 +37,12 @@ function transcribe(inputFile, lang, done) {
   const wav = `${inputFile}.16k.wav`;
   execFile(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-i', inputFile, '-ar', '16000', '-ac', '1', '-y', wav], (e1) => {
     if (e1) { fs.unlink(inputFile, () => {}); return done(e1); }
-    execFile(WHISPER_CLI, ['-m', WHISPER_MODEL, '-f', wav, '-l', lang || 'auto', '-nt', '-np', '-t', '4'],
+    // Bias the decoder toward our jargon. Measured on a Polish sample with English terms: without it
+    // "Flagsmith" came out "flagship" and "pull requeście" as "pulrek feście"; with it both are correct,
+    // and a pure-Polish sample is unaffected. Polish speech with English technical terms is the hard case.
+    const args = ['-m', WHISPER_MODEL, '-f', wav, '-l', lang || 'auto', '-nt', '-np', '-t', '4'];
+    if (WHISPER_PROMPT) args.push('--prompt', WHISPER_PROMPT);
+    execFile(WHISPER_CLI, args,
       { maxBuffer: 4 * 1024 * 1024 }, (e2, stdout) => {
         fs.unlink(inputFile, () => {}); fs.unlink(wav, () => {});
         if (e2) return done(e2);
@@ -374,7 +381,10 @@ const server = http.createServer((req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
 
   if (req.method === 'GET' && req.url === '/health') {
-    const tools = { ffmpeg: fs.existsSync(FFMPEG), whisper: fs.existsSync(WHISPER_CLI), whisperModel: fs.existsSync(WHISPER_MODEL) };
+    // Report WHICH model, not just that one exists: `launchctl kickstart` restarts the job from its cached
+    // plist, so an edited WHISPER_MODEL silently does nothing until the job is booted out and back in —
+    // and transcription quality then differs from what you measured on the command line.
+    const tools = { ffmpeg: fs.existsSync(FFMPEG), whisper: fs.existsSync(WHISPER_CLI), whisperModel: path.basename(WHISPER_MODEL) };
     checkBlackhole((blackhole) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, dir: TRANSCRIPTS_DIR, tools: { ...tools, blackhole } }));
