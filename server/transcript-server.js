@@ -39,16 +39,29 @@ const STT_NOISE = /^\s*(\[[^\]]*\]|\([^)]*\)|>>|[-–—*~.…\s]+)?\s*$/;
 const STT_MIN_PEAK_DB = parseFloat(process.env.STT_MIN_PEAK_DB || '-30');   // below this, treat as no speech
 const STT_QUIET_PEAK_DB = parseFloat(process.env.STT_QUIET_PEAK_DB || '-18'); // "Okay."-class filler only here
 // Boilerplate whisper hallucinates on silence, in every language it was trained on subtitles for.
-const STT_HALLUCINATION_RE = /^(?:\.{2,}|…)+[\s.…]*$|amara\.org|subtitles? (?:by|created)|thanks? for watching|napisy (?:stworzone|utworzone)|transcription by/i;
+const STT_HALLUCINATION_RE = /^(?:\.{2,}|…)+[\s.…]*$|amara\.org|subtitles? (?:by|created)|thanks? for watching|napisy (?:stworzone|utworzone)|transcription by|^to be continued[.…!\s]*$|продолжение следует|субтитр|dimatorzok/i;
+
+// Wrong-script guard. Whisper answers low-confidence audio with boilerplate from its subtitle training data,
+// and on a quiet Polish call that came out in Russian ("Смотрите", "Субтитры создавал DimaTorzok"). Chasing
+// individual phrases is endless; if the session's language is pinned to a Latin-script one, a line that is
+// mostly Cyrillic or CJK cannot be a transcription of it.
+const LATIN_LANGS = new Set(['pl', 'en', 'de', 'fr', 'es', 'it', 'pt', 'nl', 'cs', 'sk', 'hu', 'ro', 'sv', 'da', 'no', 'fi', 'tr']);
+function isWrongScript(text, lang) {
+  if (!lang || !LATIN_LANGS.has(lang)) return false;
+  const letters = (text.match(/\p{L}/gu) || []).length;
+  if (!letters) return false;
+  const foreign = (text.match(/[\p{Script=Cyrillic}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu) || []).length;
+  return foreign / letters > 0.3;
+}
 // Short generic phrases that are real speech sometimes — dropped only when the audio was near-silent.
 // The thank-yous span languages because whisper falls back to whatever language it guessed for the silence:
 // a quiet Polish call produced "Thank you." and "Gracias.", and a quiet tab channel produced "Uh...".
 // Always noise: hesitation sounds carry nothing, and a thank-you in a language nobody is speaking is a
 // pure artifact (a Polish call produced "Gracias.").
-const STT_FILLER_ALWAYS_RE = /^(mhm+|hmm+|uh+|um+|aha|gracias|merci|danke|grazie|obrigad[oa]|спасибо)[.!…]*$/i;
+const STT_FILLER_ALWAYS_RE = /^(mhm+|hmm+|mm+|uh+|um+|aha|thank you|thanks|bye|gracias|merci|danke|grazie|obrigad[oa]|спасибо|dziękuję|dzięki)[.!…]*$/i;
 // Real speech at a normal level, so only dropped on quiet audio — "okay" after a proposal is a decision cue
 // the board depends on, and throwing it away silently would lose agreements.
-const STT_FILLER_QUIET_RE = /^(thank you|thanks|bye|okay|ok|yeah|yes|no|dziękuję|dzięki|okej|dobrze|tak|nie)[.!…]*$/i;
+const STT_FILLER_QUIET_RE = /^(okay|ok|yeah|yes|no|okej|dobrze|tak|nie)[.!…]*$/i;
 
 // whisper-cli reloads the 1.5GB model on EVERY chunk: measured 1.55s per 6s chunk of which most is the
 // load (a 2s chunk costs the same), and ~2GB allocated 20×/minute with two channels running. whisper-server
@@ -110,10 +123,33 @@ function whisperViaCli(wav, lang, done) {
     (err, stdout) => (err ? done(err) : done(null, joinWhisper(stdout))));
 }
 
+// Whisper reports per-word probabilities, and they separate speech from invention cleanly. Measured:
+// real speech 0.80–0.97, hallucinations on noise 0.41–0.44 — and quiet speech still scores 0.97, so this
+// drops the filler without punishing someone talking softly. This is the primary defence; the phrase lists
+// stay as a cheap backstop for the CLI path, which reports no confidence.
+const STT_MIN_CONFIDENCE = parseFloat(process.env.STT_MIN_CONFIDENCE || '0.6');
+
+function confidentSegments(json) {
+  const segs = Array.isArray(json && json.segments) ? json.segments : [];
+  const kept = [];
+  for (const seg of segs) {
+    const words = Array.isArray(seg.words) ? seg.words.filter((w) => typeof w.probability === 'number') : [];
+    const conf = words.length
+      ? words.reduce((a, w) => a + w.probability, 0) / words.length
+      : (typeof seg.avg_logprob === 'number' ? (seg.avg_logprob > -0.6 ? 1 : 0) : 1);
+    if (conf < STT_MIN_CONFIDENCE) {
+      console.log(`[stt] dropped low-confidence segment (${conf.toFixed(2)}): ${String(seg.text || '').trim()}`);
+      continue;
+    }
+    kept.push(seg.text || '');
+  }
+  return kept.join('').replace(/\s+/g, ' ').trim();
+}
+
 function whisperViaServer(wav, lang, done) {
   const form = new FormData();
   form.append('file', new Blob([fs.readFileSync(wav)]), path.basename(wav));
-  form.append('response_format', 'text');
+  form.append('response_format', 'verbose_json');
   form.append('temperature', '0');
   // Always send the language, 'auto' included, and pin translate=false: omitting the field made
   // whisper-server return an ENGLISH TRANSLATION of Polish speech instead of a Polish transcript.
@@ -121,8 +157,8 @@ function whisperViaServer(wav, lang, done) {
   form.append('translate', 'false');
   if (WHISPER_PROMPT) form.append('prompt', WHISPER_PROMPT);
   fetch(`http://127.0.0.1:${WHISPER_SERVER_PORT}/inference`, { method: 'POST', body: form })
-    .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`whisper-server ${r.status}`))))
-    .then((t) => done(null, joinWhisper(t)))
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`whisper-server ${r.status}`))))
+    .then((j) => done(null, confidentSegments(j)))
     .catch((e) => done(e));
 }
 
@@ -163,6 +199,7 @@ function transcribe(inputFile, lang, done) {
         if (e2) return done(e2);
         if (!text) return done(null, '');
         if (STT_HALLUCINATION_RE.test(text)) { console.log(`[stt] dropped boilerplate (${peak}dB): ${text}`); return done(null, ''); }
+        if (isWrongScript(text, lang)) { console.log(`[stt] dropped wrong-script output (lang=${lang}, ${peak}dB): ${text}`); return done(null, ''); }
         if (STT_FILLER_ALWAYS_RE.test(text)) { console.log(`[stt] dropped hesitation (${peak}dB): ${text}`); return done(null, ''); }
         if (STT_FILLER_QUIET_RE.test(text) && peak !== null && peak < STT_QUIET_PEAK_DB) {
           console.log(`[stt] dropped filler on quiet audio (${peak}dB): ${text}`);
@@ -394,6 +431,11 @@ const wakeBuf = new Map(); // session -> { lines, firstAt, since, window, lastAt
 const WAKE_ALL_DEFAULT = process.env.WAKE_ALL === '1';
 const wakeAll = new Map(); // session -> boolean
 const remoteNames = new Map(); // session -> display name for tab-audio STT lines (1:1 only)
+// Language for STT, pinned per session. Only the Meet content script can report the call's caption language,
+// so on Zoom every chunk ran with lang=auto — and auto-detect on a 4s chunk sometimes picks the wrong
+// language outright: a Polish sentence came back as "Por um tanto de burro." Pinning removes that class of
+// failure at no measured cost (a pinned 'pl' transcribed an English sample correctly anyway).
+const sttLangs = new Map(); // session -> 'pl' | 'en' | ...
 
 // Cross-channel echo guard. The two STT channels can hear the same speech: if the other side has no
 // headphones, the user's voice returns through their mic into the tab channel (measured on a live call with
@@ -407,7 +449,19 @@ function isSttEcho(session, src, text) {
   if (norm.length < 12) return false; // too short to tell an echo from a genuine "yes, exactly"
   const now = Date.now();
   const recent = (sttRecent.get(session) || []).filter((e) => now - e.at < STT_ECHO_MS);
-  const echo = recent.some((e) => e.src !== src && (e.norm.includes(norm) || norm.includes(e.norm)));
+  // Word overlap, not substring: the two channels hear the same speech through different mics, so the
+  // transcripts differ ("Chodziło mi o rozmowę typu interview." vs "Chodzi o rozmowy w interwiewie." —
+  // the same sentence, and substring matching missed it entirely).
+  const words = new Set(norm.split(' '));
+  const echo = recent.some((e) => {
+    if (e.src === src) return false;
+    const other = new Set(e.norm.split(' '));
+    const smaller = words.size <= other.size ? words : other;
+    const bigger = smaller === words ? other : words;
+    let hit = 0;
+    for (const w of smaller) if (bigger.has(w)) hit++;
+    return hit / smaller.size >= 0.5;
+  });
   recent.push({ at: now, src, norm });
   sttRecent.set(session, recent);
   return echo;
@@ -648,10 +702,11 @@ const server = http.createServer((req, res) => {
   }
 
   // Extension -> server: transcribe a tab-audio chunk locally (whisper.cpp) and append to the transcript.
-  if (req.method === 'POST' && req.url.startsWith('/stt')) {
+  if (req.method === 'POST' && (req.url === '/stt' || req.url.startsWith('/stt?'))) { // not /stt-lang
     const u = new URL(req.url, 'http://127.0.0.1');
     const session = safeSession(u.searchParams.get('session'));
-    const lang = (u.searchParams.get('lang') || 'auto').slice(0, 5);
+    // A session pin wins over whatever the extension sends — the panel has no Zoom language selector.
+    const lang = sttLangs.get(session) || (u.searchParams.get('lang') || 'auto').slice(0, 5);
     const src = u.searchParams.get('src') === 'mic' ? 'mic' : 'tab';
     const chunks = []; let size = 0;
     req.on('data', (c) => { chunks.push(c); size += c.length; if (size > 25e6) req.destroy(); });
@@ -892,10 +947,26 @@ const server = http.createServer((req, res) => {
     const s = safeSession(u.searchParams.get('session'));
     const ap = autopilot.get(s) || { create: false, postChat: false };
     const sup = (suppress.get(s) || []).filter((e) => !e.ts || Date.now() - e.ts < SUPPRESS_TTL_MS);
-    const lines = [`state=${control.get(s) || 'running'} mode=${modes.get(s) || 'auto'} create=${ap.create ? 1 : 0} postChat=${ap.postChat ? 1 : 0} wake=${isWakeAll(s) ? 'all' : 'gated'}${remoteNames.get(s) ? ` remote=${remoteNames.get(s)}` : ''}`];
+    const lines = [`state=${control.get(s) || 'running'} mode=${modes.get(s) || 'auto'} create=${ap.create ? 1 : 0} postChat=${ap.postChat ? 1 : 0} wake=${isWakeAll(s) ? 'all' : 'gated'}${remoteNames.get(s) ? ` remote=${remoteNames.get(s)}` : ''}${sttLangs.get(s) ? ` lang=${sttLangs.get(s)}` : ''}`];
     for (const e of sup) lines.push(`suppress[${e.kind || 'any'}] ${e.text}`);
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end(lines.join('\n') + '\n');
+    return;
+  }
+
+  // Pin the STT language for a session (removes wrong-language transcriptions; see sttLangs).
+  if (req.method === 'POST' && req.url === '/stt-lang') {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
+    req.on('end', () => {
+      let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
+      const s2 = safeSession(d.session);
+      const lang = String(d.lang || '').trim().toLowerCase().slice(0, 5);
+      if (lang && lang !== 'auto') sttLangs.set(s2, lang); else sttLangs.delete(s2);
+      console.log(`[stt] ${s2} language = ${lang || 'auto'}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, lang: lang || 'auto' }));
+    });
     return;
   }
 
@@ -952,6 +1023,7 @@ const server = http.createServer((req, res) => {
       for (const suf of ['.txt', '.wake', '.wakeall', '.chat.txt', '.mode.txt', '.summary.md']) { try { fs.unlinkSync(path.join(TRANSCRIPTS_DIR, s + suf)); } catch (_) {} }
       wakeAll.delete(s);
       remoteNames.delete(s);
+      sttLangs.delete(s);
       try { fs.rmSync(path.join(SNAP_DIR, s), { recursive: true, force: true }); } catch (_) {}
       { const b = wakeBuf.get(s); if (b && b.timer) clearTimeout(b.timer); }
       for (const m of [advice, chat, items, modes, edits, domReq, doms, dbgReq, dbgData, snapReq, brainPing, brainStatus, control, wakeBuf, summaries, autopilot, callChat, callChatResult, takeover, drive, acts, actResults, suppress]) m.delete(s);
