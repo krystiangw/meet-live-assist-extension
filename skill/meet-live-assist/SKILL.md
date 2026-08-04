@@ -18,10 +18,10 @@ agent has the relevant context for *this* meeting runs it.
   - **`<YYYY-MM-DD_meetingcode>.txt`** - every caption, nothing dropped. The record, reachable via the
     `transcript` tool.
   - **`<session>.wake`** - only the batches worth a turn. This is what `poll` reads.
-- **You talk to it through MCP tools**, not `curl`: `attach` `poll` `advice` `item` `chat_reply` `working`
-  `summary` `snapshot_request` `snapshot_read` `call_chat` `speak`. They are the same HTTP API with the
-  token handled for you and the read offset kept server-side, so nothing here needs a byte counter in a
-  shell variable.
+- **You talk to it through MCP tools**, not `curl`: `attach` `poll` `transcript` `advice` `item` `chat_reply`
+  `working` `summary` `snapshot_request` `snapshot_read` `call_chat` `speak`. Same HTTP API, with the token
+  handled for you and the read position kept server-side, so nothing here needs a byte counter in a shell
+  variable.
 - Nothing is agent-specific in the capture, so any agent can assist any meeting.
 
 **If the tools are not connected**, register the adapter once and restart the session:
@@ -58,9 +58,9 @@ assisting this meeting, don't start a second watch.
 
 2. **Arm a persistent Monitor as your wake source.** MCP cannot wake you - nothing starts a turn but the
    Monitor. `attach` returns the loop ready to run as `wakeLoop`: **run it verbatim** with `persistent: true`.
-   Do not rewrite the URL. It carries the session and the consumer identity you share with your own `poll`
-   calls, and getting either wrong looks exactly like a dead server for the rest of the call. The loop prints
-   **only** when something happened, so a quiet meeting costs you nothing.
+   Do not rewrite the URL - it carries the session and the reader identity, and getting either wrong looks
+   exactly like a dead server for the rest of the call. The loop prints **only** when something happened, so
+   a quiet meeting costs you nothing.
 
    What comes out, and why this and not a file tail:
    - **Only batches worth a turn.** The server writes every caption to `.txt` but releases a batch to the
