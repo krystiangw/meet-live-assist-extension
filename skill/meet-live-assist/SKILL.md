@@ -539,9 +539,10 @@ Either path counts as confirmation:
   `/callchat` (you get a `seq`), poll `GET /callchat-result?session=&since=` → `[{seq, ok, reason}]`. If
   `ok:false` (or no result within a few seconds), it did NOT land: fall back to a **paste-ready note in the
   panel chat** (`💬 Ticket: <url>`) so __MLA_USER__ can paste it himself. (Meet-only - Zoom has no chat posting.)
-- **Automatic takeover:** `attach` claims the meeting and **refuses** if another assistant is already live on
-  it, so there is nothing to poll for and no manual clad-task handoff. Your claim name comes from `MLA_AGENT`
-  and is surfaced in the panel's 🧠 pill, so set it to something legible.
+- **Automatic takeover:** `attach` claims the meeting and **refuses** if a *different* assistant is already
+  live on it, so there is nothing to poll for and no manual clad-task handoff. Your claim name defaults to
+  your working directory's name and shows in the panel's 🧠 pill; set `MLA_AGENT` if something else reads
+  better there.
 - **Lifecycle chat messages (name yourself).** Right after attaching, post ONE opening line to the **panel
   chat** with `chat_reply` ("🧠 <agent> connected and ready.") so it's obvious which agent is on. In the wrap-up (step 4), post a matching closing line (`🧠 <agent> - call wrapped, signing off.`).
   Opening/closing only; don't narrate connect/disconnect anywhere else.

@@ -17,7 +17,7 @@
  *
  *   MLA_URL     bridge server base URL (default http://127.0.0.1:8848)
  *   MLA_TOKEN   auth token; falls back to <TRANSCRIPTS_DIR>/.mla-token
- *   MLA_AGENT   name this assistant claims in `takeover` (default "assistant")
+ *   MLA_AGENT   name this assistant claims a meeting under (default: the working directory's name)
  */
 
 const fs = require('fs');
@@ -27,7 +27,19 @@ const readline = require('readline');
 
 const VERSION = '0.4.0';
 const BASE = (process.env.MLA_URL || 'http://127.0.0.1:8848').replace(/\/$/, '');
-const AGENT = process.env.MLA_AGENT || 'assistant';
+// The name this assistant claims a meeting under. It has to be BOTH stable across a restart of this
+// process (or an assistant cannot recognise a claim it made itself, and talks itself out of its own
+// meeting) AND distinct between assistants (or two of them look like one and both attach). The client's
+// working directory is both: each agent runs in its own project, and that does not change when it
+// reconnects. MLA_AGENT overrides it, and should, when a name would be nicer in the panel's pill.
+function defaultAgentName() {
+  try {
+    const base = path.basename(process.cwd());
+    if (base && base !== '/' && base !== '.') return base;
+  } catch (_) {}
+  return 'assistant';
+}
+const AGENT = process.env.MLA_AGENT || defaultAgentName();
 // A second reader identity for tool calls, so they never consume what the wake loop has not read yet.
 const TOOL_CONSUMER = `${AGENT}.tool`;
 

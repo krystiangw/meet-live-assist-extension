@@ -404,6 +404,25 @@ try {
   check('a batched request is refused rather than silently dropped', !!batchNote, JSON.stringify(rpcRough.notes).slice(0, 200));
   rough.kill('SIGKILL');
 
+  // The claim name must be stable across a restart of the adapter AND distinct between assistants. With a
+  // fixed default it was stable but not distinct, so two agents that never set MLA_AGENT both looked like
+  // the same one and both attached to the same call - the double-assist this rule exists to prevent.
+  const named = (cwd) => new Promise((resolve) => {
+    const proc = spawn(process.execPath, [path.join(ROOT, 'server', 'mcp-server.js')], {
+      cwd, env: { ...process.env, MLA_URL: base, MLA_TOKEN: token, TRANSCRIPTS_DIR: dir, MLA_AGENT: '' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const c = client(proc);
+    c.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'n', version: '0' } })
+      .then(() => call(c, 'attach', { session, force: true }))
+      .then((r) => { proc.kill('SIGKILL'); resolve(r); });
+  });
+  const fromDir = await named(ROOT);
+  await named(path.join(ROOT, 'test'));
+  const claim = await (await fetch(`${base}/brain-ping?session=${encodeURIComponent(session)}`, { headers: auth })).json();
+  check('an assistant with no MLA_AGENT is named after its working directory', claim.agent === 'test', JSON.stringify(claim.agent));
+  check('so two assistants in different projects are not the same claimant', !fromDir.isError, fromDir.text);
+
   // --- attach must not refuse the meeting it is already assisting -----------------------------------
   // The heartbeat it checks is bumped by its own `working` calls, so without comparing the claim name an
   // adapter restarted mid-call - a client reconnecting, which is routine - saw its own liveness and
