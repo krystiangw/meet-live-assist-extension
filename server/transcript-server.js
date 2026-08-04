@@ -410,7 +410,8 @@ const dbgData = store.map('dbgData', { persist: false }); // session -> { kind, 
 // the panel polls it to show whether an assistant is actually attached to this meeting.
 const brainPing = store.map('brainPing', { persist: false }); // session -> last heartbeat ms
 // Same 45s the panel and the service worker use to draw the 🧠 pill (sidepanel.js, background.js).
-const BRAIN_STALE_MS = 45000;
+// Env-tunable only so a test can reach staleness without waiting it out.
+const BRAIN_STALE_MS = parseInt(process.env.BRAIN_STALE_MS || '45000', 10);
 const brainStatus = store.map('brainStatus', { persist: false }); // session -> { text, ts } current agent activity ("creating Jira ticket…"); '' = idle
 const control = store.map('control', { persist: false }); // session -> 'running' | 'paused' | 'stopped' - panel drives it; the brain obeys
 
