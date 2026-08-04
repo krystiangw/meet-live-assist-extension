@@ -43,15 +43,35 @@ transcript sink (`/append`), advice (`/advice`), board (`/items`), chat (`/chat`
 presentation edits (`/edit`, `/dom*`), debug (`/debug*`), brain heartbeat (`/brain-ping`), summary
 (`/summary`), per-meeting wipe (`/clear`), and health (`/health`).
 
+**The assistant reaches it through MCP, not HTTP.** `server/mcp-server.js` is a zero-dependency stdio MCP
+adapter over the same API, ~12 tools. Register it once:
+
+```bash
+claude mcp add meet-live-assist -- node <repo>/server/mcp-server.js
+```
+
+It asks the running server where its data dir is (`/health` needs no token) and reads the token from there,
+so it needs no environment. The keystone tool is `poll`: one call returns the transcript batch worth a turn,
+the panel's state, and any pending results, with the read offset held server-side per assistant. That
+replaces four or five `curl` calls a turn plus a byte offset kept in a shell variable - and it works with no
+filesystem in reach, which is what a hosted deployment needs.
+
+What MCP does **not** do is wake the assistant: the protocol is client-pull, so nothing on the server can
+start a turn. A client-side loop polling `/poll?...&format=text` remains the wake source; it prints only
+when something happened, including when the panel's state changed, which is the only way pressing Stop can
+reach an assistant at all (capture ends there, so no later caption would).
+
 **Auth:** every route except `/health` requires an `X-MLA-Token` header. The server generates the token
 into `<transcripts>/.mla-token` on first start; **paste it into the extension Options once** (and the brain
 reads the same file). Without it any website you visit could reach the localhost server.
 
 **Two files per meeting.** `/append` writes every caption to `<session>.txt` - the complete record, nothing
 dropped - and only appends a batch to `<session>.wake` when the batch is worth waking the brain for
-(decisions, blockers, your name, real questions, accumulated substance). The skill tails `.wake`, not `.txt`:
-that is what keeps a 40-minute call from costing hundreds of brain turns. A held-back batch is never lost -
-it rides along with the next wake, and a force-flush fires after `WAKE_FORCE_MS` regardless.
+(decisions, blockers, your name, real questions, accumulated substance). The assistant reads the wake channel
+(through `poll`), never the raw transcript: that is what keeps a 40-minute call from costing hundreds of brain
+turns. A held-back batch is never lost - it rides along with the next wake, and a force-flush fires after
+`WAKE_FORCE_MS` regardless. `poll` reads that channel and deliberately does not force it: flushing on a
+2-second poll would hand back everything the gate was holding, which is the gate deleted.
 
 ### Stand up the server
 
@@ -70,7 +90,7 @@ architecture. **Text-to-speech is macOS-only** (`say` + `afplay`); elsewhere adv
 the panel and only spoken output is missing. Details: [`server/README.md`](server/README.md).
 
 Publishing a new version is `cd server && npm publish` (check `npm pack --dry-run` first: it should be
-three files, ~25 kB).
+five files, ~37 kB - the server, the MCP adapter, the state store, a README and the manifest).
 
 ### Autostart it on a Mac (launchd)
 
@@ -94,8 +114,9 @@ waits for `/health`, then prints the auth token to paste into the extension Opti
 - Override defaults with env vars: `TRANSCRIPTS_DIR=~/mla PORT=8849 ./server/install-server.sh`.
   Default transcripts dir is `~/meet-live-assist/transcripts`, deliberately **outside** the repo - meeting
   text and screenshots are PII and must not risk being committed.
-- The **brain** (the `meet-live-assist` skill) has the transcripts path baked in, so if you change
-  `TRANSCRIPTS_DIR` update the skill to match, or the session will tail a directory nobody writes to.
+- The **brain** reaches the server through the MCP adapter, which asks it where its data is, so changing
+  `TRANSCRIPTS_DIR` needs no change on the assistant's side. Only the launchd plist and the extension's
+  token need to agree.
 
 Manual run instead of launchd (handy for debugging - logs to your terminal, `Ctrl-C` stops it for real):
 
@@ -168,12 +189,20 @@ canonical personal skill rather than a copy of the template.
 ## Checks
 
 ```bash
-npm run lint    # node --check over src/ and server/
-npm test        # boots the server on a throwaway port + dir, asserts the auth gate, the session guard,
-                # the append and advice round-trips, and that a traversing session name cannot escape
+npm run lint            # node --check over src/ and server/
+npm test                # all four suites below, ~140 checks
+npm run test:server     # auth gate, session guard, round-trips, restart survival
+npm run test:panel      # every request sidepanel.js makes, replayed without a browser
+npm run test:mcp        # the MCP adapter over stdio JSON-RPC
+npm run test:retention   # the retention sweep, and content not leaking between meetings
 ```
 
 Both run in CI on every push, along with both builds.
+
+The suites are split by what they protect, not by layer. `test:panel` exists because the panel is the half
+of the product a server test never touches - a renamed route or a cursor that stops advancing looks fine
+from the assistant's side and leaves the user staring at an empty panel. `test:retention` needs file
+timestamps and restarts with a gap, so it does not belong in the fast path.
 
 ## Load it (unpacked)
 

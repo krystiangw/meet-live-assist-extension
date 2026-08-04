@@ -7,7 +7,7 @@
 // assistant does to a call is an HTTP effect, so a fake transcript pushed through /append is
 // indistinguishable from a real one.
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -142,6 +142,20 @@ try {
   check('the wake loop polls under the same consumer as the poll tool',
     (attached.data.wakeLoop || '').includes('consumer=test-agent'), attached.data.wakeLoop);
 
+  // A meeting name that is the string "undefined" is what a caller writes after interpolating a variable
+  // that was never set. Real data on this machine still contains one from the day an interview landed in
+  // it. Auto-resolving to it attaches the assistant to a session the panel is not holding, and nothing in
+  // the pipeline reports an error - the transcript flows, the advice posts, the panel shows nothing.
+  // It is written newer than the real meeting on purpose: "newest wins" is exactly what would pick it.
+  writeFileSync(path.join(dir, 'undefined.txt'), 'Someone: this landed in the wrong file.\n');
+  const stillPinned = await call(rpc, 'attach');
+  check('attach never resolves to an "undefined" session', stillPinned.data.session === session, stillPinned.text);
+  rmSync(path.join(dir, 'undefined.txt'), { force: true });
+
+  // The meeting's own date comes from its name. Birth time is reset by a copy or a restore, so on restored
+  // data it would claim a meeting from months ago started today.
+  check('attach reports the meeting date from its name', attached.data.date === '2026-02-02', JSON.stringify(attached.data.date));
+
   // --- the keystone: poll ---
   const first = await call(rpc, 'poll');
   check('poll returns the transcript batch', !first.isError && /ship the release on Monday/.test(first.data.batch || ''), first.text);
@@ -273,6 +287,23 @@ try {
   const unreachable = await call(rpc4, 'attach', { session });
   check('an unreachable server tells you how to start it', unreachable.isError && /not reachable/.test(unreachable.text) && /meet-live-assist-server/.test(unreachable.text), unreachable.text);
   orphan.kill('SIGKILL');
+
+  // Closing stdin used to exit the process immediately, dropping any tool call still waiting on the bridge
+  // server - and every tool call waits on it. A long-lived client keeps stdin open, so this only showed up
+  // when piping JSON at the adapter, which is also how anyone would first try it by hand.
+  const piped = spawn(process.execPath, [path.join(ROOT, 'server', 'mcp-server.js')], {
+    env: { ...process.env, MLA_URL: base, MLA_TOKEN: token, TRANSCRIPTS_DIR: dir, MLA_AGENT: 'piped' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let pipedOut = '';
+  piped.stdout.on('data', (c) => { pipedOut += c; });
+  piped.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'piped', version: '0' } } })}\n`);
+  piped.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'attach', arguments: { session, force: true } } })}\n`);
+  piped.stdin.end(); // the whole point: no more input is coming, but a request is still in flight
+  await new Promise((resolve) => piped.on('exit', resolve));
+  const answered = pipedOut.trim().split('\n').map((l) => { try { return JSON.parse(l); } catch (_) { return {}; } });
+  check('a request still in flight is answered before the process exits',
+    answered.some((m) => m.id === 2 && m.result && !m.result.isError), pipedOut.slice(0, 200));
 
   check('the adapter wrote nothing to stderr', mcpErr === '', mcpErr.slice(0, 300));
   check('the adapter sent no unsolicited messages', rpc.notes.length === 0, JSON.stringify(rpc.notes).slice(0, 300));

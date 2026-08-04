@@ -86,7 +86,13 @@ cat <<EOF
      cat "$TRANSCRIPTS_DIR/.mla-token"
    Right-click the icon → Options → paste it.
 
-4) Run your Claude Code session and invoke the meet-live-assist skill to act as the "brain".
+4) Register the MCP adapter, so the assistant talks to the server through tools instead of curl:
+     claude mcp add meet-live-assist -- node "$REPO_DIR/server/mcp-server.js"
+   Then restart your Claude session so it picks the tools up. It finds the data dir and the token by
+   asking the running server, so no environment is needed. Not printed as a step you can skip: the
+   skill's step 1 is the \`attach\` tool, and without this it has nothing to call.
+
+5) Run your Claude Code session and invoke the meet-live-assist skill to act as the "brain".
 
 Note: launchd autostart (server/com.mla.meet-transcript-server.plist) is machine-specific - edit its
 absolute paths (node binary, this repo, $TRANSCRIPTS_DIR) before using it, or just run node manually.

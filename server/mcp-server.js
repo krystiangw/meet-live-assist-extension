@@ -34,7 +34,23 @@ function defaultTranscriptsDir() {
   try { if (fs.existsSync(beside)) return beside; } catch (_) {}
   return path.join(os.homedir(), 'meet-live-assist', 'transcripts');
 }
-const TRANSCRIPTS_DIR = process.env.TRANSCRIPTS_DIR ? path.resolve(process.env.TRANSCRIPTS_DIR) : defaultTranscriptsDir();
+let TRANSCRIPTS_DIR = process.env.TRANSCRIPTS_DIR ? path.resolve(process.env.TRANSCRIPTS_DIR) : defaultTranscriptsDir();
+
+// The running server knows where its data is; guessing does not. On this machine the guess is actively
+// wrong - a `transcripts/` dir sits beside the checkout while the service writes somewhere else entirely,
+// so every call would 403 on a token read from the wrong directory. /health needs no token, so ask.
+// Only meaningful for a local server, which is exactly the case that has a filesystem in common with us.
+let located = false;
+async function locateDataDir() {
+  if (located || process.env.TRANSCRIPTS_DIR || process.env.MLA_TOKEN) return;
+  located = true; // one attempt: a server that is down gives a clearer error than a retry loop would
+  try {
+    const r = await fetch(`${BASE}/health`);
+    if (!r.ok) return;
+    const { dir } = await r.json();
+    if (dir && fs.existsSync(path.join(dir, '.mla-token'))) TRANSCRIPTS_DIR = dir;
+  } catch (_) { /* server down: the error the caller gets says so, which is more useful than this */ }
+}
 
 function readToken() {
   if (process.env.MLA_TOKEN) return process.env.MLA_TOKEN.trim();
@@ -57,6 +73,7 @@ let pinned = '';
 class ToolError extends Error {}
 
 async function api(method, route, body) {
+  await locateDataDir();
   let res;
   try {
     res = await fetch(`${BASE}${route}`, {
@@ -110,7 +127,7 @@ const TOOLS = [
       // once and then looks like a broken server for the rest of the call.
       const wakeUrl = `${BASE}/poll?session=${encodeURIComponent(pinned)}&consumer=${encodeURIComponent(AGENT)}&format=text`;
       return {
-        session: pinned, lines: info.lines, startedAt: info.startedAt, status: status.status,
+        session: pinned, lines: info.lines, date: info.date, startedAt: info.startedAt, status: status.status,
         wakeLoop: `T=$(cat ${path.join(TRANSCRIPTS_DIR, '.mla-token')}); while true; do curl -s -H "X-MLA-Token: $T" "${wakeUrl}"; sleep 2; done`,
       };
     },
@@ -288,14 +305,23 @@ async function handle(msg) {
   return fail(id, -32601, `method not found: ${method}`);
 }
 
+// Requests in flight when stdin closes. Exiting on close alone drops any tool call still waiting on the
+// bridge server, and every tool call waits on it: a client that closes stdin as it shuts down would get
+// silence instead of the result it asked for. It also made this file untestable by piping JSON at it,
+// which is how the bug surfaced.
+let inFlight = 0;
+let stdinClosed = false;
+function maybeExit() { if (stdinClosed && inFlight === 0) process.exit(0); }
+
 const rl = readline.createInterface({ input: process.stdin });
 rl.on('line', (line) => {
   const trimmed = line.trim();
   if (!trimmed) return;
   let msg;
   try { msg = JSON.parse(trimmed); } catch (_) { return send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }); }
-  Promise.resolve(handle(msg)).catch((e) => {
-    if (msg.id !== undefined && msg.id !== null) fail(msg.id, -32603, `internal error: ${e && e.message}`);
-  });
+  inFlight++;
+  Promise.resolve(handle(msg))
+    .catch((e) => { if (msg.id !== undefined && msg.id !== null) fail(msg.id, -32603, `internal error: ${e && e.message}`); })
+    .finally(() => { inFlight--; maybeExit(); });
 });
-rl.on('close', () => process.exit(0));
+rl.on('close', () => { stdinClosed = true; maybeExit(); });

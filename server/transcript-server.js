@@ -1524,23 +1524,34 @@ const server = http.createServer((req, res) => {
       try {
         for (const f of fs.readdirSync(TRANSCRIPTS_DIR)) {
           if (!f.endsWith('.txt') || f.endsWith('.chat.txt') || f.endsWith('.mode.txt')) continue;
+          // `undefined.txt` and friends are what a caller writes after interpolating a variable that was
+          // never set. One such file exists in real data from the day an interview landed in it. Auto-
+          // resolving to it would attach an assistant to a session the panel is not holding, which is
+          // precisely the failure that cost an hour of advice nobody saw.
+          if (/^(undefined|null|NaN)\.txt$/.test(f)) continue;
           const m = fs.statSync(path.join(TRANSCRIPTS_DIR, f)).mtimeMs;
           if (m > newest) { newest = m; session = f.slice(0, -4); }
         }
       } catch (_) {}
     }
     const ping = session ? (brainPing.get(session) || 0) : 0;
-    let lines = 0; let startedAt = null;
+    let lines = 0; let startedAt = null; let date = null;
     if (session) {
       try {
         const st = fs.statSync(fileFor(session));
         startedAt = new Date(st.birthtimeMs || st.mtimeMs).toISOString();
+        // Also report the meeting's own date, taken from its name. The file's birth time is reset by any
+        // copy or restore, so on restored data it claims a meeting from July started today - and an ISO
+        // instant derived from a date-only name reads as the previous day in any zone east of UTC. The
+        // name's date is unambiguous and is what the caller actually wants to reason about.
+        const named = /^(\d{4}-\d{2}-\d{2})/.exec(session);
+        if (named) date = named[1];
         lines = fs.readFileSync(fileFor(session), 'utf8').split('\n').length - 1;
       } catch (_) {}
     }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      session: session || null, lines, startedAt,
+      session: session || null, lines, date, startedAt,
       otherAssistantAgeMs: ping ? Date.now() - ping : null,
     }));
     return;
@@ -1707,4 +1718,16 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`[transcript] retention: ${RETENTION_DAYS > 0 ? RETENTION_DAYS + ' days' : 'forever'}`);
   purgeOld();
   setInterval(purgeOld, 6 * 3600 * 1000); // re-check a few times a day
+});
+
+// Without this a busy port ends in an unhandled 'error' event and eighteen lines of stack trace, which
+// says "the server is broken" when it means "one is already running".
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`[transcript] port ${PORT} is already in use - a meet-live-assist server is probably `
+      + 'already running (launchctl list | grep meet-transcript). Set PORT= to use another one.');
+  } else {
+    console.error(`[transcript] cannot listen on ${PORT}: ${e.message}`);
+  }
+  process.exit(1);
 });
