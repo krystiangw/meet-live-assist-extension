@@ -31,6 +31,35 @@ function freePort() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CAP = 64 * 1024; // POLL_MAX_BYTES
 
+// The cut helper, directly. Its failure modes are silent: reporting more than was read advances a reader
+// past captions nobody saw, and reporting zero when a usable prefix exists stalls that reader for good.
+// Neither shows up through the HTTP checks below unless the input happens to be adversarial.
+{
+  const { utf8SafeCut } = await import(new URL('../server/wake-cut.js', import.meta.url));
+  const two = Buffer.from('ą');   // 2 bytes
+  const four = Buffer.from('🔵'); // 4 bytes, a surrogate pair in UTF-16
+  const cases = [
+    ['an empty read reports nothing to consume', Buffer.from(''), 0, 0],
+    ['a length of zero never looks past it', Buffer.from('a\nb'), 0, 0],
+    ['plain ascii with no newline is taken whole', Buffer.from('abcdef'), 6, 6],
+    ['a lone lead byte at the end is held back', Buffer.concat([Buffer.from('ab'), four.slice(0, 1)]), 3, 2],
+    ['so is a partial 4-byte sequence', Buffer.concat([Buffer.from('ab'), four.slice(0, 3)]), 5, 2],
+    ['and a partial 2-byte one', Buffer.concat([Buffer.from('ab'), two.slice(0, 1)]), 3, 2],
+    ['a complete sequence is not held back', Buffer.from('ab🔵'), 6, 6],
+    ['a newline wins over character arithmetic', Buffer.from('ab\nc\xc4'), 5, 3],
+    ['a length beyond the buffer is clamped', Buffer.from('abc'), 99, 3],
+  ];
+  for (const [name, buf, len, want] of cases) {
+    const got = utf8SafeCut(buf, len);
+    check(name, got === want, `got ${got}, wanted ${want}`);
+  }
+  // The invariant that matters most, over inputs nobody designed: never report more than was read.
+  let overflow = 0;
+  const fuzz = Buffer.concat([Buffer.from('Zażółć gęślą 🔵\n'), Buffer.from([0x80, 0xc4, 0xff, 0xf0, 0x9f])]);
+  for (let len = 0; len <= fuzz.length + 3; len++) if (utf8SafeCut(fuzz, len) > len) overflow++;
+  check('no length ever cuts past what was read', overflow === 0, `${overflow} overflowing lengths`);
+}
+
 try {
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;

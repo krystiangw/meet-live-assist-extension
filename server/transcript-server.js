@@ -21,6 +21,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { execFile, spawn } = require('child_process');
 const { createStore } = require('./state-store');
+const { utf8SafeCut } = require('./wake-cut');
 
 const IS_MAC = process.platform === 'darwin';
 
@@ -576,22 +577,6 @@ function spokenText(line) { // strip "[hh:mm:ss] Speaker: " to classify the actu
 }
 function wakeFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.wake`); }
 
-// Where to cut a capped read of the wake channel. Prefer the last newline: the channel is line-oriented,
-// so a consumer should never receive half a sentence, and a line boundary is also a character boundary.
-// A single line longer than the cap has no newline to cut at, so fall back to walking back off any
-// incomplete multi-byte sequence - cutting mid-character costs one replacement glyph on each side of the
-// boundary, and the offset then starts the next read inside a character forever after.
-function utf8SafeCut(buf, len) {
-  const nl = buf.lastIndexOf(0x0a, len - 1);
-  if (nl >= 0) return nl + 1;
-  let i = len - 1;
-  let back = 0;
-  while (i >= 0 && (buf[i] & 0xc0) === 0x80 && back < 3) { i--; back++; }
-  if (i < 0) return len;
-  const lead = buf[i];
-  const need = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 1;
-  return i + need <= len ? len : i;
-}
 function isUrgentLine(line) {
   const t = spokenText(line);
   if (URGENT_RE.test(t)) return true;
@@ -1621,10 +1606,6 @@ const server = http.createServer((req, res) => {
     // worth a turn yet; forcing them out on a 2-second poll would make every poll return a batch and undo
     // the gate entirely (measured on a real call: 786 wakes gated down to 189). Nothing is stranded
     // either - WAKE_FORCE_MS bounds how long even pure chatter can sit there.
-    // Deliberately does NOT flush the wake buffer. Held lines are held because the gate judged them not
-    // worth a turn yet; forcing them out on a 2-second poll would make every poll return a batch and undo
-    // the gate entirely (measured on a real call: 786 wakes gated down to 189). Nothing is stranded
-    // either - WAKE_FORCE_MS bounds how long even pure chatter can sit there.
     const wf = wakeFileFor(s);
     // Object.create(null), because `consumer` is caller-supplied and survives sanitising as `constructor`,
     // `toString` or `__proto__`. On a plain object those inherit from the prototype, so `offsets[consumer]`
@@ -1652,6 +1633,7 @@ const server = http.createServer((req, res) => {
         try {
           const buf = Buffer.alloc(Math.min(size - from, POLL_MAX_BYTES));
           const read = fs.readSync(fd, buf, 0, buf.length, from);
+          if (read <= 0) throw new Error('wake file shrank between the stat and the read');
           // Cut a capped read at the last complete line. The channel is line-oriented, so this both keeps
           // the consumer from receiving half a sentence and keeps the byte offset off the middle of a
           // multi-byte character - a Polish transcript hit at 64 KB would otherwise lose one character to
