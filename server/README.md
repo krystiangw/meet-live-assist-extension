@@ -22,12 +22,28 @@ It prints an auth token on first run. Paste that into the extension's Options on
 - **Local speech-to-text** through [whisper.cpp](https://github.com/ggerganov/whisper.cpp), fully offline,
   for calls with no captions.
 - **Text-to-speech into the call** (macOS only, see below).
+- **An MCP front door.** The same package ships `meet-live-assist-mcp`, a stdio MCP adapter over this API, so
+  an assistant reaches the call through tools instead of shelling out to `curl`:
+
+  ```bash
+  claude mcp add meet-live-assist -- npx -y -p meet-live-assist-server meet-live-assist-mcp
+  ```
+
+  It asks this server where its data dir is, so it needs no configuration. The tool that matters is `poll`:
+  one call for the transcript batch worth a turn, the panel's state and any pending results, with the read
+  position held here, per assistant.
+
+- **A restart is survivable.** Live state is snapshotted to `<data-dir>/.state/` and reloaded on boot, so
+  bouncing the server mid-call costs a couple of seconds rather than the meeting. Consent (letting the
+  assistant drive a tab, post to the meeting chat) and pause/stop deliberately do **not** come back: they are
+  answers about one call, and meeting codes repeat.
 
 ## Nothing leaves your machine
 
 It binds `127.0.0.1` only, has no accounts and no telemetry, and writes to files you own. Every route except
 `/health` and `/auth-check` requires the `X-MLA-Token` header, so a website you happen to be visiting cannot
-reach it. Transcripts and snapshots are purged after `RETENTION_DAYS` (14 by default).
+reach it. Transcripts, snapshots and the stored live state are purged after `RETENTION_DAYS` (14 by default); the state
+directory and its files are owner-only.
 
 If your assistant uses a cloud model, whatever you route to it is subject to that provider's terms. That
 part is your configuration, not this server.

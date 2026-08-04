@@ -4,6 +4,64 @@ Notable changes only. Earlier history is in `git log` (91 commits from 2026-07-1
 point the project was prepared for a public release, because that is where a version number began to mean
 something to anyone other than the author.
 
+## 0.4.0 - 2026-08-05
+
+A restart no longer costs you a meeting, and the assistant reaches the server through MCP tools instead of
+`curl` plus a byte offset in a shell variable.
+
+### State survives a restart
+
+- Advice, the decisions board, chat, the wrap-up, the wake buffer and each assistant's read position load from
+  and snapshot to `<transcripts>/.state/`. Bouncing the server mid-call costs at most the last two seconds
+  (`STATE_SNAPSHOT_MS`), not the meeting. The README's "never restart it during a live call" warning is gone.
+- The snapshot is periodic rather than write-through because values are mutated in place: `/items` calls
+  `set()` once and then pushes onto the list, so a `set()` hook would have persisted an empty board.
+- Stores stay `Map`/`Set` compatible, so the ~90 call sites are untouched.
+- **Consent and lifecycle deliberately do not persist.** 🕹 drive, autopilot, pause/stop and the liveness
+  stores are answers about one call, and a recurring series reuses its meet code: persisting them would hand
+  back a Monday "the agent may click in my tab" on Thursday, and a Stop at the end of one call would kill the
+  next call's assistant on its first turn. Request scratch (captured DOM, debugger dumps) never touches disk.
+- Only one process may write a data dir. A second server on the same `TRANSCRIPTS_DIR` serves normally but
+  does not persist, so a sandbox run beside the launchd job cannot rewind the live meeting.
+
+### The assistant talks MCP
+
+- `server/mcp-server.js`: a zero-dependency stdio MCP adapter, 12 tools, published in the same npm package as
+  `meet-live-assist-mcp`. Register with `claude mcp add meet-live-assist -- node <repo>/server/mcp-server.js`;
+  it asks the server where its data is, so it needs no environment.
+- The keystone is `poll`: one call for the transcript batch worth a turn, the panel's state, and pending
+  results, with the read offset held server-side per assistant. It replaces a file tail plus four `curl` calls
+  a turn, and works with no filesystem in reach.
+- `poll` reads the wake channel and does **not** flush it. Forcing the buffer on a 2-second poll would return
+  every caption the gate was holding, which is the gate deleted and roughly 4x the assistant turns.
+- New reads behind it: `/sessions`, `/poll`, `/transcript`, `/snapshots`.
+- `attach` refuses a meeting another assistant is live on, skips sessions named `undefined`/`null`/`NaN`, and
+  hands back the wake loop ready to run so the session and consumer identity cannot be mistyped.
+- Pressing **Stop** now reaches the assistant. `poll` reports a state change, which is the only signal
+  available once capture has ended and no further caption can arrive.
+- The skill (1.5.0) is rewritten around the tools. Raw HTTP remains only for the page-driving surface, which
+  will never have a hosted equivalent.
+
+### Fixes
+
+- A retention sweep could wipe the state of the meeting happening right now: one leftover `.mode.txt` past the
+  cutoff was enough, because a recurring series reuses its meet code. It now forgets a session only once no
+  file of it is left.
+- Wake lines held by the gate were persisted without their flush timer and nothing re-armed it, so they waited
+  on disk until the same meet code returned and then arrived as "what was just said". Boot re-arms buffers
+  still inside their window and drops overdue ones, loudly.
+- `.state` is `0700`; the files were already owner-only but the listing leaked meeting codes.
+- The 🧠 pill no longer names an assistant whose heartbeat has stopped.
+- A busy port says so instead of printing an unhandled `error` event and a stack trace.
+- The MCP adapter no longer exits with a request still in flight when its client closes stdin.
+
+### Tests
+
+`npm test` is now four suites, ~143 checks: the server contract, **the panel's own request cycle replayed
+without a browser**, the MCP adapter over stdio, and retention plus cross-meeting leaks. Each fix above was
+reproduced first and is covered by a check that fails when the fix is reverted. Also validated against a copy
+of a real 113 MB data dir with 75 sessions, which is what surfaced three of the adapter bugs.
+
 ## 0.3.0 - 2026-08-04
 
 Everything needed to put the extension in the Chrome Web Store, plus a server anyone can run.
