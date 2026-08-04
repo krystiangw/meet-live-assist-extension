@@ -1563,6 +1563,9 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/poll')) {
     const u = new URL(req.url, 'http://127.0.0.1');
     const s = safeSession(u.searchParams.get('session'));
+    // A consumer's own cursors are stored beside it as `<consumer>:chat`, `:callchat` and `:sig`. That is
+    // collision-free only because `:` cannot survive this sanitiser - do not widen it to allow one. The
+    // value is used as an object key and never as a path component, so `..` here is harmless.
     const consumer = String(u.searchParams.get('consumer') || 'default').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 60);
     const statusOnly = u.searchParams.get('statusOnly') === '1';
     const asText = u.searchParams.get('format') === 'text';
