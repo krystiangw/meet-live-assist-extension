@@ -1,4 +1,4 @@
-# Install Meet Live Assist on this machine — instructions for a Claude Code agent
+# Install Meet Live Assist on this machine - instructions for a Claude Code agent
 
 You (the agent) are setting up **Meet Live Assist** on a new machine. It has 3 parts: this **Chrome
 extension**, a local **bridge server** (Node, `127.0.0.1:8848`), and the **`meet-live-assist` skill** (the
@@ -16,7 +16,7 @@ user (you can't click Chrome).
    git clone git@github.com:krystiangw/meet-live-assist-extension.git
    cd meet-live-assist-extension
    ```
-2. **Run the installer** — copies the skill to `~/.claude/skills/meet-live-assist` with this machine's data
+2. **Run the installer** - copies the skill to `~/.claude/skills/meet-live-assist` with this machine's data
    path wired in, and creates the transcripts dir:
    ```bash
    ./install.sh
@@ -29,7 +29,7 @@ user (you can't click Chrome).
    curl -s http://127.0.0.1:8848/health   # expect {"ok":true,...}
    ```
    First start writes the auth token to `<transcripts>/.mla-token`.
-4. **Give the user the token and the two manual steps** (you cannot do these — they are Chrome UI):
+4. **Give the user the token and the two manual steps** (you cannot do these - they are Chrome UI):
    ```bash
    cat "<transcripts>/.mla-token"   # the path install.sh printed
    ```
@@ -54,4 +54,4 @@ The live originals on the author's machine are `meet-live-assist/meet-transcript
 two placeholders that `install.sh` fills per-machine: `__MLA_TRANSCRIPTS__` (the data/transcripts dir) and
 `__MLA_REPO__` (this repo root, e.g. for the server path and cards dir). Re-generate the copy by replacing
 the author-machine paths (`<meet-live-assist>/transcripts` → `__MLA_TRANSCRIPTS__`, `<meet-live-assist>/meet-transcript` →
-`__MLA_REPO__/server`) — do not commit absolute `/Users/...` paths.
+`__MLA_REPO__/server`) - do not commit absolute `/Users/...` paths.

@@ -30,7 +30,7 @@ async function loadVoices(selEn, selPl) {
     fill(enSel, voices, 'en', selEn, DEFAULT_EN);
     fill(plSel, voices, 'pl', selPl, DEFAULT_PL);
   } catch (_) {
-    enSel.innerHTML = plSel.innerHTML = '<option value="">(server offline — can’t list voices)</option>';
+    enSel.innerHTML = plSel.innerHTML = '<option value="">(server offline - can’t list voices)</option>';
   }
 }
 
@@ -54,7 +54,7 @@ document.getElementById('enableMic').addEventListener('click', async () => {
     s.getTracks().forEach((t) => t.stop());
     micState.textContent = 'granted ✓';
   } catch (e) {
-    micState.textContent = 'denied — allow the mic prompt / check chrome://settings';
+    micState.textContent = 'denied - allow the mic prompt / check chrome://settings';
   }
 });
 

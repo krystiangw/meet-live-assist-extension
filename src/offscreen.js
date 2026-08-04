@@ -1,14 +1,14 @@
-// Offscreen document — the only place that can consume a tabCapture MediaStream in MV3.
+// Offscreen document - the only place that can consume a tabCapture MediaStream in MV3.
 // Records audio in short complete WebM chunks (CHUNK_MS) and POSTs each to the local server's /stt.
 // Each chunk is a full file (start/stop per chunk) so it decodes standalone.
 //
 // Two sources can run at once, which is what makes STT a usable caption fallback: `tab` carries the
 // REMOTE participants (tabCapture never includes your own mic) and `mic` carries the user. The server
-// labels them differently ('(unattributed)' vs 'You'), so attribution — and with it the rule that only
-// the user can authorize actions — survives a call with no captions at all.
+// labels them differently ('(unattributed)' vs 'You'), so attribution - and with it the rule that only
+// the user can authorize actions - survives a call with no captions at all.
 
 // 4s, not 6: whisper costs the same per call regardless of chunk length (measured 1.5s for both a 2s and a
-// 6s chunk — the model load dominates), so a shorter chunk buys ~1.5s of latency at the price of more calls.
+// 6s chunk - the model load dominates), so a shorter chunk buys ~1.5s of latency at the price of more calls.
 // Worth it now that the model stays resident server-side; 2s chunks were measurably worse ("wandelskich").
 const CHUNK_MS = 4000;
 const MIN_BYTES = 4000; // skip near-silent tiny blobs
@@ -40,15 +40,15 @@ async function startSource(kind, streamId, config) {
       ? await navigator.mediaDevices.getUserMedia({ audio: true })
       : await navigator.mediaDevices.getUserMedia({ audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId } } });
   } catch (e) {
-    // One source failing must not take the other down — tab-only (or mic-only) is still useful.
+    // One source failing must not take the other down - tab-only (or mic-only) is still useful.
     chrome.runtime.sendMessage({
       type: 'stt-error', source: kind, fatal: !anyActive(),
-      reason: kind === 'mic' ? 'microphone blocked — allow it for the extension' : String((e && e.message) || e),
+      reason: kind === 'mic' ? 'microphone blocked - allow it for the extension' : String((e && e.message) || e),
     });
     return;
   }
   const entry = { stream, recorder: null, audioCtx: null, active: true };
-  // tabCapture mutes the tab locally — re-route to speakers so the user still hears the call. Mic needs no reroute.
+  // tabCapture mutes the tab locally - re-route to speakers so the user still hears the call. Mic needs no reroute.
   if (kind !== 'mic') {
     entry.audioCtx = new AudioContext();
     entry.audioCtx.createMediaStreamSource(stream).connect(entry.audioCtx.destination);
@@ -87,7 +87,7 @@ function loop(kind) {
   rec.onstop = () => {
     const blob = new Blob(parts, { type: mime || 'audio/webm' });
     // Restart on a fresh tick (not synchronously inside onstop) so the previous recorder fully releases the
-    // stream before we start the next one — starting it synchronously throws NotSupportedError.
+    // stream before we start the next one - starting it synchronously throws NotSupportedError.
     if (entry.active) setTimeout(() => loop(kind), 0);
     if (blob.size > MIN_BYTES) transcribeChunk(kind, blob); // fire-and-forget; runs in parallel with recording
   };

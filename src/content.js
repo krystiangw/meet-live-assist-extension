@@ -1,6 +1,6 @@
-// Content script — Google Meet caption capture (ported from the Tampermonkey userscript v2.1.0).
+// Content script - Google Meet caption capture (ported from the Tampermonkey userscript v2.1.0).
 // Phase 0: scrape finalized caption lines and hand them to the service worker. The SW fans them out
-// to the side panel and to the local transcript server (127.0.0.1:8848 — the "brain" for Path A).
+// to the side panel and to the local transcript server (127.0.0.1:8848 - the "brain" for Path A).
 //
 // IF CAPTURE BREAKS: Google periodically renames the caption CSS classes / jsname.
 // Update the SEL block below (DevTools -> inspect the caption area -> copy new class names).
@@ -9,7 +9,7 @@
   'use strict';
 
   // Reloading the extension orphans this script: its chrome.* calls throw, `send()` swallows them, and it
-  // keeps scraping into the void — capture looks alive but nothing arrives (silent, and it cost us a real
+  // keeps scraping into the void - capture looks alive but nothing arrives (silent, and it cost us a real
   // meeting). The SW heals that by re-injecting; this generation counter makes that safe, because an older
   // instance stands down as soon as a newer one loads. Exactly one instance ever captures.
   const GEN = (window.__mlaGen = (window.__mlaGen || 0) + 1);
@@ -21,7 +21,7 @@
     block: ['.nMcdL', '.TBMuR', '.bh44bd'],
     speaker: ['.NWpY1d', '.KcIKyf', '.zs7s8d', '.jxFHg'],
     text: ['.ygicle.VbkSUe', '.bh44bd', '.iTTPOb', '.VbkSUe'],
-    // Chat panel messages (opportunistic — only in the DOM while the chat panel is open).
+    // Chat panel messages (opportunistic - only in the DOM while the chat panel is open).
     // data-message-id / data-sender-name are the stable hooks; classes are fallbacks.
     chatMsg: ['div[data-message-id]', 'div[jsname="Ne3sFf"]'],
     chatSender: ['[data-sender-name]', '.poVWob', '.YTbUzc'],
@@ -29,7 +29,7 @@
   };
 
   // ---- TUNABLES ------------------------------------------------------------
-  // Commit a line when it looks utterance-complete, NOT every 600ms — cuts revision-dups, mid-word splits,
+  // Commit a line when it looks utterance-complete, NOT every 600ms - cuts revision-dups, mid-word splits,
   // and (with the SILENT-on-filler rule) the agent's wake/turn count. Sentence-aware: end-punctuation lines
   // commit fast; mid-sentence lines wait longer for ASR to settle/continue.
   const FLUSH_SENT_MS = 900;   // text ends in . ? ! … → commit after this much quiet
@@ -77,7 +77,7 @@
   let primed = false; // false until the first scan pass has absorbed the captions already on screen
   // Sentences already handed over in THIS session. Per-element `sent` is not enough: Meet re-renders caption
   // nodes (and when SEL.block misses, blocksIn() falls back to the whole region), so a fresh tracker can hold
-  // the entire history and re-emit it — live, every utterance after a re-injection re-sent 11 minutes of talk.
+  // the entire history and re-emit it - live, every utterance after a re-injection re-sent 11 minutes of talk.
   // Deduping by sentence is DOM-shape independent. Short confirmations ("Okay.", "Yeah.") are exempt: they
   // legitimately repeat.
   const emitted = new Set();
@@ -114,7 +114,7 @@
     for (const s of SEL.region) { try { const el = document.querySelector(s); if (el) return el; } catch (_) {} }
     return null;
   }
-  // Returns the per-utterance blocks, or — when Google's block classes don't match — the region itself with
+  // Returns the per-utterance blocks, or - when Google's block classes don't match - the region itself with
   // fallback:true. The fallback element is CUMULATIVE (it holds the whole caption history), so callers must
   // treat it as one growing stream, not as a new utterance each time it is re-rendered.
   let usedRegionFallback = false;
@@ -145,7 +145,7 @@
   function send(msg) {
     try {
       chrome.runtime.sendMessage(msg, () => void chrome.runtime.lastError); // swallow "no receiver" while SW spins up
-    } catch (_) { /* extension context invalidated on reload — ignore */ }
+    } catch (_) { /* extension context invalidated on reload - ignore */ }
   }
 
   // Live: emit the growing caption immediately so the panel shows it in real time.
@@ -165,7 +165,7 @@
     if (tr.sent) {
       if (text.startsWith(tr.sent)) delta = text.slice(tr.sent.length).trim();
       else {
-        // ASR revised something earlier in a cumulative stream — emit from the first divergence, backed up
+        // ASR revised something earlier in a cumulative stream - emit from the first divergence, backed up
         // to a word boundary, instead of re-sending the whole history.
         let i = 0; const n = Math.min(tr.sent.length, text.length);
         while (i < n && tr.sent[i] === text[i]) i++;
@@ -178,13 +178,13 @@
     send({ type: 'cap-final', session, id: tr.id, ts: tr.ts, speaker: tr.speaker || '', text: out });
   }
 
-  // ---- MEETING CHAT (opportunistic — only when the chat panel is open) -----
+  // ---- MEETING CHAT (opportunistic - only when the chat panel is open) -----
   // People paste links / names / ticket IDs / decisions in chat that never reach the captions.
   // Forward each message once as a distinct `[chat]` line so the brain has it as context.
   // Meet renders a hover action-toolbar INSIDE each message node ("Pin message", "keep", "More options").
   // Reading raw textContent drags those button labels into the captured line. Strip interactive nodes
   // before reading, and mop up any label that survives as a plain text node.
-  // Anchored to end-of-string (no /g): only peel toolbar labels that TRAIL the message — never mid-text,
+  // Anchored to end-of-string (no /g): only peel toolbar labels that TRAIL the message - never mid-text,
   // so a real "…pin message #1423, more options?" stays intact. Loop to strip a run of stacked labels.
   const CHAT_UI_NOISE_TRAIL = /\s*(?:Hover over a message to pin it|Unpin message|Pin message|More options|React to message)\s*$/i;
   function cleanNodeText(el) {
@@ -242,7 +242,7 @@
           if (text !== tr.text) { tr.text = text; tr.lastChange = now(); tr.finalized = false; emitInterim(tr); }
         }
         if (!primed) {
-          // Seed the dedupe from the whole caption area — covers re-rendered nodes and the whole-region
+          // Seed the dedupe from the whole caption area - covers re-rendered nodes and the whole-region
           // fallback, which per-element priming missed.
           try { dropAlreadyEmitted((region.textContent || '').trim()); } catch (_) {}
           primed = true;
@@ -289,7 +289,7 @@
     }
     if (attempt < 25) setTimeout(() => ensureCaptionsOn(attempt + 1), 2000);
   }
-  // Watchdog: Meet captions sometimes switch off mid-call — re-enable them if the region disappears
+  // Watchdog: Meet captions sometimes switch off mid-call - re-enable them if the region disappears
   // (only click the CC button when it's actually OFF, so we never toggle captions off ourselves).
   function keepCaptionsOn() {
     if (!AUTO_CAPTIONS || !started || sttPaused) return;
@@ -336,7 +336,7 @@
     }
   }
 
-  // ---- SCREEN-SHARE DETECTION (best-effort; heuristic — tune hints if it misfires) --------
+  // ---- SCREEN-SHARE DETECTION (best-effort; heuristic - tune hints if it misfires) --------
   // When someone presents, the panel switches to frequent (15s) snapshots; otherwise on-demand only.
   const SHARE_LABEL_HINTS = ['stop presenting', 'zatrzymaj prezentacj', 'is presenting', 'presentation', 'prezentuje', 'udostępnia', 'is sharing'];
   let sharing = false;
@@ -416,7 +416,7 @@
     }
     return null;
   }
-  // Is the chat panel already open? Check the composer, a live Send button, or the toggle's pressed state —
+  // Is the chat panel already open? Check the composer, a live Send button, or the toggle's pressed state -
   // so we NEVER click the toggle on an open panel (that would close it, which broke delivery before).
   function chatOpen() {
     if (findChatInput() || findSendButton()) return true;
@@ -424,7 +424,7 @@
     return !!t && (t.getAttribute('aria-pressed') === 'true' || t.getAttribute('aria-expanded') === 'true');
   }
   function openChatPanel() {
-    if (chatOpen()) return; // already open — clicking the toggle would CLOSE it
+    if (chatOpen()) return; // already open - clicking the toggle would CLOSE it
     const t = chatToggleBtn();
     if (t) { try { t.click(); } catch (_) {} }
   }
@@ -455,7 +455,7 @@
   function reportCallChat(seq, ok, reason) { send({ type: 'callchat-done', session, seq, ok, reason: reason || '' }); }
   function postToCallChat(text, seq) {
     if (!text) return;
-    if (!chatOpen()) openChatPanel(); // open only if closed — never toggle an open panel shut
+    if (!chatOpen()) openChatPanel(); // open only if closed - never toggle an open panel shut
     let tries = 0;
     const timer = setInterval(() => {
       const ta = findChatInput();
@@ -465,11 +465,11 @@
       setTimeout(() => {
         const send1 = findSendButton();
         if (send1) { try { send1.click(); } catch (_) { pressEnter(ta); } } else pressEnter(ta);
-        // Meet clears the composer on a successful send — use that as the delivery signal.
+        // Meet clears the composer on a successful send - use that as the delivery signal.
         setTimeout(() => {
           const after = findChatInput();
           const leftover = after ? ((after.value != null ? after.value : after.textContent) || '').trim() : '';
-          reportCallChat(seq, !leftover, leftover ? 'composer not cleared — send likely failed' : '');
+          reportCallChat(seq, !leftover, leftover ? 'composer not cleared - send likely failed' : '');
         }, 500);
       }, 150);
     }, 200);

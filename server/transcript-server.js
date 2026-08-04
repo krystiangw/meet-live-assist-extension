@@ -4,10 +4,10 @@
  *
  * The userscript POSTs each finalized caption line here; this server appends it to
  *   <TRANSCRIPTS_DIR>/<session>.txt
- * so it's a real, tailable local file — fully automatic, no file picker, no clicks.
+ * so it's a real, tailable local file - fully automatic, no file picker, no clicks.
  *
  * Zero dependencies. Run with:  node transcript-server.js
- * (or install the launchd autostart — see README.)
+ * (or install the launchd autostart - see README.)
  *
  * Config via env:
  *   TRANSCRIPTS_DIR   where to write (default: ../transcripts next to this script = <meet-live-assist>/transcripts)
@@ -21,18 +21,35 @@ const os = require('os');
 const crypto = require('crypto');
 const { execFile, spawn } = require('child_process');
 
-// ffmpeg lives in Homebrew; launchd's PATH doesn't include it, so use an absolute path.
-const FFMPEG = process.env.FFMPEG || '/opt/homebrew/bin/ffmpeg';
+const IS_MAC = process.platform === 'darwin';
 
-// Local speech-to-text (whisper.cpp) — fully offline, no subscription.
-const WHISPER_CLI = process.env.WHISPER_CLI || '/opt/homebrew/bin/whisper-cli';
+// An absolute path, not a bare command name: launchd (and Windows services) start us with a PATH that has
+// no Homebrew or /usr/local, so `ffmpeg` alone resolves under a shell and fails under the service manager.
+// First existing candidate wins; falling through to the bare name keeps the error an honest ENOENT.
+function resolveBin(envValue, name) {
+  if (envValue) return envValue;
+  const candidates = [
+    `/opt/homebrew/bin/${name}`,  // macOS, Apple Silicon
+    `/usr/local/bin/${name}`,     // macOS Intel, and many Linux installs
+    `/usr/bin/${name}`,           // Linux distro packages
+  ];
+  for (const c of candidates) { try { if (fs.existsSync(c)) return c; } catch (_) {} }
+  return name;
+}
+
+const FFMPEG = resolveBin(process.env.FFMPEG, 'ffmpeg');
+
+// Local speech-to-text (whisper.cpp) - fully offline, no subscription.
+const WHISPER_CLI = resolveBin(process.env.WHISPER_CLI, 'whisper-cli');
 const WHISPER_MODEL = process.env.WHISPER_MODEL || `${os.homedir()}/.local/share/whisper/ggml-base.bin`;
+// Biases whisper toward words it would otherwise mangle. Keep it to vocabulary common to any technical
+// meeting: your own product names and ticket prefixes belong in WHISPER_PROMPT, not in a shipped default.
 const WHISPER_PROMPT = process.env.WHISPER_PROMPT
-  || 'Angular, Flagsmith, feature flag, code review, pull request, Jira, backend, frontend, deploy, release, sprint, story points.';
-// whisper emits these for silence/music — drop them.
+  || 'code review, pull request, feature flag, backend, frontend, deploy, release, sprint, story points, staging, rollback, API, database, migration.';
+// whisper emits these for silence/music - drop them.
 const STT_NOISE = /^\s*(\[[^\]]*\]|\([^)]*\)|\*[^*]*\*|>>|[-–—*~.…\s]+)?\s*$/; // incl. whisper's *sniff*-style annotations
 
-// Whisper does not return "nothing" for a chunk with no speech — it invents filler. On a quiet mic it
+// Whisper does not return "nothing" for a chunk with no speech - it invents filler. On a quiet mic it
 // produced "Thank you." and "... ... ... ..." on a live call, which would fill an interview transcript with
 // phantom lines. Two nets: skip silent chunks before whisper runs at all (peak level), then drop the
 // boilerplate it emits anyway. Thresholds are env-tunable because mic levels differ per machine.
@@ -53,13 +70,13 @@ function isWrongScript(text, lang) {
   const foreign = (text.match(/[\p{Script=Cyrillic}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu) || []).length;
   return foreign / letters > 0.3;
 }
-// Short generic phrases that are real speech sometimes — dropped only when the audio was near-silent.
+// Short generic phrases that are real speech sometimes - dropped only when the audio was near-silent.
 // The thank-yous span languages because whisper falls back to whatever language it guessed for the silence:
 // a quiet Polish call produced "Thank you." and "Gracias.", and a quiet tab channel produced "Uh...".
 // Always noise: hesitation sounds carry nothing, and a thank-you in a language nobody is speaking is a
 // pure artifact (a Polish call produced "Gracias.").
 const STT_FILLER_ALWAYS_RE = /^(mhm+|hmm+|mm+|uh+|um+|aha|thank you|thanks|bye|gracias|merci|danke|grazie|obrigad[oa]|спасибо|dziękuję|dzięki)[.!…]*$/i;
-// Real speech at a normal level, so only dropped on quiet audio — "okay" after a proposal is a decision cue
+// Real speech at a normal level, so only dropped on quiet audio - "okay" after a proposal is a decision cue
 // the board depends on, and throwing it away silently would lose agreements.
 const STT_FILLER_QUIET_RE = /^(okay|ok|yeah|yes|no|okej|dobrze|tak|nie)[.!…]*$/i;
 
@@ -67,8 +84,8 @@ const STT_FILLER_QUIET_RE = /^(okay|ok|yeah|yes|no|okej|dobrze|tak|nie)[.!…]*$
 // load (a 2s chunk costs the same), and ~2GB allocated 20×/minute with two channels running. whisper-server
 // keeps the model resident → 1.0s per chunk and one steady 1.8GB process.
 // Started lazily on the first chunk (so an idle machine holds no model) and reaped when STT goes quiet;
-// while it warms up, and if it ever fails, chunks go through the CLI — STT must not depend on it.
-const WHISPER_SERVER_BIN = process.env.WHISPER_SERVER || '/opt/homebrew/bin/whisper-server';
+// while it warms up, and if it ever fails, chunks go through the CLI - STT must not depend on it.
+const WHISPER_SERVER_BIN = resolveBin(process.env.WHISPER_SERVER, 'whisper-server');
 const WHISPER_SERVER_PORT = parseInt(process.env.WHISPER_SERVER_PORT || '8859', 10);
 const WHISPER_IDLE_MS = parseInt(process.env.WHISPER_IDLE_MS || '600000', 10); // free the model after 10 min idle
 const ws = { proc: null, ready: false, failed: false, lastUse: 0 };
@@ -95,14 +112,14 @@ function ensureWhisperServer() {
     if (!ws.proc) return clearInterval(poll);
     whisperServerHealthy((ok) => {
       if (ok) { ws.ready = true; clearInterval(poll); console.log('[stt] whisper-server ready'); }
-      else if (++tries > 30) { clearInterval(poll); ws.failed = true; console.log('[stt] whisper-server did not come up — staying on the CLI'); }
+      else if (++tries > 30) { clearInterval(poll); ws.failed = true; console.log('[stt] whisper-server did not come up - staying on the CLI'); }
     });
   }, 1000);
 }
 
 setInterval(() => {
   if (ws.proc && ws.lastUse && Date.now() - ws.lastUse > WHISPER_IDLE_MS) {
-    console.log('[stt] whisper-server idle — stopping to free the model');
+    console.log('[stt] whisper-server idle - stopping to free the model');
     try { ws.proc.kill(); } catch (_) {}
     ws.proc = null; ws.ready = false;
   }
@@ -124,7 +141,7 @@ function whisperViaCli(wav, lang, done) {
 }
 
 // Whisper reports per-word probabilities, and they separate speech from invention cleanly. Measured:
-// real speech 0.80–0.97, hallucinations on noise 0.41–0.44 — and quiet speech still scores 0.97, so this
+// real speech 0.80-0.97, hallucinations on noise 0.41-0.44 - and quiet speech still scores 0.97, so this
 // drops the filler without punishing someone talking softly. This is the primary defence; the phrase lists
 // stay as a cheap backstop for the CLI path, which reports no confidence.
 const STT_MIN_CONFIDENCE = parseFloat(process.env.STT_MIN_CONFIDENCE || '0.6');
@@ -171,7 +188,7 @@ function whisperText(wav, lang, done) {
   if (!ws.ready) return whisperViaCli(wav, lang, done);
   whisperViaServer(wav, lang, (err, text) => {
     if (!err) return done(null, text);
-    console.log(`[stt] whisper-server failed (${err.message}) — falling back to the CLI for this chunk`);
+    console.log(`[stt] whisper-server failed (${err.message}) - falling back to the CLI for this chunk`);
     ws.ready = false; // re-checked on the next chunk; a crashed server must not black-hole transcription
     whisperViaCli(wav, lang, done);
   });
@@ -195,13 +212,13 @@ function transcribe(inputFile, lang, done) {
     peakDb(wav, (peak) => {
       if (peak !== null && peak < STT_MIN_PEAK_DB) {
         fs.unlink(inputFile, () => {}); fs.unlink(wav, () => {});
-        return done(null, ''); // no speech in this chunk — running whisper on it only invents filler
+        return done(null, ''); // no speech in this chunk - running whisper on it only invents filler
       }
       whisperText(wav, lang, (e2, text) => {
         fs.unlink(inputFile, () => {}); fs.unlink(wav, () => {});
         if (e2) return done(e2);
         if (!text) return done(null, '');
-        // Whisper prefixes dialogue dashes ("- Yeah."), which made the filler patterns miss — they anchor
+        // Whisper prefixes dialogue dashes ("- Yeah."), which made the filler patterns miss - they anchor
         // on the whole line.
         text = text.replace(/^[-–—>\s]+/, '');
         if (!text) return done(null, '');
@@ -222,7 +239,7 @@ function transcribe(inputFile, lang, done) {
 // device === null -> default output (you hear it); a CoreAudio device name -> routed there (into Meet, 2b).
 const TTS_VOICE = process.env.TTS_VOICE || 'Zosia';
 
-// CoreAudio output-device indices are NOT stable across device changes — resolve by name substring.
+// CoreAudio output-device indices are NOT stable across device changes - resolve by name substring.
 const deviceIndexCache = new Map();
 function resolveDeviceIndex(nameSub, done) {
   const key = nameSub.toLowerCase();
@@ -239,9 +256,10 @@ function resolveDeviceIndex(nameSub, done) {
   });
 }
 
-// Cached BlackHole presence for /health (device listing spawns ffmpeg — cache to avoid a DoS via /health).
+// Cached BlackHole presence for /health (device listing spawns ffmpeg - cache to avoid a DoS via /health).
 let healthDevCache = { at: 0, blackhole: false };
 function checkBlackhole(done) {
+  if (!IS_MAC) return done(false); // the listing goes through ffmpeg's audiotoolbox device, macOS-only
   if (Date.now() - healthDevCache.at < 60000) return done(healthDevCache.blackhole);
   resolveDeviceIndex('BlackHole', (err, idx) => {
     healthDevCache = { at: Date.now(), blackhole: !err && idx != null };
@@ -256,12 +274,16 @@ function playFile(tmp, deviceIndex, done) {
     execFile(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-i', tmp,
       '-f', 'audiotoolbox', '-audio_device_index', String(deviceIndex), '-'], finish);
   } else {
-    execFile('afplay', [tmp], finish); // default output — you hear it
+    execFile('afplay', [tmp], finish); // default output - you hear it
   }
 }
 
 // TTS via macOS `say`. device: number (index) | name substring (e.g. "BlackHole") | null (default output).
+// Non-macOS gets a clear refusal rather than an ENOENT: everything else in the server is portable, so a
+// Linux/Windows user should learn that only this one feature is missing, not that their install is broken.
+const TTS_UNAVAILABLE = 'text-to-speech needs macOS (`say` + `afplay`); advice still shows in the panel';
 function speak(text, device, voice, done) {
+  if (!IS_MAC) return done(new Error(TTS_UNAVAILABLE));
   const clean = String(text || '').slice(0, 600);
   if (!clean.trim()) return done(new Error('empty'));
   const v = (typeof voice === 'string' && voice.trim()) ? voice.trim() : TTS_VOICE;
@@ -280,9 +302,18 @@ function speak(text, device, voice, done) {
 }
 
 const PORT = parseInt(process.env.PORT || '8848', 10);
+// Where meeting text and screenshots land. Explicit env always wins. Otherwise: a `transcripts/` dir
+// beside the checkout means we are running from the repo, so keep using it; anything else (an npm/npx
+// install, where __dirname is inside the package cache) gets a real home directory, because writing
+// recordings into a cache that npm may clear is both surprising and lossy.
+function defaultTranscriptsDir() {
+  const beside = path.resolve(__dirname, '..', 'transcripts');
+  try { if (fs.existsSync(beside)) return beside; } catch (_) {}
+  return path.join(os.homedir(), 'meet-live-assist', 'transcripts');
+}
 const TRANSCRIPTS_DIR = process.env.TRANSCRIPTS_DIR
   ? path.resolve(process.env.TRANSCRIPTS_DIR)
-  : path.resolve(__dirname, '..', 'transcripts');
+  : defaultTranscriptsDir();
 
 fs.mkdirSync(TRANSCRIPTS_DIR, { recursive: true });
 
@@ -301,7 +332,7 @@ try {
 const SNAP_DIR = path.join(TRANSCRIPTS_DIR, 'snapshots');
 const SNAP_MAX = 40; // keep only the most recent per session
 
-// Retention: meeting text + screenshots are PII — purge anything older than this (0 = keep forever).
+// Retention: meeting text + screenshots are PII - purge anything older than this (0 = keep forever).
 const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS || '14', 10);
 function purgeOld() {
   if (!(RETENTION_DAYS > 0)) return;
@@ -323,7 +354,7 @@ function purgeOld() {
 const seenSessions = new Set();
 
 // Advice channel (Phase 1): the "brain" POSTs advice here; the side panel polls it.
-// In-memory only — advice is ephemeral live guidance, not a record.
+// In-memory only - advice is ephemeral live guidance, not a record.
 const advice = new Map(); // session -> { seq, items: [{ seq, ts, marker, text }] }
 const ADVICE_MAX = 200;
 const MARKERS = new Set(['SAY', 'INFO', 'SUMMARY', 'EXPLAIN', 'RISK', 'ACTION']);
@@ -350,7 +381,7 @@ const dbgData = new Map(); // session -> { kind, data }
 // the panel polls it to show whether an assistant is actually attached to this meeting.
 const brainPing = new Map(); // session -> last heartbeat ms
 const brainStatus = new Map(); // session -> { text, ts } current agent activity ("creating Jira ticket…"); '' = idle
-const control = new Map(); // session -> 'running' | 'paused' | 'stopped' — panel drives it; the brain obeys
+const control = new Map(); // session -> 'running' | 'paused' | 'stopped' - panel drives it; the brain obeys
 
 // Live decisions + action items captured by the brain during the call (the board; source for Jira drafts).
 const items = new Map(); // session -> { seq, list: [{ seq, ts, kind, text, owner, blockedBy }] }
@@ -383,7 +414,7 @@ const SUPPRESS_TTL_MS = 8 * 3600 * 1000; // drop dismissals older than 8h (defen
 const summaries = new Map(); // session -> markdown
 function summaryFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.summary.md`); }
 
-// Meeting mode — steers how the brain advises. Panel sets it; brain reads it each turn.
+// Meeting mode - steers how the brain advises. Panel sets it; brain reads it each turn.
 const modes = new Map(); // session -> mode
 const MODES = new Set(['auto', 'listener', 'lead', 'explain', 'produce']);
 function modeFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.mode.txt`); }
@@ -402,7 +433,7 @@ function fileFor(session) {
 }
 
 // Rough, volume-based estimate of tokens the brain has processed this call: transcript + chat bytes ÷ 4.
-// NOT billing — it counts raw volume once, so it undercounts per-turn context re-reads (the panel labels it "est.").
+// NOT billing - it counts raw volume once, so it undercounts per-turn context re-reads (the panel labels it "est.").
 function estTokensFor(session) {
   let bytes = 0;
   for (const f of [fileFor(session), chatFileFor(session)]) {
@@ -413,40 +444,40 @@ function estTokensFor(session) {
 
 // --- Wake gating (token economy) ----------------------------------------------------------------
 // The transcript file used to be BOTH the archive and the brain's doorbell (its Monitor tails it), so the
-// only way to not spend a turn was to not write the line — which is why a plain "okay"/"yeah" was dropped,
+// only way to not spend a turn was to not write the line - which is why a plain "okay"/"yeah" was dropped,
 // losing exactly the agreement cues the decisions board depends on ("Agree = log").
 //
 // Split the two channels: `<session>.txt` gets EVERYTHING (complete record), `<session>.wake` gets a batch
-// only when it's worth a turn — that's what the brain tails. A skipped batch is not lost: its lines stay
+// only when it's worth a turn - that's what the brain tails. A skipped batch is not lost: its lines stay
 // queued and ride along with the next wake, so a wrong "nothing here yet" costs latency, not information.
 // That's what makes gating this aggressive safe.
 //
 // Measured on two real calls against ground truth (95 moments where the brain actually posted advice):
 // 786 → 136 and 1109 → 237 wakes, no productive moment missed.
-// Tunable via env (also how the test harness shrinks them) — no code edit needed to re-tune a call.
+// Tunable via env (also how the test harness shrinks them) - no code edit needed to re-tune a call.
 const WAKE_BASE_MS = parseInt(process.env.WAKE_BASE_MS || '10000', 10);   // normal coalescing window
 const WAKE_MAX_MS = parseInt(process.env.WAKE_MAX_MS || '90000', 10);     // widest window, reached by doubling on empty batches
 const WAKE_MIN_GAP_MS = parseInt(process.env.WAKE_MIN_GAP_MS || '8000', 10); // never wake twice inside this
-const WAKE_FORCE_MS = parseInt(process.env.WAKE_FORCE_MS || '180000', 10);   // even pure chatter lands eventually — never go blind longer
+const WAKE_FORCE_MS = parseInt(process.env.WAKE_FORCE_MS || '180000', 10);   // even pure chatter lands eventually - never go blind longer
 const WAKE_MAX_CHARS = parseInt(process.env.WAKE_MAX_CHARS || '4000', 10);   // a burst this big is substance by volume alone
 const wakeBuf = new Map(); // session -> { lines, firstAt, since, window, lastAt, timer }
 
 // Per-session escape hatch: wake on EVERY line, small talk included, so `.wake` mirrors `.txt`. For calls
-// where the brain must see the verbatim flow (dictation, note-taking, judging the gate itself) — it costs a
+// where the brain must see the verbatim flow (dictation, note-taking, judging the gate itself) - it costs a
 // turn per batch, which is exactly what the gate exists to avoid, so the gate stays the default.
 // Set via POST /wake-mode; WAKE_ALL=1 flips the default for the whole server.
 const WAKE_ALL_DEFAULT = process.env.WAKE_ALL === '1';
 const wakeAll = new Map(); // session -> boolean
 const remoteNames = new Map(); // session -> display name for tab-audio STT lines (1:1 only)
 // Language for STT, pinned per session. Only the Meet content script can report the call's caption language,
-// so on Zoom every chunk ran with lang=auto — and auto-detect on a 4s chunk sometimes picks the wrong
+// so on Zoom every chunk ran with lang=auto - and auto-detect on a 4s chunk sometimes picks the wrong
 // language outright: a Polish sentence came back as "Por um tanto de burro." Pinning removes that class of
 // failure at no measured cost (a pinned 'pl' transcribed an English sample correctly anyway).
 const sttLangs = new Map(); // session -> 'pl' | 'en' | ...
 
 // Cross-channel echo guard. The two STT channels can hear the same speech: if the other side has no
 // headphones, the user's voice returns through their mic into the tab channel (measured on a live call with
-// a second device in the room — the same utterance landed as both 'You' and the remote speaker). Keep a
+// a second device in the room - the same utterance landed as both 'You' and the remote speaker). Keep a
 // short window of recent lines per session and drop one that just arrived on the OTHER channel.
 const STT_ECHO_MS = parseInt(process.env.STT_ECHO_MS || '9000', 10);
 const sttRecent = new Map(); // session -> [{ at, src, norm }]
@@ -457,7 +488,7 @@ function isSttEcho(session, src, text) {
   const now = Date.now();
   const recent = (sttRecent.get(session) || []).filter((e) => now - e.at < STT_ECHO_MS);
   // Word overlap, not substring: the two channels hear the same speech through different mics, so the
-  // transcripts differ ("Chodziło mi o rozmowę typu interview." vs "Chodzi o rozmowy w interwiewie." —
+  // transcripts differ ("Chodziło mi o rozmowę typu interview." vs "Chodzi o rozmowy w interwiewie." -
   // the same sentence, and substring matching missed it entirely).
   const words = new Set(norm.split(' '));
   const echo = recent.some((e) => {
@@ -483,13 +514,13 @@ function isWakeAll(session) {
 }
 
 // Wake NOW: decisions, blockers, someone calling Krystian (incl. the caption manglings of his name), and
-// real questions. This bypass is what keeps recall at 100% — the gating below only defers the rest.
-// The name list carries Meet's real manglings of "Krystian" — captions turned it into "Christian" on a
+// real questions. This bypass is what keeps recall at 100% - the gating below only defers the rest.
+// The name list carries Meet's real manglings of "Krystian" - captions turned it into "Christian" on a
 // live test, and "Chris"/"Kirsten" on earlier calls. Missing a mangling means missing a direct callout.
 const URGENT_RE = /\b(agreed|decided|decision|action item|deadline|blocker|blocked|approved|rejected|ship it|krystian|krystiana|krystianie|christian|chris|kirsten|christos)\b/i;
-// Substance: a number or a domain word. Deliberately a short, editable list — it will drift with the work.
+// Substance: a number or a domain word. Deliberately a short, editable list - it will drift with the work.
 // NOTE: no bare "pr" here. With the /i flag and the trailing \w* it matched problem/pretty/probably/
-// present — 3-9% of batches on real calls passed on that alone. A pull request is either uppercase "PR"
+// present - 3-9% of batches on real calls passed on that alone. A pull request is either uppercase "PR"
 // or comes with a number, so match those two shapes explicitly instead (see PR_RE).
 const CONTENT_RE = /[0-9]|\b(ticket|jira|sprint|epic|story|point|backend|frontend|api|flag|deploy|release|bug|test|column|filter|sort|invite|credit|email|status|candidate|job|search|design|figma|migration|angular|eslint|contract|deliverab|onboarding|roadmap|ticket[ai]|sprint[uy]|zadani|błąd|blad|wdroż|wdroz)\w*/i;
 const PR_RE = /\bPR\b|\bpr\s*#?\d/;  // case-sensitive on purpose: "PR" the noun, or "pr 1234"
@@ -503,7 +534,7 @@ function wakeFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession
 function isUrgentLine(line) {
   const t = spokenText(line);
   if (URGENT_RE.test(t)) return true;
-  // A real question wakes us — but "how are you?" and "can you see my screen?" are questions too, and
+  // A real question wakes us - but "how are you?" and "can you see my screen?" are questions too, and
   // they were burning a turn each until the noise check was added here (not just in batchWorthATurn).
   if (!(t.endsWith('?') && t.length > 25)) return false;
   return !SMALLTALK_RE.test(t) && !TECH_NOISE_RE.test(t);
@@ -521,7 +552,7 @@ function queueForWake(session, line) {
   const now = Date.now();
   if (!b.firstAt) b.firstAt = now;
   if (!b.since) b.since = now;
-  // Back to fast cadence the moment anything real shows up — and cancel the pending long timer, otherwise
+  // Back to fast cadence the moment anything real shows up - and cancel the pending long timer, otherwise
   // a window widened to 90s during small talk would sit on the first meaningful line for up to 90s.
   if (isUrgentLine(line) || CONTENT_RE.test(spokenText(line)) || PR_RE.test(spokenText(line))) {
     b.window = WAKE_BASE_MS;
@@ -545,7 +576,7 @@ function evaluateWake(session) {
     flushWake(session);
     return;
   }
-  // Nothing of substance yet: widen the window and keep the lines queued. Self-tuning — no lexicon needed
+  // Nothing of substance yet: widen the window and keep the lines queued. Self-tuning - no lexicon needed
   // to sit out a long stretch of chatter, and the WAKE_FORCE_MS ceiling bounds how long we stay quiet.
   b.window = Math.min(WAKE_MAX_MS, b.window * 2);
   b.since = Date.now();
@@ -558,14 +589,14 @@ function flushWake(session) {
   if (!b.lines.length) return;
   try {
     fs.appendFileSync(wakeFileFor(session), b.lines.join(''));
-    // One line per brain turn — this is the log to read when tuning the WAKE_* thresholds for a real call.
+    // One line per brain turn - this is the log to read when tuning the WAKE_* thresholds for a real call.
     console.log(`[wake] ${session} +${b.lines.length} lines (window ${b.window}ms)`);
   } catch (e) { console.error('[transcript] wake write failed', e); }
   b.lines = []; b.firstAt = 0; b.since = 0; b.lastAt = Date.now(); b.window = WAKE_BASE_MS;
 }
 
 function cors(req, res) {
-  // Reflect only the extension's own origin — never a web page's. A malicious site's cross-origin
+  // Reflect only the extension's own origin - never a web page's. A malicious site's cross-origin
   // request then fails its preflight (custom X-MLA-Token header forces one) and is never sent.
   const origin = req.headers.origin || '';
   if (origin.startsWith('chrome-extension://')) res.setHeader('Access-Control-Allow-Origin', origin);
@@ -583,7 +614,7 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && req.url === '/health') {
     // Report WHICH model, not just that one exists: `launchctl kickstart` restarts the job from its cached
-    // plist, so an edited WHISPER_MODEL silently does nothing until the job is booted out and back in —
+    // plist, so an edited WHISPER_MODEL silently does nothing until the job is booted out and back in -
     // and transcription quality then differs from what you measured on the command line.
     const tools = { ffmpeg: fs.existsSync(FFMPEG), whisper: fs.existsSync(WHISPER_CLI), whisperModel: path.basename(WHISPER_MODEL) };
     checkBlackhole((blackhole) => {
@@ -591,6 +622,15 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify({ ok: true, dir: TRANSCRIPTS_DIR, tools: { ...tools, blackhole } }));
     });
     return;
+  }
+
+  // Is the caller's token good? Answers 200 either way, so the panel can show "set your token" without
+  // logging a 403 on every poll. A brand-new install polls this before the token is pasted, and a console
+  // full of red on first run reads as "broken" to someone who has done nothing wrong yet.
+  // Safe to sit before the gate: it reveals only whether the caller already knows the token.
+  if (req.method === 'GET' && req.url.startsWith('/auth-check')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ authed: (req.headers['x-mla-token'] || '') === TOKEN }));
   }
 
   // Everything past here requires the shared token (see TOKEN_FILE above).
@@ -606,7 +646,7 @@ const server = http.createServer((req, res) => {
       // every line of a call into its own transcript file when the caller lost track of the session.
       // Also reject the literal strings a broken caller sends: a template that interpolated an undefined
       // variable produced session="undefined", the server dutifully created `undefined.txt`, and it then
-      // became the newest transcript — which is what the brain pins. One hour of a real interview landed
+      // became the newest transcript - which is what the brain pins. One hour of a real interview landed
       // there while the panel, holding no session at all, could not display a single line of advice.
       if (!/\S/.test(String(data.session || '')) || /^(undefined|null|NaN)$/i.test(String(data.session).trim())) {
         res.writeHead(400); return res.end('missing or invalid session');
@@ -617,11 +657,11 @@ const server = http.createServer((req, res) => {
       try {
         if (!seenSessions.has(session)) {
           seenSessions.add(session);
-          fs.appendFileSync(file, `==== ${session} — started ${new Date().toISOString()} ====\n`);
+          fs.appendFileSync(file, `==== ${session} - started ${new Date().toISOString()} ====\n`);
           console.log(`[transcript] new session → ${file}`);
         }
         if (line) {
-          fs.appendFileSync(file, line); // the .txt is the complete record — nothing is ever dropped here
+          fs.appendFileSync(file, line); // the .txt is the complete record - nothing is ever dropped here
           queueForWake(session, line);   // whether it's worth a turn is decided on the .wake channel
           if (isWakeAll(session)) flushWake(session); // "collect everything" mode: no gate, no coalescing
         } else {
@@ -719,10 +759,10 @@ const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://127.0.0.1');
     const rawSession = String(u.searchParams.get('session') || '').trim();
     if (!rawSession || /^(undefined|null|NaN)$/i.test(rawSession)) {
-      res.writeHead(400); return res.end('missing or invalid session'); // see /append — no phantom sessions
+      res.writeHead(400); return res.end('missing or invalid session'); // see /append - no phantom sessions
     }
     const session = safeSession(rawSession);
-    // A session pin wins over whatever the extension sends — the panel has no Zoom language selector.
+    // A session pin wins over whatever the extension sends - the panel has no Zoom language selector.
     const lang = sttLangs.get(session) || (u.searchParams.get('lang') || 'auto').slice(0, 5);
     const src = u.searchParams.get('src') === 'mic' ? 'mic' : 'tab';
     const chunks = []; let size = 0;
@@ -745,10 +785,10 @@ const server = http.createServer((req, res) => {
             const file = fileFor(session);
             if (!seenSessions.has(session)) {
               seenSessions.add(session);
-              fs.appendFileSync(file, `==== ${session} — started ${new Date().toISOString()} ====\n`);
+              fs.appendFileSync(file, `==== ${session} - started ${new Date().toISOString()} ====\n`);
             }
             // Mic STT is the user (co-pilot) → 'You' (authorizes actions). tabCapture STT is remote
-            // participants; whisper does no diarization, so there is no name to attach — unless the user
+            // participants; whisper does no diarization, so there is no name to attach - unless the user
             // named the other side for this session (POST /remote-name), which is exact in a 1:1 and wrong
             // the moment a third person joins. Either way it is NOT the user, so it still authorizes nothing.
             const who = src === 'mic' ? 'You' : (remoteNames.get(session) || '(unattributed)');
@@ -768,6 +808,8 @@ const server = http.createServer((req, res) => {
 
   // Options page -> server: list installed `say` voices (for the voice picker).
   if (req.method === 'GET' && req.url === '/voices') {
+    // An empty list, not a 500: off macOS there are no voices to pick and that is not an error.
+    if (!IS_MAC) { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end('[]'); }
     execFile('say', ['-v', '?'], (err, stdout) => {
       if (err) { res.writeHead(500); return res.end('[]'); }
       const voices = String(stdout).split('\n').map((l) => {
@@ -914,7 +956,7 @@ const server = http.createServer((req, res) => {
   }
 
   // Brain -> server: claim a meeting ("I'm taking this session now"). Other assistants GET this and, on
-  // seeing a NEWER agent than themselves, yield — automatic handoff instead of a manual clad-task.
+  // seeing a NEWER agent than themselves, yield - automatic handoff instead of a manual clad-task.
   if (req.method === 'POST' && req.url === '/brain-takeover') {
     let body = '';
     req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
@@ -958,7 +1000,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Everything the brain must check each turn, in ONE request and ONE line — /control + /mode + /autopilot
+  // Everything the brain must check each turn, in ONE request and ONE line - /control + /mode + /autopilot
   // + /suppress. Four JSON responses per turn would each land in the loop's context and be re-read on every
   // later turn; plain text keeps that to a handful of tokens. Suppression texts appear only if there are any.
   if (req.method === 'GET' && req.url.startsWith('/status')) {
@@ -1006,7 +1048,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Wake mode: `gated` (default — only batches worth a turn reach .wake) or `all` (everything, small talk
+  // Wake mode: `gated` (default - only batches worth a turn reach .wake) or `all` (everything, small talk
   // included). Panel or brain can flip it mid-call; a pending batch is flushed so nothing waits behind it.
   if (req.method === 'POST' && req.url === '/wake-mode') {
     let body = '';
@@ -1185,7 +1227,7 @@ const server = http.createServer((req, res) => {
       const hms = [dt.getHours(), dt.getMinutes(), dt.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
       try {
         const file = fileFor(session);
-        if (!seenSessions.has(session)) { seenSessions.add(session); fs.appendFileSync(file, `==== ${session} — started ${new Date().toISOString()} ====\n`); }
+        if (!seenSessions.has(session)) { seenSessions.add(session); fs.appendFileSync(file, `==== ${session} - started ${new Date().toISOString()} ====\n`); }
         const block = `\n[${hms}] ===== PRE-JOIN CONTEXT (imported) =====\n${text}\n=================================================\n`;
         fs.appendFileSync(file, block);
         queueForWake(session, block); // imported background is worth a turn
@@ -1407,7 +1449,7 @@ const server = http.createServer((req, res) => {
 });
 
 // Flush queued wakes before dying (launchd reload / Ctrl-C) so a pending batch isn't lost on restart.
-// The .txt needs no flushing — it's written line by line.
+// The .txt needs no flushing - it's written line by line.
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => { for (const s of wakeBuf.keys()) flushWake(s); process.exit(0); });
 }
@@ -1415,7 +1457,7 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[transcript] listening on http://127.0.0.1:${PORT}`);
   console.log(`[transcript] writing to ${TRANSCRIPTS_DIR}`);
-  console.log(`[transcript] auth token in ${TOKEN_FILE} — paste it into the extension options (cat the file).`);
+  console.log(`[transcript] auth token in ${TOKEN_FILE} - paste it into the extension options (cat the file).`);
   console.log(`[transcript] retention: ${RETENTION_DAYS > 0 ? RETENTION_DAYS + ' days' : 'forever'}`);
   purgeOld();
   setInterval(purgeOld, 6 * 3600 * 1000); // re-check a few times a day

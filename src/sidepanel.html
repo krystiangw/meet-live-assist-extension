@@ -6,7 +6,7 @@
   <title>Meet Live Assist</title>
   <style>
     :root {
-      color-scheme: light; /* committed light — Whispr-style soft surface */
+      color-scheme: light; /* committed light - Whispr-style soft surface */
       --ink: #1b2138;    /* base dark for text + all translucent tints */
       --text: #1c2338;
       --muted: #6b7488;
@@ -20,7 +20,7 @@
       --shadow-md: 0 2px 6px rgba(24,33,72,.06), 0 8px 24px rgba(24,33,72,.07);
     }
     * { box-sizing: border-box; }
-    /* The `hidden` attribute must always win — otherwise id/class display rules (e.g. #consent{display:flex},
+    /* The `hidden` attribute must always win - otherwise id/class display rules (e.g. #consent{display:flex},
        .status{display:inline-flex}) override it and elements toggled via el.hidden never actually hide. */
     [hidden] { display: none !important; }
     body {
@@ -146,10 +146,10 @@
     .advice-item.ACTION { border-left-color: var(--action); background: color-mix(in srgb, var(--action) 8%, var(--surface)); }
     .advice-item.ACTION .marker { color: var(--action); }
     .advice-item.SAY .body { font-weight: 600; }
-    /* SAY splits into the words to speak (prominent, dark) vs framing/why (receded) — read your line at a glance. */
+    /* SAY splits into the words to speak (prominent, dark) vs framing/why (receded) - read your line at a glance. */
     .advice-item.SAY .say-quote { font-weight: 700; color: var(--ink); }
     .advice-item.SAY .say-frame { font-weight: 400; font-size: 12px; color: color-mix(in srgb, var(--text) 58%, transparent); }
-    /* Make bold actually pop as a scan-anchor — distinct even against SAY's 600 body baseline. */
+    /* Make bold actually pop as a scan-anchor - distinct even against SAY's 600 body baseline. */
     .advice-item .body strong, .item .txt strong { font-weight: 800; color: color-mix(in srgb, var(--ink) 92%, var(--text)); }
     /* Auto-highlighted numbers/values: subtle tinted chip so they surface in a thicket of text. */
     .kw-num { font-weight: 700; font-variant-numeric: tabular-nums; padding: 0 3px; border-radius: 4px;
@@ -252,13 +252,13 @@
 <body>
   <header>
     <div class="statusrow">
-      <span id="capStatus" class="status idle" title="Capture state — idle / capturing (Meet or Zoom captions) / co-pilot / ⚠ no captions">idle</span>
-      <span id="srvStatus" class="status idle" title="Local bridge server — ✓ connected, ✗ down (start it), or ✗ token missing (set it in Options)">server ?</span>
+      <span id="capStatus" class="status idle" title="Capture state - idle / capturing (Meet or Zoom captions) / co-pilot / ⚠ no captions">idle</span>
+      <span id="srvStatus" class="status idle" title="Local bridge server - ✓ connected, ✗ down (start it), or ✗ token missing (set it in Options)">server ?</span>
       <span id="brainStatus" class="status idle" title="Is a Claude assistant attached and watching this meeting?">🧠 ?</span>
       <span id="talkStatus" class="status idle" title="Your share of talk time this meeting (rough, by words)" hidden></span>
       <span id="snapStatus" class="status idle" title="Screen snapshots captured this meeting (kept for the assistant's visual context)">shots 0</span>
       <span id="session" title="This meeting's session id (date_time_code)"></span>
-      <select id="modeSel" title="Agent mode — how proactive it is (Auto / Listener / Lead) or its job: Explain (define terms + cite sources) · Produce (turn talk into tickets, docs, plans)">
+      <select id="modeSel" title="Agent mode - how proactive it is (Auto / Listener / Lead) or its job: Explain (define terms + cite sources) · Produce (turn talk into tickets, docs, plans)">
         <option value="auto">🤖 Auto</option>
         <option value="listener">👂 Listener</option>
         <option value="lead">🎤 Lead</option>
@@ -268,25 +268,27 @@
     </div>
 
     <div class="toolbar">
-      <button id="copilotBtn" class="iconbtn" title="Co-pilot: start a session without a meeting — the assistant watches this tab and listens to your mic">🧑‍💻</button>
+      <button id="copilotBtn" class="iconbtn" title="Co-pilot: start a session without a meeting - the assistant watches this tab and listens to your mic">🧑‍💻</button>
       <button id="snapNow" class="iconbtn" title="Capture the shared tab now">📷</button>
-      <label class="toggle" title="Transcribe the call's audio locally (whisper) — start with ⌘⇧U on the Meet tab">
+      <label class="toggle" title="Transcribe the call's audio locally (whisper) - start with ⌘⇧U on the Meet tab">
         <input type="checkbox" id="sttToggle" />🎧
       </label>
       <label class="toggle" title="Route 🔊 into the meeting (BlackHole) instead of your headphones">
         <input type="checkbox" id="ttsCall" />🎙
       </label>
-      <label class="toggle debug" title="Let the assistant read network/console (attaches the debugger — shows a banner) and storage">
+      <!-- mla:pro-start -->
+      <label class="toggle debug" title="Let the assistant read network/console (attaches the debugger - shows a banner) and storage">
         <input type="checkbox" id="dbgToggle" />🐞
       </label>
-      <button id="driveBtn" class="iconbtn" title="Let the agent control this tab — click / type / navigate to walk or test a flow. Opt-in; a banner shows while active and it acts in your real logged-in session.">🕹️</button>
+      <button id="driveBtn" class="iconbtn" title="Let the agent control this tab - click / type / navigate to walk or test a flow. Opt-in; a banner shows while active and it acts in your real logged-in session.">🕹️</button>
+      <!-- mla:pro-end -->
       <span class="tb-spacer"></span>
       <button id="ctxBtn" class="iconbtn" title="Import pre-join context: highlight a Gemini / AI 'summarize so far' (or any text) in the call, then click to give the assistant what happened before you joined">📥</button>
       <button id="summaryBtn" class="iconbtn" title="Show / download the post-call summary">📄</button>
       <button id="setupBtn" class="iconbtn" title="Setup &amp; health check">⚙</button>
       <span class="tb-sep"></span>
-      <button id="pauseBtn" class="iconbtn" title="Pause — hold capture &amp; advice; nothing is recorded until you resume">⏸</button>
-      <button id="stopBtn" class="iconbtn" title="End session — the assistant wraps up and stops (data kept; use 🗑 to wipe)">⏹</button>
+      <button id="pauseBtn" class="iconbtn" title="Pause - hold capture &amp; advice; nothing is recorded until you resume">⏸</button>
+      <button id="stopBtn" class="iconbtn" title="End session - the assistant wraps up and stops (data kept; use 🗑 to wipe)">⏹</button>
       <button id="clearBtn" class="iconbtn" title="Delete all data for this meeting (transcript, snapshots, chat)">🗑</button>
     </div>
   </header>
@@ -298,21 +300,25 @@
     <button id="consentDismiss" type="button">Got it</button>
   </div>
 
+  <!-- mla:pro-start -->
   <div id="driveBar" hidden>
-    🤖 The assistant can control this tab (click / type / navigate) — acting in your real session.
+    🤖 The assistant can control this tab (click / type / navigate) - acting in your real session.
     <button id="driveStop" type="button">Stop</button>
   </div>
+  <!-- mla:pro-end -->
 
   <!-- Transient alerts: shown only while active (the strip collapses when all are hidden). -->
   <div id="alerts">
-    <span id="shareStatus" class="status bad" title="Someone is screen-sharing — auto-snapshotting on visual change" hidden>● sharing</span>
-    <span id="muteStatus" class="status bad" title="Someone said you can't be heard — check your mic" hidden>🔇 you may be muted</span>
+    <span id="shareStatus" class="status bad" title="Someone is screen-sharing - auto-snapshotting on visual change" hidden>● sharing</span>
+    <span id="muteStatus" class="status bad" title="Someone said you can't be heard - check your mic" hidden>🔇 you may be muted</span>
     <span id="mentionStatus" class="status bad" title="Your name was just said in the call" hidden>🙋 mentioned you</span>
     <span id="speakStatus" class="status idle" title="Text-to-speech (🔊) status" hidden></span>
     <span id="sttStatus" class="status idle" title="Local speech-to-text (🎧) status" hidden></span>
+    <!-- mla:pro-start -->
     <span id="dbgStatus" class="status idle" title="Live debugging (🐞) status" hidden></span>
     <span id="editStatus" class="status idle" title="Presentation edit (✏) status" hidden></span>
     <span id="actStatus" class="status idle" title="Agent page-action (🕹) status" hidden></span>
+    <!-- mla:pro-end -->
     <span id="ctxStatus" class="status idle" title="Pre-join context import (📥) status" hidden></span>
   </div>
 
@@ -325,7 +331,7 @@
     <input class="sec-search" id="itemSearch" type="search" placeholder="filter…" title="Filter decisions &amp; action items by keyword" hidden />
   </div>
   <div id="itemCtl">
-    <label class="chip-toggle" title="Let the assistant create tickets/docs for action items without asking each time — you authorize once (this IS the 'don't ask again').">
+    <label class="chip-toggle" title="Let the assistant create tickets/docs for action items without asking each time - you authorize once (this IS the 'don't ask again').">
       <input type="checkbox" id="autoCreate" /> 🤖 Auto-create
     </label>
     <label class="chip-toggle" title="Post created ticket/doc links into the meeting chat for everyone (off by default).">
@@ -340,7 +346,7 @@
   <div class="section-label">Chat</div>
   <div id="chat"></div>
   <div id="tokenEst" class="token-est" hidden
-    title="Rough estimate of what the assistant has processed this call (transcript + chat volume ÷ 4). Volume-based estimate, not exact billing — it undercounts per-turn context re-reads.">⛃ —</div>
+    title="Rough estimate of what the assistant has processed this call (transcript + chat volume ÷ 4). Volume-based estimate, not exact billing - it undercounts per-turn context re-reads.">⛃ -</div>
   <div id="quickAsk">
     <button type="button" title="Quick catch-up on the last few minutes" data-ask="What did I miss in the last few minutes? Give me a 3-bullet catch-up.">⏮ Recap</button>
     <button type="button" title="Check if you were mentioned or asked anything" data-ask="Was I (Krystian) mentioned or asked anything recently? If so, what and by whom?">🙋 Mentioned me?</button>
@@ -349,7 +355,7 @@
   <form id="chatForm">
     <div id="cmdMenu" role="listbox" hidden></div>
     <input id="chatInput" type="text" placeholder="Ask the assistant…" autocomplete="off"
-      title="Ask the assistant privately — it replies here, not in the meeting chat" />
+      title="Ask the assistant privately - it replies here, not in the meeting chat" />
     <button type="submit" title="Send to the assistant (private back-channel, not the meeting)">Send</button>
   </form>
 

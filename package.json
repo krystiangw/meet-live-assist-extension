@@ -1,0 +1,16 @@
+{
+  "name": "meet-live-assist",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Live meeting co-pilot for Google Meet and Zoom: transcript capture, colour-coded advice, action items, snapshots, chat and TTS, driven by your own local assistant.",
+  "homepage": "https://krystiangw.github.io/meet-live-assist/",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "./build.sh",
+    "build:public": "./build.sh --public",
+    "test": "node test/smoke.mjs",
+    "lint": "for f in src/*.js server/*.js; do node --check \"$f\" || exit 1; done"
+  }
+}

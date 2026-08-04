@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Syntax-check every source file
+        run: npm run lint
+
+      - name: Smoke-test the bridge server
+        run: npm test
+
+      # The public build is the artifact that gets uploaded, so a broken strip must fail here rather than
+      # in a store review. build.sh --public already asserts valid syntax and no dangling pro references.
+      - name: Build the public (store) zip
+        run: npm run build:public
+
+      - name: Build the full zip
+        run: npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zips
+          path: dist/*.zip

@@ -1,4 +1,4 @@
-// Content script — Zoom WEB CLIENT (app.zoom.us/wc) live-caption capture.
+// Content script - Zoom WEB CLIENT (app.zoom.us/wc) live-caption capture.
 // Emits the SAME messages as the Meet content script (session / cap / cap-final / session-end),
 // so the service worker, dedup pipeline, and side panel are shared and unchanged.
 //
@@ -24,12 +24,12 @@
              '[class*="subtitle" i]', '[class*="caption" i]'],
     block: ['[class*="lt-full-transcript__item" i]', '[class*="live-transcription-content" i]',
             '[class*="caption" i] li', '[class*="subtitle-item" i]'],
-    // The full-transcript row keeps name, time and message in separate elements — target them exactly, or the
+    // The full-transcript row keeps name, time and message in separate elements - target them exactly, or the
     // fallback reads the whole row and the timestamp ends up recorded as speech.
     speaker: ['[class*="lt-full-transcript__display-name" i]', '[class*="speaker" i]', '[class*="name" i]'],
     avatar: ['[class*="lt-full-transcript__avatar" i]'],
     text: ['[class*="lt-full-transcript__message" i]', '[class*="text" i]', '[class*="content" i]'],
-    // Chat panel messages (opportunistic — only in the DOM while the chat panel is open).
+    // Chat panel messages (opportunistic - only in the DOM while the chat panel is open).
     chatMsg: ['[class*="new-chat-message" i]', '[class*="chat-item" i]', '#chat-list [class*="message" i]'],
     chatSender: ['[class*="sender" i]', '[class*="chat-item__sender" i]'],
     chatText: ['[class*="chat-info" i]', '[class*="message-text" i]', '[class*="text" i]'],
@@ -42,7 +42,7 @@
   const POLL_MS = 200;
   const CAPTURE_WARN_MS = 12000;
   // A call is /wc/<numeric meeting id>/…; /wc/home is the web client's landing page. Treating that as a
-  // meeting created an empty `…_zoom-home` session — which then shadowed the real meeting, because the brain
+  // meeting created an empty `…_zoom-home` session - which then shadowed the real meeting, because the brain
   // pins the newest transcript file.
   const ZOOM_MEETING_RE = /\/wc\/(\d{8,12})(?:\/|$)/;
   const NOISE_RE = /^(show captions|hide captions|captions|save|more|settings|napisy (są )?włączone|captions (are )?(enabled|on)|transkrypcja (jest )?włączona)$/i;
@@ -58,8 +58,8 @@
   // For comparing two ASR revisions of the same utterance: punctuation and case carry no signal there.
   const norm = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
-  // "Name: caption" heuristic — only treat the prefix as a speaker if it looks like a display name
-  // (1–4 capitalized words), never for ordinary prose that happens to contain a colon.
+  // "Name: caption" heuristic - only treat the prefix as a speaker if it looks like a display name
+  // (1-4 capitalized words), never for ordinary prose that happens to contain a colon.
   const NAME_WORD = /^[A-Z][\p{L}.'-]*$/u;
   const NOT_NAME = new Set(['actually', 'note', 'so', 'well', 'yeah', 'ok', 'okay', 'right', 'yes', 'no',
     'sorry', 'hmm', 'um', 'uh', 'and', 'but', 'because', 'also', 'anyway', 'basically', 'honestly', 'wait', 'look']);
@@ -78,7 +78,7 @@
   const seenChatEls = new WeakSet(); let chatTick = 0; // meeting-chat dedup (Zoom messages carry no stable id)
   let currentCode = null, regionSeenAt = 0, captureWarned = false, lineCount = 0, trackerId = 0, lastSpeaker = '';
   // Zoom attributes rows per PARTICIPANT, not per name: two people can share a display name (a second device
-  // joined as the same user) and are told apart only by the avatar — a photo <img src> vs a coloured letter.
+  // joined as the same user) and are told apart only by the avatar - a photo <img src> vs a coloured letter.
   // Key on both so they stay separate streams, and label the second one "Name (2)".
   // Caveat: if Zoom ever swaps one participant's avatar mid-call (photo fails to load), that person splits
   // into two labels. Conflating two speakers is the worse error, so this errs the other way.
@@ -181,14 +181,14 @@
         for (const el of blocksIn(region)) {
           const { speaker, text } = readBlock(el);
           // Zoom groups consecutive utterances of one person under a single name header (hence the row class
-          // "…__title--first"), so continuation rows carry no speaker — inherit the last one seen. Kept across
+          // "…__title--first"), so continuation rows carry no speaker - inherit the last one seen. Kept across
           // scans too: the virtualized list can scroll a continuation row into view before its header.
           if (speaker) lastSpeaker = speaker;
           const rowSpeaker = speaker || lastSpeaker;
           if (!text || NOISE_RE.test(text)) continue;
           let tr = trackers.find((t) => t.el === el);
           // The full-transcript list is React-virtualized: it recycles a row element for a different
-          // utterance. Reusing the tracker would reuse its line id, and the panel upserts by id — the new
+          // utterance. Reusing the tracker would reuse its line id, and the panel upserts by id - the new
           // utterance would overwrite the old line. A wholesale text replacement (not an ASR revision that
           // extends the text) means a recycled row, so retire the tracker and start a fresh id.
           // Is the new text a revision of the same utterance, or a recycled row? Compare punctuation- and
@@ -219,7 +219,7 @@
       }
     } else if (sttPaused) {
       // STT owns the transcript while it runs. Keep the watchdog quiet instead of leaving a stale
-      // "no captions" warning that can never clear — it looks exactly like broken capture.
+      // "no captions" warning that can never clear - it looks exactly like broken capture.
       regionSeenAt = now();
       if (captureWarned) { captureWarned = false; send({ type: 'capture-health', ok: true }); }
     }

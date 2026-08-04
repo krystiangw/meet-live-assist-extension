@@ -1,4 +1,4 @@
-// Service worker — ROUTER + SCHEDULER ONLY. Holds no load-bearing in-memory state:
+// Service worker - ROUTER + SCHEDULER ONLY. Holds no load-bearing in-memory state:
 // it may be torn down after ~30s idle / a 5-min cap. Durable state lives in chrome.storage.session;
 // the streaming/stateful work lives in the side-panel page (which survives SW death while open).
 //
@@ -23,7 +23,7 @@ chrome.alarms.onAlarm.addListener(async () => {
   refreshBadge();
   // Heal an orphaned content script even when the panel never reconnects. Reloading the extension leaves the
   // injected script dead in already-open tabs, and healing only on panel `hello` means a call joined before
-  // the reload never gets a session — capture then has no identity and the panel stays blank.
+  // the reload never gets a session - capture then has no identity and the panel stays blank.
   const { mla_session } = await chrome.storage.session.get('mla_session');
   if (!mla_session) { try { await ensureCapture(); } catch (_) {} }
 });
@@ -32,10 +32,10 @@ chrome.alarms.onAlarm.addListener(async () => {
 // panel and still see the session is live: no badge = idle, green = capturing, blue = an assistant
 // (brain) is attached. Capture itself runs in the content script + SW, independent of the panel.
 const BADGE = {
-  idle:   { text: '',  color: null,      title: 'Meet Live Assist — no active session (click to open)' },
-  live:   { text: '●', color: '#17935a', title: 'Meet Live Assist — capturing this meeting (click to open)' },
-  brain:  { text: '●', color: '#3b6ef0', title: 'Meet Live Assist — capturing · assistant attached (click to open)' },
-  paused: { text: '❙❙', color: '#b07a12', title: 'Meet Live Assist — PAUSED (capture + advice held; click to open)' },
+  idle:   { text: '',  color: null,      title: 'Meet Live Assist - no active session (click to open)' },
+  live:   { text: '●', color: '#17935a', title: 'Meet Live Assist - capturing this meeting (click to open)' },
+  brain:  { text: '●', color: '#3b6ef0', title: 'Meet Live Assist - capturing · assistant attached (click to open)' },
+  paused: { text: '❙❙', color: '#b07a12', title: 'Meet Live Assist - PAUSED (capture + advice held; click to open)' },
 };
 async function setActionState(state) {
   const c = BADGE[state] || BADGE.idle;
@@ -62,12 +62,12 @@ async function refreshBadge() {
     try {
       const r = await fetch(`${await getServerUrl()}/brain-ping?session=${encodeURIComponent(mla_session)}`, { headers: await authHeaders() });
       if (r.ok) { const j = await r.json(); brain = j.ageMs != null && j.ageMs < 45000; }
-    } catch (_) { /* server down — leave it as live */ }
+    } catch (_) { /* server down - leave it as live */ }
   }
   setActionState(brain ? 'brain' : 'live');
 }
 
-// A keyboard command counts as invoking the extension, so it grants activeTab on the Meet tab —
+// A keyboard command counts as invoking the extension, so it grants activeTab on the Meet tab -
 // which tabCapture requires (a side-panel click does not). This is the reliable way to START STT.
 chrome.commands.onCommand.addListener(async (cmd) => {
   if (cmd !== 'toggle-stt') return;
@@ -108,7 +108,7 @@ function tokenSim(a, b) {
   return i / (A.size + B.size - i);
 }
 async function persistCapFinal(msg) {
-  if (await isPaused()) return; // dropped during a hold — nothing recorded while paused
+  if (await isPaused()) return; // dropped during a hold - nothing recorded while paused
   const { session, buffer } = await loadState();
   const sess = msg.session || session;
   const { mla_commit, mla_recent, mla_committedLines, mla_rebaseline } = await chrome.storage.session.get(['mla_commit', 'mla_recent', 'mla_committedLines', 'mla_rebaseline']);
@@ -231,7 +231,7 @@ async function captureSnapshot(auto = false) {
   let tab = null;
   try { const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); tab = t || null; } catch (_) {}
   if (auto) {
-    // Auto-capture stays ON THE MEETING — never snapshot a private tab the user flips to mid-call.
+    // Auto-capture stays ON THE MEETING - never snapshot a private tab the user flips to mid-call.
     // Allowed: the Meet/Zoom tab (renders a remote share) and the "presented" tab (first non-meeting tab
     // seen during a share, i.e. the one being self-shared). Any other tab → skip. Manual 📷 / agent
     // requests below still capture whatever's visible.
@@ -298,7 +298,7 @@ async function startStt() {
   await ensureOffscreen();
   const { mla_lang } = await chrome.storage.session.get('mla_lang');
   // Never start recording without a session identity. Without this the chunk URL interpolated `undefined`,
-  // the server created an `undefined` transcript, and the panel — which had no session either — could not
+  // the server created an `undefined` transcript, and the panel - which had no session either - could not
   // show a single line of advice while an hour-long interview was being captured into that phantom file.
   const session = await resolveSession({ tab });
   const common = { session, lang: mla_lang || 'auto', serverUrl: await getServerUrl(), token: await getToken() };
@@ -310,7 +310,7 @@ async function startStt() {
   try { chrome.tabs.sendMessage(tab.id, { type: 'capture-mode', captions: false }, () => void chrome.runtime.lastError); } catch (_) {} // avoid dup transcript
 }
 // Heal an orphaned content script. Reloading the extension invalidates the injected script's context:
-// its chrome.* calls throw, `send()` swallows them, and it goes on scraping into the void — capture looks
+// its chrome.* calls throw, `send()` swallows them, and it goes on scraping into the void - capture looks
 // fine and delivers nothing (this silently killed a real meeting's transcript). Chrome does NOT re-inject
 // into already-open tabs, so probe each call tab and re-inject where nobody answers. Safe against double
 // capture: content.js keeps a generation counter and older instances stand down.
@@ -358,7 +358,7 @@ async function startCoPilot() {
   await chrome.storage.session.set({ mla_active: true, mla_paused: false }); // never inherit a stale pause
   setActionState('live');
   broadcast({ type: 'session', session, code: 'copilot' });
-  // Listen to the microphone (the user), transcribed locally — no Meet tab involved.
+  // Listen to the microphone (the user), transcribed locally - no Meet tab involved.
   await ensureOffscreen();
   chrome.runtime.sendMessage({ type: 'offscreen-start', source: 'mic', session, lang: 'auto', serverUrl: await getServerUrl(), token: await getToken() });
   await chrome.storage.session.set({ mla_stt_on: true });
@@ -391,6 +391,12 @@ async function postCallChatResult(seq, ok, reason) {
   } catch (_) {}
 }
 
+/* mla:pro-start
+   Everything to the pro-end marker acts ON a page rather than observing one: DOM edits, agent-driven
+   clicks, and network/console via chrome.debugger. `build.sh --public` strips this region and drops the
+   `debugger` permission, so the store build can claim one purpose (a meeting assistant that sees and
+   hears) instead of also being a remote control. Every call site lives in the one panel-port switch
+   below, marked the same way; nothing else references these functions. */
 // ---- presentation DOM edits on the shared (non-Meet) tab -----------------
 let lastAppTabId = null; // most recently focused http(s) tab that isn't Meet = the app being shared
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
@@ -428,7 +434,7 @@ async function captureDom() {
   } catch (_) {}
 }
 
-// These run in the SHARED page's context (serialized by executeScript — must be self-contained).
+// These run in the SHARED page's context (serialized by executeScript - must be self-contained).
 function pageApplyEdit(cmd) {
   const store = (window.__mlaEdits = window.__mlaEdits || { items: [] });
   const texts = (root) => {
@@ -542,7 +548,7 @@ const netBuf = [];   // { method, url, status, mime, type }
 const conBuf = [];   // { level, text }
 const netReq = new Map(); // requestId -> { method, url }
 
-// Guarded: `debugger` is an optional permission — the namespace may be inert until granted.
+// Guarded: `debugger` is an optional permission - the namespace may be inert until granted.
 if (chrome.debugger) chrome.debugger.onEvent.addListener((source, method, params) => {
   if (source.tabId !== dbgTabId) return;
   if (method === 'Network.requestWillBeSent') {
@@ -616,10 +622,11 @@ async function handleDebugDo(kind) {
   } catch (_) {}
   broadcast({ type: 'debug-done', kind });
 }
+// mla:pro-end
 
 // ---- content script -> SW ------------------------------------------------
 // Lines scraped in a child frame carry no session (only the top frame owns one). Resolve it here from the
-// sender tab's URL — if a session-less line reaches the server, it invents one per REQUEST
+// sender tab's URL - if a session-less line reaches the server, it invents one per REQUEST
 // (`meeting_<timestamp>`), so every single line became its own transcript file.
 async function resolveSession(sender) {
   const { mla_session } = await chrome.storage.session.get('mla_session');
@@ -704,7 +711,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     } else if (msg.type === 'stt-status') {
       broadcast({ type: 'stt', on: !!msg.on });
     } else if (msg.type === 'stt-error') {
-      // One source failing (typically a blocked mic) leaves the other recording — don't report STT as off,
+      // One source failing (typically a blocked mic) leaves the other recording - don't report STT as off,
       // or the panel would claim nothing is being captured while the remote side still is.
       broadcast({ type: 'stt', on: !msg.fatal, reason: msg.source ? `${msg.source}: ${msg.reason}` : msg.reason });
     }
@@ -754,6 +761,7 @@ chrome.runtime.onConnect.addListener((port) => {
       broadcast({ type: 'sharing', on: false });
     } else if (m.type === 'send-call-chat') {
       sendToCallChat(m.text, m.seq);
+    /* mla:pro-start */
     } else if (m.type === 'do-act') {
       handleAct(m.cmd);
     } else if (m.type === 'apply-edit') {
@@ -764,6 +772,7 @@ chrome.runtime.onConnect.addListener((port) => {
       if (m.on) attachDebugger(); else detachDebugger();
     } else if (m.type === 'debug-do') {
       handleDebugDo(m.kind);
+    /* mla:pro-end */
     }
     // 'ping' is a no-op: receiving it resets the SW idle timer (keep-alive).
   });

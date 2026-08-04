@@ -1,21 +1,21 @@
-# Meet Live Assist — Chrome extension
+# Meet Live Assist - Chrome extension
 
 Live Google Meet assistant. During a call it captures the transcript, shows it in a side panel,
 and (Path A) feeds the local transcript server so a Claude Code session with your context can
 advise you in real time.
 
-**Integration guide / landing page:** [`docs/index.html`](docs/index.html) — a self-contained page.
+**Integration guide / landing page:** [`docs/index.html`](docs/index.html) - a self-contained page.
 Hosted (public docs-only repo, so this code stays private): **https://krystiangw.github.io/meet-live-assist/**
 (source: `github.com/krystiangw/meet-live-assist`). It also opens fine locally (`open docs/index.html`).
 
-**This is a personal / dogfood tool**, distributed unpacked — not a public Chrome Web Store product.
+**This is a personal / dogfood tool**, distributed unpacked - not a public Chrome Web Store product.
 See `../agent/.../meet-live-assist-BUILD-PLAN.md` for the full plan and why.
 
 ## Status (v0.2)
 
 Working, dogfood. What it does now:
 
-- **Live transcript** — Meet captions scraped, streamed to the panel instantly, de-duplicated + monologue
+- **Live transcript** - Meet captions scraped, streamed to the panel instantly, de-duplicated + monologue
   forced-flush before hitting the file/brain, with a conservative ASR glossary.
 - **Colour-coded advice** from the brain (🟢SAY/🔵INFO/🟡SUMMARY/🟣EXPLAIN/🔴RISK/🟠ACTION), rich
   (links/images/diagrams/lists), each **copyable**; RISK fires an audible + notification cue.
@@ -47,13 +47,34 @@ presentation edits (`/edit`, `/dom*`), debug (`/debug*`), brain heartbeat (`/bra
 into `<transcripts>/.mla-token` on first start; **paste it into the extension Options once** (and the brain
 reads the same file). Without it any website you visit could reach the localhost server.
 
-**Two files per meeting.** `/append` writes every caption to `<session>.txt` — the complete record, nothing
-dropped — and only appends a batch to `<session>.wake` when the batch is worth waking the brain for
+**Two files per meeting.** `/append` writes every caption to `<session>.txt` - the complete record, nothing
+dropped - and only appends a batch to `<session>.wake` when the batch is worth waking the brain for
 (decisions, blockers, your name, real questions, accumulated substance). The skill tails `.wake`, not `.txt`:
-that is what keeps a 40-minute call from costing hundreds of brain turns. A held-back batch is never lost —
+that is what keeps a 40-minute call from costing hundreds of brain turns. A held-back batch is never lost -
 it rides along with the next wake, and a force-flush fires after `WAKE_FORCE_MS` regardless.
 
-### Stand up the server on a Mac
+### Stand up the server
+
+The server is published on its own as `meet-live-assist-server` (zero dependencies, `server/package.json`),
+so a user who only wants to run it needs neither this repo nor a clone:
+
+```bash
+npx meet-live-assist-server
+```
+
+It prints the auth token to paste into the extension Options, and writes to
+`~/meet-live-assist/transcripts` unless `TRANSCRIPTS_DIR` says otherwise. **Node 20+ is the only hard
+requirement**; `ffmpeg` and `whisper-cli` are optional and only local STT depends on them. Binary paths
+resolve from Homebrew, `/usr/local`, `/usr/bin` and then `PATH`, so Linux works as well as either Mac
+architecture. **Text-to-speech is macOS-only** (`say` + `afplay`); elsewhere advice still shows as text in
+the panel and only spoken output is missing. Details: [`server/README.md`](server/README.md).
+
+Publishing a new version is `cd server && npm publish` (check `npm pack --dry-run` first: it should be
+three files, ~25 kB).
+
+### Autostart it on a Mac (launchd)
+
+From a clone, if you want it to come back after a reboot:
 
 ```bash
 git clone https://github.com/krystiangw/meet-live-assist-extension.git
@@ -62,21 +83,21 @@ MLA_DRY_RUN=1 ./server/install-server.sh   # optional: see the plan + generated 
 ./server/install-server.sh                 # install as a launchd agent + start it
 ```
 
-It resolves the machine-specific bits itself (node binary via `process.execPath` — a bare `which node` under
+It resolves the machine-specific bits itself (node binary via `process.execPath` - a bare `which node` under
 fnm/nvm points at a per-shell shim that dies with the shell; Homebrew prefix for `ffmpeg`/`whisper-cli`, so
 Intel and Apple Silicon both work), writes `~/Library/LaunchAgents/com.mla.meet-transcript-server.plist`,
 waits for `/health`, then prints the auth token to paste into the extension Options.
 
 - **Only Node 20+ is required.** `ffmpeg` and `whisper-cli` are optional (`brew install ffmpeg whisper-cpp`);
-  without them the server still runs — TTS-into-the-call and local STT are the parts that go dark.
-- **Re-run it after `git pull`** — it is idempotent and restarts the service with the new code.
+  without them the server still runs - TTS-into-the-call and local STT are the parts that go dark.
+- **Re-run it after `git pull`** - it is idempotent and restarts the service with the new code.
 - Override defaults with env vars: `TRANSCRIPTS_DIR=~/mla PORT=8849 ./server/install-server.sh`.
-  Default transcripts dir is `~/meet-live-assist/transcripts`, deliberately **outside** the repo — meeting
+  Default transcripts dir is `~/meet-live-assist/transcripts`, deliberately **outside** the repo - meeting
   text and screenshots are PII and must not risk being committed.
 - The **brain** (the `meet-live-assist` skill) has the transcripts path baked in, so if you change
   `TRANSCRIPTS_DIR` update the skill to match, or the session will tail a directory nobody writes to.
 
-Manual run instead of launchd (handy for debugging — logs to your terminal, `Ctrl-C` stops it for real):
+Manual run instead of launchd (handy for debugging - logs to your terminal, `Ctrl-C` stops it for real):
 
 ```bash
 PORT=8899 TRANSCRIPTS_DIR=/tmp/mla node server/transcript-server.js
@@ -93,7 +114,7 @@ curl -s http://127.0.0.1:8899/health
 | restart | `launchctl kickstart -k gui/$UID/com.mla.meet-transcript-server` |
 | stop for real | `launchctl unload -w ~/Library/LaunchAgents/com.mla.meet-transcript-server.plist` |
 
-`KeepAlive` is on, so `kill`/`pkill` does **not** stop it — launchd restarts it within seconds (and you lose
+`KeepAlive` is on, so `kill`/`pkill` does **not** stop it - launchd restarts it within seconds (and you lose
 the in-memory wake buffer). ⚠ **Never restart it during a live call**: capture gaps, and the buffered batch
 dies with the process.
 
@@ -101,7 +122,7 @@ dies with the process.
 
 | var | default | what it does |
 | --- | --- | --- |
-| `PORT` | `8848` | the extension has host permission for `127.0.0.1:8848` — changing it needs a manifest change |
+| `PORT` | `8848` | the extension has host permission for `127.0.0.1:8848` - changing it needs a manifest change |
 | `TRANSCRIPTS_DIR` | `<server-dir>/../transcripts` | where transcripts, snapshots and `.mla-token` live |
 | `RETENTION_DAYS` | `14` | purge transcripts + snapshots older than this (`0` = keep forever) |
 | `WAKE_BASE_MS` / `WAKE_MAX_MS` | `10000` / `90000` | wake-gate backoff window: starts here, doubles on an empty batch up to the max |
@@ -110,19 +131,50 @@ dies with the process.
 | `WAKE_MIN_GAP_MS` | `8000` | floor between two wakes |
 | `FFMPEG` / `WHISPER_CLI` / `WHISPER_MODEL` / `TTS_VOICE` | Homebrew paths / `Zosia` | TTS + STT plumbing |
 
-**Two copies of the server exist on Krystian's machine.** `server/transcript-server.js` here is the
+**Two copies of the server exist on the author's machine.** `server/transcript-server.js` here is the
 version-controlled one; the live launchd service historically ran
-`~/projects/meet-live-assist/meet-transcript/transcript-server.js`, which is **not** in any repo. Keep
-them in sync, or re-run `install-server.sh` to repoint launchd at this repo copy and make it the only source.
+`~/projects/meet-live-assist/meet-transcript/transcript-server.js`, which is **not** in any repo. They are
+byte-identical as of 2026-08-04, but nothing enforces that - re-run `install-server.sh` to repoint launchd at
+this repo copy and make it the only source.
+
+## Two builds, and the skill that matches each
+
+`./build.sh` zips everything this repo can do. `./build.sh --public` produces the **store** zip: it drops the
+`debugger` permission and strips the surface that acts on pages (DOM edits, agent-driven clicks,
+network/console reads), leaving the assistant that only sees and hears. The store reviews for a single
+purpose, and the full build reads as a remote control. The cut is driven by `mla:pro-start` / `mla:pro-end`
+markers in `src/`; the build refuses to ship a dangling reference to anything it removed.
+
+The bundled skill is cut the same way and, more importantly, is a **template** - it addresses the user by
+name, answers in their language and pre-briefs against their domain, none of which can be hardcoded for
+someone else. `install.sh` fills it:
+
+```bash
+MLA_USER="Ada Lovelace" MLA_LANGUAGE=Polish MLA_DOMAIN="backend eng, payments" ./install.sh
+MLA_PRO=1 ./install.sh      # keep the page-control sections (pairs with the full build)
+```
+
+It refuses to run on the author's machine without `MLA_FORCE=1`, because there the destination is the
+canonical personal skill rather than a copy of the template.
+
+## Checks
+
+```bash
+npm run lint    # node --check over src/ and server/
+npm test        # boots the server on a throwaway port + dir, asserts the auth gate, the session guard,
+                # the append and advice round-trips, and that a traversing session name cannot escape
+```
+
+Both run in CI on every push, along with both builds.
 
 ## Load it (unpacked)
 
-1. Make sure the transcript server is running — `curl -s http://127.0.0.1:8848/health` → `{"ok":true,...}`.
+1. Make sure the transcript server is running - `curl -s http://127.0.0.1:8848/health` → `{"ok":true,...}`.
    On a fresh Mac install it first: `./server/install-server.sh` (see *Stand up the server on a Mac* above).
 2. `chrome://extensions` → enable **Developer mode** → **Load unpacked** → pick this folder.
 3. Pin the extension; click its toolbar icon to open the side panel.
 4. Right-click the icon → **Options** → paste the **server token** (`cat <TRANSCRIPTS_DIR>/.mla-token`; the
-   installer prints it, and it is per-machine — a token from another Mac will be rejected).
+   installer prints it, and it is per-machine - a token from another Mac will be rejected).
    Optionally set TTS voices and your name(s) (for mention alerts). The panel's ⚙ shows a setup checklist.
 5. Disable the old Tampermonkey userscript to avoid double-capture.
 
@@ -131,11 +183,11 @@ them in sync, or re-run `install-server.sh` to repoint launchd at this repo copy
 - [ ] Join a real Meet call → within a few seconds the side panel shows `capturing` and live lines.
 - [ ] `server ✓` shows green; the transcript file under `meet-live-assist/transcripts/` grows.
 - [ ] **SW-death resilience:** open `chrome://serviceworker-internals` (or just wait), let the SW go
-      idle / click "Stop" on the extension's SW, keep talking — capture resumes and the panel
+      idle / click "Stop" on the extension's SW, keep talking - capture resumes and the panel
       re-hydrates without a reload. Verify a **10-minute** call captures end-to-end with no gaps.
 - [ ] Leave the call → panel shows `call ended`.
 
-## Phase 1 (in progress) — advice + visual context
+## Phase 1 (in progress) - advice + visual context
 
 Brain = a Claude Code session (subscription, no API key) via the `meet-live-assist` skill.
 
@@ -145,27 +197,27 @@ Brain = a Claude Code session (subscription, no API key) via the `meet-live-assi
 - **Visual context:** the extension captures the Meet tab (periodic, default 60s, + the panel's 📷 button)
   and POSTs it (`POST /snapshot`); frames are saved to `meet-live-assist/transcripts/snapshots/<session>/` (~40 kept)
   for the brain to Read on demand.
-- Agentic actions (Tier1/Tier2, drafts-only) stay in the session/call per the skill — the panel is display-only.
+- Agentic actions (Tier1/Tier2, drafts-only) stay in the session/call per the skill - the panel is display-only.
 
 ### Permissions
 The `<all_urls>` host is **optional**, requested at runtime on a user gesture (starting co-pilot, turning on
 🐞 Debug, or the setup checklist's *Grant* button), so the host prompt stays limited to **Meet + Zoom +
-localhost**. `debugger` stays a **required** permission — Chrome forbids listing it as optional — so it's in
+localhost**. `debugger` stays a **required** permission - Chrome forbids listing it as optional - so it's in
 the install prompt (heavier review; a public build can drop it, the code degrades gracefully). Token auth
 closes the "any website can drive the localhost server" hole. Build the store zip with `./build.sh`
 (→ `dist/`, extension files only). Full listing + justifications: `STORE.md`.
 
-> Reloading an already-installed copy will drop the now-optional `<all_urls>` grant — re-grant once from the
+> Reloading an already-installed copy will drop the now-optional `<all_urls>` grant - re-grant once from the
 > panel (co-pilot / 🐞 / ⚙ setup → Grant).
 
 ## Roadmap
 
-- **Mute-aware mic capture** (deferred 2026-07-28 — idea worth keeping). Muting yourself in Zoom does not stop
+- **Mute-aware mic capture** (deferred 2026-07-28 - idea worth keeping). Muting yourself in Zoom does not stop
   the OS microphone, so the `mic` STT channel keeps recording asides nobody in the call heard, and the brain
-  treats them as things you said in the meeting. Don't drop them — **label them** `You (muted):` so muting
+  treats them as things you said in the meeting. Don't drop them - **label them** `You (muted):` so muting
   becomes a deliberate private voice channel to the assistant (still authorizes actions; never quotable as
   something said to the room). Open question is only how to read the state: the toolbar button is localized
-  ("Wyłącz wyciszenie" / "Unmute"), so it needs a state attribute or an icon class, not a text match — the same
+  ("Wyłącz wyciszenie" / "Unmute"), so it needs a state attribute or an icon class, not a text match - the same
   fragility that already bit the caption selectors.
 
 - **Auth north-star (product):** user authorizes a provider (Claude, later ChatGPT) in the extension's

@@ -1,0 +1,26 @@
+{
+  "name": "meet-live-assist-server",
+  "version": "0.3.0",
+  "description": "Local bridge server for the Meet Live Assist browser extension: transcript sink, advice channel, action-item board, snapshots, local STT and TTS. Zero dependencies, binds to 127.0.0.1 only.",
+  "keywords": ["meet", "zoom", "transcript", "meeting", "assistant", "localhost"],
+  "homepage": "https://krystiangw.github.io/meet-live-assist/",
+  "bin": {
+    "meet-live-assist-server": "transcript-server.js"
+  },
+  "main": "transcript-server.js",
+  "files": [
+    "transcript-server.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "scripts": {
+    "start": "node transcript-server.js"
+  }
+}

@@ -1,6 +1,6 @@
-// Side panel — primary live UI. This page persists while open, so it (not the SW) owns any
+// Side panel - primary live UI. This page persists while open, so it (not the SW) owns any
 // long-lived state/streaming. Renders live transcript (via the SW port) + live advice (polled
-// straight from the transcript server's /advice channel — the "brain" POSTs advice there).
+// straight from the transcript server's /advice channel - the "brain" POSTs advice there).
 
 const logEl = document.getElementById('log');
 const adviceEl = document.getElementById('advice');
@@ -23,14 +23,16 @@ const chatInput = document.getElementById('chatInput');
 const cmdMenu = document.getElementById('cmdMenu');
 const sttToggle = document.getElementById('sttToggle');
 const sttEl = document.getElementById('sttStatus');
+/* mla:pro-start */
 const editEl = document.getElementById('editStatus');
 const dbgToggle = document.getElementById('dbgToggle');
 const dbgEl = document.getElementById('dbgStatus');
+/* mla:pro-end */
 const modeSel = document.getElementById('modeSel');
 
 const MARKER_LABEL = { SAY: '🟢 SAY', INFO: '🔵 INFO', SUMMARY: '🟡 SUMMARY', EXPLAIN: '🟣 EXPLAIN', RISK: '🔴 RISK', ACTION: '🟠 ACTION' };
 const MARKER_TIP = {
-  SAY: 'Say this out loud now — ready-to-speak words (🔊 voice it, 📋 copy)',
+  SAY: 'Say this out loud now - ready-to-speak words (🔊 voice it, 📋 copy)',
   INFO: 'A fact, number, link or name from your context',
   SUMMARY: 'Where the discussion is / what was just decided',
   EXPLAIN: 'A short explanation of a term or the “why”',
@@ -71,11 +73,17 @@ function setStatus(el, text, cls) { el.textContent = text; el.className = 'statu
 async function pollServerHealth() {
   if (Date.now() - lastAuthWarnAt < 20000) return;
   try {
-    // Poll a token-guarded route, NOT /health (which is unauthenticated and always 200) — so the pill
-    // reflects auth too: a wrong/missing token shows the token warning instead of a misleading ✓.
-    const r = await fetch(`${serverUrl}/brain-ping?session=${encodeURIComponent(currentSession || 'none')}`, { headers: hdrs() });
-    if (r.status === 403) { lastAuthWarnAt = Date.now(); setStatus(srvEl, 'server ✗ (set token in options)', 'bad'); return; }
-    setStatus(srvEl, r.ok ? 'server ✓' : 'server ✗ (start it)', r.ok ? 'ok' : 'bad');
+    // /auth-check answers 200 with {authed}, so the pill reflects auth as well as reachability without a
+    // failed request per poll. It used to probe a token-guarded route and read the 403; the pill was right,
+    // but every poll before the token was pasted logged a console error on a fresh install.
+    const r = await fetch(`${serverUrl}/auth-check`, { headers: hdrs() });
+    // A server older than this route is running fine, it just cannot answer. Saying "start it" there would
+    // send the user chasing a process that is already up.
+    if (r.status === 404) { setStatus(srvEl, 'server ✓ (restart to update)', 'ok'); return; }
+    if (!r.ok) { setStatus(srvEl, 'server ✗ (start it)', 'bad'); return; }
+    const { authed } = await r.json();
+    if (!authed) { lastAuthWarnAt = Date.now(); setStatus(srvEl, 'server ✗ (set token in options)', 'bad'); return; }
+    setStatus(srvEl, 'server ✓', 'ok');
   } catch (_) {
     setStatus(srvEl, 'server ✗ (start it)', 'bad');
   }
@@ -102,15 +110,22 @@ function resetSnap() { lastSnapAt = 0; lastSnapCount = null; snapErrUntil = 0; s
 setInterval(renderSnapAge, 1000);
 function hdrs(json) { const h = { 'X-MLA-Token': serverToken }; if (json) h['Content-Type'] = 'application/json'; return h; }
 
-// Optional permissions (debugger + all-sites host) are requested at runtime on a user gesture — kept out
+// Optional permissions (debugger + all-sites host) are requested at runtime on a user gesture - kept out
 // of the install-time prompt for a cleaner Web Store listing.
 const ALL_URLS = { origins: ['<all_urls>'] };
 async function ensurePerms(perms) {
-  // request() resolves true immediately if already held (no prompt), so no contains() pre-check — that
+  // request() resolves true immediately if already held (no prompt), so no contains() pre-check - that
   // extra await could otherwise consume the gesture's transient activation before the prompt shows.
   try { return await chrome.permissions.request(perms); }
   catch (_) { return false; }
 }
+
+// Seams for the page-control / live-debugging surface, which `build.sh --public` strips (see the
+// mla:pro markers). Shared code calls these three and never the pro functions directly, so stripping
+// leaves working no-ops instead of dangling references and needs no build-time flag.
+let pollPro = () => {};
+let loadPro = () => {};
+let resetPro = () => {};
 
 // Urgent cue on 🔴 RISK: a short beep + a system notification (the panel may be hidden mid-call).
 let cueArmed = false; // stays off briefly after (re)connect so backfilled advice doesn't blast
@@ -125,7 +140,7 @@ function riskCue(text) {
     o.start(); o.stop(ctx.currentTime + 0.36);
     setTimeout(() => { try { ctx.close(); } catch (_) {} }, 600);
   } catch (_) {}
-  try { chrome.notifications.create({ type: 'basic', iconUrl: 'icons/icon48.png', title: 'Meet Live Assist — RISK', message: String(text || '').slice(0, 180) }); } catch (_) {}
+  try { chrome.notifications.create({ type: 'basic', iconUrl: 'icons/icon48.png', title: 'Meet Live Assist - RISK', message: String(text || '').slice(0, 180) }); } catch (_) {}
 }
 
 // ---- transcript ----------------------------------------------------------
@@ -141,7 +156,7 @@ function renderLine(el, ts, speaker, text, final) {
   if (speaker) { const w = document.createElement('span'); w.className = 'who'; w.textContent = speaker + ': '; el.append(w); }
   linkify(el, text);
 }
-// Same utterance if the two texts share a substantial leading chunk — tolerant of ASR revising later words
+// Same utterance if the two texts share a substantial leading chunk - tolerant of ASR revising later words
 // (e.g. "…TG site cream" → "…TG site. Creamier"), which a strict prefix check would wrongly split.
 function sameUtterance(a, b) {
   a = (a || '').trim(); b = (b || '').trim();
@@ -216,7 +231,7 @@ function appendLine({ ts, speaker, text }) {
 }
 
 // ---- advice --------------------------------------------------------------
-// Safe inline rich rendering — no innerHTML. Supports bare URLs, [text](url), ![alt](url) images,
+// Safe inline rich rendering - no innerHTML. Supports bare URLs, [text](url), ![alt](url) images,
 // **bold**, and `code`. Everything else stays literal text.
 // Jira ticket keys (e.g. PROJ-529) become links to the configured Jira. Deny common non-Jira tokens
 // that look like keys (UTF-8, GPT-4, SHA-256, …) so they aren't wrongly linked.
@@ -369,10 +384,10 @@ function findSimilarCard(container, sel, text, min = 0.5) {
 function updatedBadge(n) {
   const u = document.createElement('span'); u.className = 'upd-badge';
   u.textContent = n > 1 ? `✎ updated ×${n}` : '✎ updated';
-  u.title = `Refined during the call${n > 1 ? ` (${n}×)` : ''} — replaces an earlier, similar suggestion`;
+  u.title = `Refined during the call${n > 1 ? ` (${n}×)` : ''} - replaces an earlier, similar suggestion`;
   return u;
 }
-// Filtering a single card is pointless — only surface the search box once there's something to sift.
+// Filtering a single card is pointless - only surface the search box once there's something to sift.
 function toggleSearch(inputId, container, sel, clearFilter) {
   const el = document.getElementById(inputId);
   const show = container.querySelectorAll(sel).length > 1;
@@ -476,7 +491,7 @@ async function speak(text, btn) {
 function resetAdvice() { adviceEl.innerHTML = '<div class="empty small">Suggestions will appear here live…</div>'; hasAdvice = false; lastAdviceSeq = 0; syncSearchVisibility(); }
 
 // Server seq only grows within one server lifetime; if `last` comes back BELOW our cursor the transcript
-// server restarted (its in-memory queue reset to 0). Resync from 0 so we don't miss the fresh queue —
+// server restarted (its in-memory queue reset to 0). Resync from 0 so we don't miss the fresh queue -
 // otherwise Math.max would pin the stale-high cursor and drop every post-restart message.
 function nextSeq(cur, last) {
   if (typeof last !== 'number') return cur;
@@ -488,7 +503,7 @@ function setBrainEmpty(live) {
   if (hasAdvice) return;
   const e = adviceEl.querySelector('.empty');
   if (e) e.textContent = live ? 'Advice will appear here live…'
-    : 'No assistant attached — run your Claude session with the meet-live-assist skill.';
+    : 'No assistant attached - run your Claude session with the meet-live-assist skill.';
 }
 
 async function pollBrain() {
@@ -504,7 +519,7 @@ async function pollBrain() {
     // Show a live "working…" bubble while the agent is mid-action; stale (>30s) = drop it (crash guard).
     setBrainWork(live && status && statusAgeMs != null && statusAgeMs < 30000 ? status : '');
     renderTokenEst(estTokens);
-  } catch (_) { setBrainWork(''); /* server down — srv pill already reflects it */ }
+  } catch (_) { setBrainWork(''); /* server down - srv pill already reflects it */ }
 }
 
 // A single, reused typing/working indicator pinned to the bottom of the Chat section.
@@ -547,7 +562,7 @@ async function pollAdvice() {
     const { items, last } = await r.json();
     (items || []).forEach(appendAdvice);
     lastAdviceSeq = nextSeq(lastAdviceSeq, last);
-  } catch (_) { /* server down — transcript-side status already reflects it */ }
+  } catch (_) { /* server down - transcript-side status already reflects it */ }
 }
 
 async function pollSnapRequest() {
@@ -595,7 +610,7 @@ function appendItem({ kind, text, owner, blockedBy }) {
   if (!decision) {
     const j = document.createElement('button'); j.className = 'jira'; j.textContent = 'Draft Jira';
     j.title = 'Ask the assistant to draft a Jira ticket for this (draft only)';
-    j.addEventListener('click', () => sendChat(`Draft a Jira ticket (DRAFT only — do not create) for this action item: "${text}"${owner ? ` — owner ${owner}` : ''}. Use the team's Goal / Summary / Test plan sections.`));
+    j.addEventListener('click', () => sendChat(`Draft a Jira ticket (DRAFT only - do not create) for this action item: "${text}"${owner ? ` - owner ${owner}` : ''}. Use the team's Goal / Summary / Test plan sections.`));
     div.append(j);
   }
   div.append(iconBtn('✕', 'Remove this item', () => { div.remove(); syncSearchVisibility(); }));
@@ -653,7 +668,8 @@ async function pollCallChat() {
   } catch (_) {}
 }
 
-// ---- agent-driven page actions (flow testing) — opt-in "drive" ----
+/* mla:pro-start */
+// ---- agent-driven page actions (flow testing) - opt-in "drive" ----
 const driveBtn = document.getElementById('driveBtn');
 const driveBar = document.getElementById('driveBar');
 let driveOn = false;
@@ -687,6 +703,9 @@ async function pollActs() {
     if (typeof last === 'number') lastActSeq = Math.max(lastActSeq, last);
   } catch (_) {}
 }
+resetPro = () => setDrive(false);
+loadPro = () => loadDrive();
+/* mla:pro-end */
 
 // ---- chat ----------------------------------------------------------------
 function appendChat({ role, text, image }) {
@@ -746,7 +765,7 @@ const COMMANDS = [
   { name: '/ask', aliases: [], arg: '<question>', desc: 'Ask the assistant', run: (argText) => sendChat(argText) },
   {
     name: '/recap', aliases: [], arg: null, desc: 'Quick recap so far',
-    run: () => sendChat('Quick recap of the discussion so far, please — 3 bullets max.'),
+    run: () => sendChat('Quick recap of the discussion so far, please - 3 bullets max.'),
   },
   {
     name: '/explain', aliases: [], arg: '<term>', desc: 'Explain a term/decision',
@@ -754,7 +773,7 @@ const COMMANDS = [
   },
   {
     name: '/draft', aliases: [], arg: '<action item>', desc: 'Draft a Jira ticket (DRAFT only)',
-    run: (argText) => sendChat('Draft a Jira ticket (DRAFT only — do not create) for this action item: "' + argText + '". Use the team\'s Goal / Summary / Test plan sections.'),
+    run: (argText) => sendChat('Draft a Jira ticket (DRAFT only - do not create) for this action item: "' + argText + '". Use the team\'s Goal / Summary / Test plan sections.'),
   },
 ];
 let cmdMatches = [];
@@ -862,6 +881,7 @@ function setSharing(on) {
   }
 }
 
+/* mla:pro-start */
 async function pollEdits() {
   if (!currentSession) return;
   try {
@@ -903,12 +923,14 @@ dbgToggle.addEventListener('change', async () => {
   try { port.postMessage({ type: 'debug-toggle', on: dbgToggle.checked }); } catch (_) {}
   dbgEl.hidden = false; setStatus(dbgEl, dbgToggle.checked ? '🐞 attaching…' : '🐞 off', 'idle');
 });
+pollPro = () => { pollActs(); pollEdits(); pollDomRequest(); pollDebugRequest(); };
+/* mla:pro-end */
 
 function startPolling() {
   clearInterval(pollTimer);
-  pollTimer = setInterval(() => { pollAdvice(); pollItems(); pollCallChat(); pollActs(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); pollDebugRequest(); }, 1500);
+  pollTimer = setInterval(() => { pollAdvice(); pollItems(); pollCallChat(); pollSnapRequest(); pollChat(); pollPro(); }, 1500);
   clearInterval(brainTimer);
-  brainTimer = setInterval(pollBrain, 5000); // liveness is coarse — no need to poll it fast
+  brainTimer = setInterval(pollBrain, 5000); // liveness is coarse - no need to poll it fast
 }
 
 // ---- SW port (transcript + status) ---------------------------------------
@@ -958,27 +980,29 @@ function onMessage(msg) {
       setStatus(capEl, 'ended', 'idle');
       setSharing(false);
       copilotOn = false; copilotBtn.classList.remove('on');
-      setDrive(false);
+      resetPro();
       setPausedUI(false);
       break;
     case 'paused':
       setPausedUI(!!msg.on);
       break;
+    /* mla:pro-start */
     case 'act': {
       const el = document.getElementById('actStatus'); el.hidden = false;
       setStatus(el, msg.ok ? `🕹 ${msg.op} ✓` : `🕹 ${msg.op} ✗ ${msg.reason || ''}`.trim(), msg.ok ? 'ok' : 'bad');
       setTimeout(() => { el.hidden = true; }, 3000);
       break;
     }
+    /* mla:pro-end */
     // Result of the SW's liveness probe (sent on panel open, and on demand). Without this the panel just
-    // said "idle" while an orphaned content script scraped into the void — no way to tell from the UI.
+    // said "idle" while an orphaned content script scraped into the void - no way to tell from the UI.
     case 'capture-probe':
       if (msg.ok && msg.healed) setStatus(capEl, 'capture restored', 'ok');
       else if (!msg.ok && msg.reason === 'no call tab') setStatus(capEl, 'no Meet/Zoom tab', 'idle');
       else if (!msg.ok) setStatus(capEl, `⚠ capture: ${msg.reason}`, 'bad');
       break;
     case 'capture-health':
-      if (!msg.ok) setStatus(capEl, '⚠ no captions — turn on CC / check language', 'bad');
+      if (!msg.ok) setStatus(capEl, '⚠ no captions - turn on CC / check language', 'bad');
       else setStatus(capEl, 'capturing', 'ok');
       break;
     case 'sharing':
@@ -994,14 +1018,15 @@ function onMessage(msg) {
     case 'snapshot':
       if (msg.ok) { snapErrUntil = 0; snapEl.onclick = null; snapEl.style.cursor = ''; lastSnapAt = Date.now(); shareFlashUntil = lastSnapAt + 1200; if (msg.count != null) lastSnapCount = msg.count; renderSnapAge(); }
       else if (msg.perm) {
-        // Capturing an arbitrary shared tab needs All-sites — offer a one-click grant (a panel click is a gesture).
+        // Capturing an arbitrary shared tab needs All-sites - offer a one-click grant (a panel click is a gesture).
         snapErrUntil = Date.now() + 60000;
         setStatus(snapEl, '📷 grant screen access', 'bad');
-        snapEl.title = 'Snapshots need All-sites access for the shared tab — click to grant';
+        snapEl.title = 'Snapshots need All-sites access for the shared tab - click to grant';
         snapEl.style.cursor = 'pointer';
         snapEl.onclick = async () => { if (await ensurePerms(ALL_URLS)) { snapEl.onclick = null; snapEl.style.cursor = ''; snapErrUntil = 0; requestCapture(false); } };
       } else { snapErrUntil = Date.now() + 4000; setStatus(snapEl, `shot ✗ ${msg.reason || ''}`.trim(), 'bad'); }
       break;
+    /* mla:pro-start */
     case 'debug':
       dbgEl.hidden = false;
       if (msg.on) { setStatus(dbgEl, '🐞 debugging', 'ok'); dbgToggle.checked = true; }
@@ -1021,6 +1046,7 @@ function onMessage(msg) {
       } else setStatus(editEl, `✏ ✗ ${msg.reason || 'no match'}`, 'bad');
       setTimeout(() => { editEl.hidden = true; }, 3000);
       break;
+    /* mla:pro-end */
     case 'stt':
       sttEl.hidden = false;
       if (msg.on) { setStatus(sttEl, '🎧 listening', 'ok'); sttToggle.checked = true; }
@@ -1057,8 +1083,8 @@ function setPausedUI(on) {
   pauseBtn.textContent = paused ? '⏵' : '⏸';
   pauseBtn.classList.toggle('on', paused);
   pauseBtn.title = paused
-    ? 'Resume — restart capture & advice'
-    : 'Pause — hold capture & advice; nothing is recorded until you resume';
+    ? 'Resume - restart capture & advice'
+    : 'Pause - hold capture & advice; nothing is recorded until you resume';
   if (paused) setStatus(capEl, '⏸ paused', 'idle');
   else if (currentSession) setStatus(capEl, copilotOn ? 'co-pilot' : 'capturing', 'ok');
 }
@@ -1067,7 +1093,7 @@ async function postControl(state) {
   try { await fetch(`${serverUrl}/control`, { method: 'POST', headers: hdrs(true), body: JSON.stringify({ session: currentSession, state }) }); } catch (_) {}
 }
 // Full pause/stop behavior lives here so both the buttons and the /pause,/resume,/stop
-// slash commands apply it identically — postControl alone only notifies the server/brain,
+// slash commands apply it identically - postControl alone only notifies the server/brain,
 // it does NOT tell the SW to actually drop captures or update the pause UI.
 function applyPause(next) {
   if (!currentSession) return;
@@ -1077,7 +1103,7 @@ function applyPause(next) {
 }
 function applyStop() {
   if (!currentSession) return;
-  if (!confirm('End this session? The assistant wraps up and stops capturing. Data is kept — use 🗑 to wipe.')) return;
+  if (!confirm('End this session? The assistant wraps up and stops capturing. Data is kept - use 🗑 to wipe.')) return;
   postControl('stopped');
   try { port.postMessage({ type: 'session-stop' }); } catch (_) {}
   setPausedUI(false);
@@ -1109,7 +1135,7 @@ document.getElementById('ctxBtn').addEventListener('click', async () => {
 // ---- setup / health checklist --------------------------------------------
 const setupEl = document.getElementById('setup');
 let autoSetupShown = false;
-// One compact row of status chips (icon + ✓/✗), full text in the tooltip — instead of six full lines.
+// One compact row of status chips (icon + ✓/✗), full text in the tooltip - instead of six full lines.
 function renderSetup(h, allSites) {
   const t = (h && h.tools) || {};
   const checks = [
@@ -1125,7 +1151,7 @@ function renderSetup(h, allSites) {
   for (const [icon, name, ok, hint] of checks) {
     const c = document.createElement('span'); c.className = 'chk ' + (ok ? 'ok' : 'bad');
     c.textContent = `${icon} ${ok ? '✓' : '✗'}`;
-    c.title = ok ? name : `${name} — ${hint}`;
+    c.title = ok ? name : `${name} - ${hint}`;
     row.appendChild(c);
   }
   if (!allSites) {
@@ -1167,7 +1193,7 @@ async function doSummary() {
     if (!r.ok) return;
     const { text } = await r.json();
     if (text && text.trim()) { appendChat({ role: 'agent', text }); downloadText(`${currentSession}.summary.md`, text); }
-    else { appendChat({ role: 'agent', text: '_No summary yet — ask the assistant to wrap up, or it writes one when the call ends._' }); }
+    else { appendChat({ role: 'agent', text: '_No summary yet - ask the assistant to wrap up, or it writes one when the call ends._' }); }
   } catch (_) {}
 }
 document.getElementById('summaryBtn').addEventListener('click', doSummary);
@@ -1200,12 +1226,12 @@ modeSel.addEventListener('change', () => { chrome.storage.local.set({ mla_mode: 
 function setSession(session) {
   if (session && session !== currentSession) {
     currentSession = session; lastAdviceSeq = 0; lastItemsSeq = 0; lastReqSeq = -1; lastChatSeq = 0; lastEditSeq = -1; lastDomReqSeq = -1; lastDbgReqSeq = -1; lastCallChatSeq = -1; lastActSeq = -1;
-    chatEl.innerHTML = ''; brainWorkEl = null; resetItems(); resetTalk(); resetSnap(); setDrive(false);
+    chatEl.innerHTML = ''; brainWorkEl = null; resetItems(); resetTalk(); resetSnap(); resetPro();
     setStatus(brainEl, '🧠 ?', 'idle');
     cueArmed = false; setTimeout(() => { cueArmed = true; }, 2500); // don't cue on initial backfill
     postMode(modeSel.value); // register the current mode for the new session
-    loadAutopilot(); loadDrive(); // sync toggles to this session's stored state
-    pollAdvice(); pollItems(); pollCallChat(); pollActs(); pollSnapRequest(); pollChat(); pollEdits(); pollDomRequest(); pollDebugRequest(); pollBrain();
+    loadAutopilot(); loadPro(); // sync toggles to this session's stored state
+    pollAdvice(); pollItems(); pollCallChat(); pollSnapRequest(); pollChat(); pollPro(); pollBrain();
   }
 }
 
@@ -1217,7 +1243,7 @@ function connect() {
   pingTimer = setInterval(() => { try { port.postMessage({ type: 'ping' }); } catch (_) {} }, 20000);
   port.onDisconnect.addListener(() => {
     clearInterval(pingTimer);
-    setTimeout(connect, 1000); // SW recycled — reconnect and re-hydrate
+    setTimeout(connect, 1000); // SW recycled - reconnect and re-hydrate
   });
 }
 
@@ -1235,7 +1261,7 @@ chrome.storage.local.get(['serverUrl', 'ttsVoicePl', 'ttsVoiceEn', 'mla_mode', '
 
 // Capture watchdog: if no session appears shortly after the panel opens, the content script is missing or
 // orphaned (a reloaded extension is never re-injected into open tabs). Ask the SW to re-probe, then say
-// plainly what to do — a silent "idle" pill cost us a whole meeting's transcript.
+// plainly what to do - a silent "idle" pill cost us a whole meeting's transcript.
 let captureRetried = false;
 setTimeout(function checkCapture() {
   if (currentSession) return;
@@ -1245,13 +1271,18 @@ setTimeout(function checkCapture() {
     setTimeout(checkCapture, 6000);
     return;
   }
-  if (!currentSession) setStatus(capEl, '⚠ no capture — reload the Meet tab (⌘R)', 'bad');
+  if (!currentSession) setStatus(capEl, '⚠ no capture - reload the Meet tab (⌘R)', 'bad');
 }, 8000);
 });
 // Pick up token / names edited in options without reopening the panel.
 chrome.storage.onChanged.addListener((ch, area) => {
   if (area !== 'local') return;
-  if (ch.mla_token) serverToken = ch.mla_token.newValue || '';
+  if (ch.mla_token) {
+    serverToken = ch.mla_token.newValue || '';
+    // Re-render the checklist, or the 🔑 chip stays ✗ until the next health poll. On a first install the
+    // token is always pasted after the panel is already open, so the chip contradicted a working setup.
+    fetchHealth();
+  }
   if (ch.mla_names) buildNameRe(ch.mla_names.newValue);
 });
 connect();

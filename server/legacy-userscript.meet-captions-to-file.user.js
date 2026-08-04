@@ -2,7 +2,7 @@
 // @name         Google Meet Captions → local transcript (auto)
 // @namespace    mla.local.meet
 // @version      2.1.0
-// @description  Fully automatic: auto-enables Meet captions, auto-captures them (no clicks), tags the speaker, and streams each line to a tiny local server that writes <meet-live-assist>/transcripts/<date_time_meeting>.txt — tailable live.
+// @description  Fully automatic: auto-enables Meet captions, auto-captures them (no clicks), tags the speaker, and streams each line to a tiny local server that writes <meet-live-assist>/transcripts/<date_time_meeting>.txt - tailable live.
 // @match        https://meet.google.com/*
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
@@ -12,7 +12,7 @@
 
 /*
  * Pairs with transcript-server.js (run that once; see README).
- * No buttons to click per meeting — it starts itself when you're in a call.
+ * No buttons to click per meeting - it starts itself when you're in a call.
  *
  * IF CAPTURE BREAKS: Google periodically renames the caption CSS classes / jsname.
  * Update the SEL block below (DevTools → inspect the caption area → copy new class names).
@@ -108,7 +108,7 @@
   function flush(tr) {
     const text = (tr.text || '').trim();
     if (!text || text === tr.flushed) return;
-    // Meet keeps a growing rolling caption per speaker — write only the NEW part, not the whole thing again.
+    // Meet keeps a growing rolling caption per speaker - write only the NEW part, not the whole thing again.
     let out = text;
     if (tr.flushed && text.startsWith(tr.flushed)) out = text.slice(tr.flushed.length).trim();
     tr.flushed = text;
