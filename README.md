@@ -198,7 +198,7 @@ canonical personal skill rather than a copy of the template.
 
 ```bash
 npm run lint            # node --check over src/ and server/
-npm test                # all five suites below, ~196 checks
+npm test                # all five suites below, ~215 checks
 npm run test:server     # auth gate, session guard, round-trips, restart survival
 npm run test:panel      # every request sidepanel.js makes, replayed without a browser
 npm run test:mcp        # the MCP adapter over stdio JSON-RPC

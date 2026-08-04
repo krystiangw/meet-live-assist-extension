@@ -79,6 +79,29 @@ Twelve more defects, each reproduced before being fixed. The ones that would hav
   from the `undefined` incident, since in that scenario the transcript is going to the wrong file.
 - A session line count lost the last line of a file with no trailing newline.
 
+### A third review, of the second review's fixes
+
+Fixing twelve things introduced eleven more, which is the argument for reviewing fixes rather than only
+features. Four of them were in the wake loop, the one component that can start an assistant's turn: it read
+the token from the file only when the environment did *not* have one (exactly backwards - the loop runs in a
+shell that does not inherit this process's environment), reported an unreachable server every two seconds
+instead of backing off, told a rejected token apart from real content by matching the body against
+`forbidden*` (which also matches a transcript line starting with that word, and swallowed it), and left the
+token path unquoted so a data dir with a space in it produced a false "paste the token again".
+
+The rest were in the read positions the second review had just split apart. `seed` was honoured only when
+creating a position, so a re-attach fell through to a real read and ate the batch the loop had not collected.
+Eviction protected recently-seen readers, which is backwards - forty one-shot readers are all newer than a
+wake loop - so it evicted exactly the reader whose place must not be lost; it now goes by how established a
+reader is. A fresh reader's chat position still started at zero, so its first poll returned every question the
+user had typed all meeting. And `/transcript` returned an empty string when the newest line alone exceeded the
+cap, making that content unreachable by any tail.
+
+The review also demonstrated that **four of the previous round's fixes had tests that passed for unrelated
+reasons** - including the headline one, which no test touched at all because every adapter in the suite was
+handed both environment variables and so never ran the discovery path. Each now has a check that fails when
+the fix is reverted.
+
 ### Fixes
 
 - A retention sweep could wipe the state of the meeting happening right now: one leftover `.mode.txt` past the
@@ -94,7 +117,7 @@ Twelve more defects, each reproduced before being fixed. The ones that would hav
 
 ### Tests
 
-`npm test` is now five suites, ~196 checks: the server contract, **the panel's own request cycle replayed
+`npm test` is now five suites, ~215 checks: the server contract, **the panel's own request cycle replayed
 without a browser**, the MCP adapter over stdio, **the size caps with non-ASCII text**, and retention plus
 cross-meeting leaks. Each fix above was reproduced first and is covered by a check that fails when the fix is
 reverted. Also validated against a copy of a real 113 MB data dir with 75 sessions, and by driving the adapter

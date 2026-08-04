@@ -72,10 +72,12 @@ assisting this meeting, don't start a second watch.
      also the only way you hear about **Stop**: capture ends there, so no further caption would ever wake you.
    - **`chat> …`** for anything the user types in the panel, above the transcript, because a question aimed at
      you outranks the room.
-   - **`truncated: N more bytes waiting - call poll`** when there was more than one read could carry. That is
-     the one case where you should call `poll` for the rest.
-   - **`mla: …`** when the loop itself is in trouble - the server unreachable, or the token rejected. Tell the
-     user; you are blind until it is fixed.
+   - **`truncated: N more bytes still queued`** when there was more than one read could carry. Nothing to do:
+     the rest arrives on the next read. Do **not** call `poll` for it - that reads under a different position
+     and would hand you nothing.
+   - **`mla: …`** when the loop itself is in trouble: the server unreachable, or the request rejected. It says
+     it once and then checks every 30s instead of every 2s. Tell the user - you are blind until it is fixed,
+     which includes not hearing Stop.
    - The read offset is server-side, so a restarted loop neither replays nor skips. Your first read gets the
      meeting so far; after that, only what is new.
 
@@ -95,9 +97,8 @@ assisting this meeting, don't start a second watch.
 
    `poll` is safe to call mid-turn - it reads under its own position, so it cannot swallow a wake the loop
    still owed you. Its `batch` is normally empty precisely because the loop already delivered it; what it is
-   for is the rest of a `truncated` read, re-reading state after you changed it, and the structured form of
-   chat and pending results. To catch up on the meeting itself, use `transcript`, which is bounded and says
-   when it dropped the front.
+   for is re-reading state after you changed it, and the structured form of chat and pending results. To catch
+   up on the meeting itself use `transcript`, which is bounded and says when it dropped the front.
 
    **Then verify the channel before you trust it - one exchange, at arm time.** Post a single advice line
    ("connected - say hello if you see this") and **ask the user to confirm they see it in the panel**. This is
