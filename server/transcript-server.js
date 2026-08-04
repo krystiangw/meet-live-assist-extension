@@ -326,8 +326,8 @@ const store = createStore({ dir: TRANSCRIPTS_DIR, log: (m) => console.log(m) });
 
 // Shared secret. Without it any website you visit could POST /speak, /edit or read /dom & /debug
 // (DOM + localStorage/cookies/network of the shared tab) on this localhost server. Every route but
-// /health requires the token in an `X-MLA-Token` header. Paste it into the extension options once;
-// the brain (skill) reads it from this file.
+// /health requires the token in an `X-MLA-Token` header. Paste it into the extension options once; the MCP
+// adapter finds this file by asking /health where the data dir is.
 const TOKEN_FILE = path.join(TRANSCRIPTS_DIR, '.mla-token');
 let TOKEN = '';
 try {
@@ -391,8 +391,8 @@ const MARKERS = new Set(['SAY', 'INFO', 'SUMMARY', 'EXPLAIN', 'RISK', 'ACTION'])
 // Agent-requested snapshots: the brain bumps a seq; the side panel polls it and triggers a capture.
 const snapReq = store.map('snapReq'); // session -> seq
 
-// Two-way chat: panel <-> brain. User messages are also appended to <session>.chat.txt so the
-// brain (Claude Code session) can tail them and reply via POST /chat {role:"agent"}.
+// Two-way chat: panel <-> brain. The user's side reaches the assistant through /poll, which also makes a
+// typed message wake it; <session>.chat.txt is still written as a plain-text record.
 const chat = store.map('chat'); // session -> { seq, items: [{ seq, ts, role, text, image }] }
 const CHAT_MAX = 300;
 function chatFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.chat.txt`); }
