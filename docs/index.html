@@ -99,7 +99,7 @@ Chrome extension  ──HTTP──►  Local bridge server (127.0.0.1:8848)
    └───────────────────────────────┤  transcript file + advice/chat channels
                                     ▼
                           The "brain" - a Claude Code session with YOUR
-                          context (notes, docs, tools) tails the transcript
+                          context (notes, docs, tools) reads the call over MCP
                           and replies with advice / chat / TTS.</code></pre>
   <p class="note">The extension only captures and displays. The intelligence is the brain - a local agent session that already knows your work. That is the differentiator: advice grounded in <em>your</em> real context, not a generic model.</p>
 </section>
@@ -122,11 +122,13 @@ curl -s http://127.0.0.1:8848/health   # → {"ok":true,...}</code></pre>
       <h3>Paste the server token</h3>
       <p>The server generates an auth token on first start so no other website can reach it. Copy it into the
       extension <strong>Options</strong> (the panel's ⚙ shows a setup checklist):</p>
-      <pre><code>cat ~/projects/meet-live-assist/transcripts/.mla-token</code></pre>
+      <pre><code>cat ~/meet-live-assist/transcripts/.mla-token</code></pre>
     </li>
     <li>
-      <h3>Point the brain at the transcript</h3>
-      <p>In your Claude Code session, load the <code>meet-live-assist</code> skill and ask it to watch your meeting. It tails the transcript, pushes advice to <code>/advice</code>, and answers chat on <code>/chat</code>.</p>
+      <h3>Give the brain the tools</h3>
+      <p>Register the MCP adapter once, then restart your session:</p>
+      <pre><code>claude mcp add meet-live-assist -- npx -y -p meet-live-assist-server meet-live-assist-mcp</code></pre>
+      <p>Now load the <code>meet-live-assist</code> skill and ask it to watch your meeting. It <code>attach</code>es to the live call, <code>poll</code>s for what is worth a turn, and posts advice, board items and chat replies back to the panel. No file paths to configure - the adapter asks the server where its data is.</p>
     </li>
     <li>
       <h3>(Optional) Enable "speak into the call"</h3>
