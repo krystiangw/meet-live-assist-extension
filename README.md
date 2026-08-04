@@ -98,7 +98,7 @@ architecture. **Text-to-speech is macOS-only** (`say` + `afplay`); elsewhere adv
 the panel and only spoken output is missing. Details: [`server/README.md`](server/README.md).
 
 Publishing a new version is `cd server && npm publish` (check `npm pack --dry-run` first: it should be
-five files, ~37 kB - the server, the MCP adapter, the state store, a README and the manifest).
+six files, ~42 kB - the server, the MCP adapter, the state store, the wake-channel cut helper, a README and the manifest).
 
 ### Autostart it on a Mac (launchd)
 
@@ -198,7 +198,7 @@ canonical personal skill rather than a copy of the template.
 
 ```bash
 npm run lint            # node --check over src/ and server/
-npm test                # all five suites below, ~186 checks
+npm test                # all five suites below, ~196 checks
 npm run test:server     # auth gate, session guard, round-trips, restart survival
 npm run test:panel      # every request sidepanel.js makes, replayed without a browser
 npm run test:mcp        # the MCP adapter over stdio JSON-RPC

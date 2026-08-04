@@ -94,7 +94,7 @@ Twelve more defects, each reproduced before being fixed. The ones that would hav
 
 ### Tests
 
-`npm test` is now five suites, ~186 checks: the server contract, **the panel's own request cycle replayed
+`npm test` is now five suites, ~196 checks: the server contract, **the panel's own request cycle replayed
 without a browser**, the MCP adapter over stdio, **the size caps with non-ASCII text**, and retention plus
 cross-meeting leaks. Each fix above was reproduced first and is covered by a check that fails when the fix is
 reverted. Also validated against a copy of a real 113 MB data dir with 75 sessions, and by driving the adapter
