@@ -134,7 +134,9 @@ try {
     // The next meeting on the same code must not receive it.
     await fetch(`${s.base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session, line: 'Ann: we decided to start the new sprint.\n' }) });
     await sleep(900);
-    const poll = await (await fetch(`${s.base}/poll?session=${session}&consumer=next-meeting`, { headers: auth })).json();
+    // backlog=1 so this reader sees the whole channel: the question is whether the old line is in it
+    // at all, not where a fresh reader would start.
+    const poll = await (await fetch(`${s.base}/poll?session=${session}&consumer=next-meeting&backlog=1`, { headers: auth })).json();
     check('the next meeting on the same code does not receive last time\'s held line',
       !poll.batch.includes('CONFIDENTIAL-FROM-MEETING-A'), poll.batch);
     check('but it does receive its own', poll.batch.includes('new sprint'), poll.batch);
@@ -164,7 +166,7 @@ try {
 
     await fetch(`${s.base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session, line: 'Ann: blocker - the deploy is rejected.\n' }) });
     await sleep(900);
-    const poll = await (await fetch(`${s.base}/poll?session=${session}&consumer=brain`, { headers: auth })).json();
+    const poll = await (await fetch(`${s.base}/poll?session=${session}&consumer=brain&backlog=1`, { headers: auth })).json();
     check('a batch interrupted seconds ago still rides along after the restart', poll.batch.includes('good morning'), poll.batch);
     check('together with what came after it', poll.batch.includes('blocker'), poll.batch);
     s.proc.kill('SIGKILL');

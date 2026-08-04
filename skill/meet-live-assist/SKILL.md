@@ -27,7 +27,9 @@ agent has the relevant context for *this* meeting runs it.
 **If the tools are not connected**, register the adapter once and restart the session:
 `claude mcp add meet-live-assist -- node __MLA_REPO__/server/mcp-server.js`. Everything below is also
 reachable as plain HTTP on `127.0.0.1:8848` with an `X-MLA-Token` header (token in
-`__MLA_TRANSCRIPTS__/.mla-token`) - use that only as a fallback, and never mix the two in one call.
+`__MLA_TRANSCRIPTS__/.mla-token`) - use that as a fallback only. The wake loop in step 2 is `curl` by
+necessity (a tool call cannot wake you) and does not count as mixing: it reads under its own position and
+`attach` hands it to you ready to run.
 
 ## Multiple Chrome profiles
 Capture is browser-side, so it is **per Chrome profile** - the server + transcript dir are shared (localhost, profile-agnostic). To enable a second profile: install **Tampermonkey** in that profile, install the userscript (open `file://__MLA_REPO__/server/legacy-userscript.meet-captions-to-file.user.js` → Install), then - the common gotcha - enable Chrome's MV3 setting **`chrome://extensions` → Tampermonkey → Details → "Allow user scripts"** (needs Developer mode if the toggle is hidden) and reload the Meet tab. Without that toggle the script is "enabled" in Tampermonkey but Chrome never runs it. The toggle is per-profile.
@@ -45,8 +47,9 @@ assisting this meeting, don't start a second watch.
 
 1. **`attach`.** One call: it finds the meeting active *now*, pins it, claims it, and hands back the panel
    state. Pass a `session` only to assist a *specific* meeting instead of the current one.
-   - It **refuses** if another assistant is live on that call (the one-agent-per-meeting rule). Tell the user
-     and stop; `force: true` only if they explicitly want to take over.
+   - It **refuses** if a *different* assistant is live on that call (the one-agent-per-meeting rule) and names
+     it. Tell the user and stop; `force: true` only if they explicitly want to take over. Re-attaching to a
+     meeting **you** already hold is always allowed, so a reconnect costs you nothing.
    - It **fails** if the server is down or no meeting has produced a transcript yet, and says which. Start the
      server with `npx meet-live-assist-server`, or load the launchd agent
      (`com.mla.meet-transcript-server.plist`). Also remind the user the extension must be capturing.
@@ -67,7 +70,14 @@ assisting this meeting, don't start a second watch.
      content.
    - **A `state=…` line whenever the panel changed** - and *only* then, so it is a signal, not a banner. It is
      also the only way you hear about **Stop**: capture ends there, so no further caption would ever wake you.
-   - The read offset is server-side per `consumer`, so a restarted loop neither replays nor skips.
+   - **`chat> …`** for anything the user types in the panel, above the transcript, because a question aimed at
+     you outranks the room.
+   - **`truncated: N more bytes waiting - call poll`** when there was more than one read could carry. That is
+     the one case where you should call `poll` for the rest.
+   - **`mla: …`** when the loop itself is in trouble - the server unreachable, or the token rejected. Tell the
+     user; you are blind until it is fixed.
+   - The read offset is server-side, so a restarted loop neither replays nor skips. Your first read gets the
+     meeting so far; after that, only what is new.
 
    Handle the state line as follows:
    - `state=paused` → **stay silent** this turn: no advice, no actions. Keep calling `working` so the 🧠 pill
@@ -81,10 +91,13 @@ assisting this meeting, don't start a second watch.
    - `callchat[failed] …` → your last message to the meeting chat did not go out. Say so rather than assuming
      the room read it.
 
-   Call `working` once per turn regardless, so the panel's 🧠 pill tracks **your** meeting. Use `poll`
-   mid-turn only when you need to catch up on something the Monitor's output cut off (`truncated`), or to
-   re-read state after you changed it - the Monitor already consumed the batch, so a second `poll` normally
-   returns nothing.
+   Call `working` once per turn regardless, so the panel's 🧠 pill tracks **your** meeting.
+
+   `poll` is safe to call mid-turn - it reads under its own position, so it cannot swallow a wake the loop
+   still owed you. Its `batch` is normally empty precisely because the loop already delivered it; what it is
+   for is the rest of a `truncated` read, re-reading state after you changed it, and the structured form of
+   chat and pending results. To catch up on the meeting itself, use `transcript`, which is bounded and says
+   when it dropped the front.
 
    **Then verify the channel before you trust it - one exchange, at arm time.** Post a single advice line
    ("connected - say hello if you see this") and **ask the user to confirm they see it in the panel**. This is

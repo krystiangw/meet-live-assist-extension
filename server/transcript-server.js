@@ -521,7 +521,10 @@ const pollOffsets = store.map('pollOffsets');
 // Cap on a single poll or transcript read. A 40-minute call is a few hundred KB, and handing all of it
 // to a model in one tool result is how you spend a context window on backlog. The remainder is not
 // dropped: a capped poll leaves the rest for the next one and says `truncated: true`.
-const POLL_MAX_BYTES = 64 * 1024; // session -> [{ at, src, norm }]
+const POLL_MAX_BYTES = 64 * 1024;
+// How many distinct consumers a session remembers a read position for. One assistant needs two (its wake
+// loop and its tools); the rest of the room is for a handover or a second agent looking on.
+const POLL_MAX_CONSUMERS = 8; // session -> [{ at, src, norm }]
 const normStt = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 function isSttEcho(session, src, text) {
   const norm = normStt(text);
@@ -572,6 +575,23 @@ function spokenText(line) { // strip "[hh:mm:ss] Speaker: " to classify the actu
   return line.replace(/^\[[^\]]*\]\s*/, '').replace(/^[^:]{1,40}:\s*/, '').trim();
 }
 function wakeFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.wake`); }
+
+// Where to cut a capped read of the wake channel. Prefer the last newline: the channel is line-oriented,
+// so a consumer should never receive half a sentence, and a line boundary is also a character boundary.
+// A single line longer than the cap has no newline to cut at, so fall back to walking back off any
+// incomplete multi-byte sequence - cutting mid-character costs one replacement glyph on each side of the
+// boundary, and the offset then starts the next read inside a character forever after.
+function utf8SafeCut(buf, len) {
+  const nl = buf.lastIndexOf(0x0a, len - 1);
+  if (nl >= 0) return nl + 1;
+  let i = len - 1;
+  let back = 0;
+  while (i >= 0 && (buf[i] & 0xc0) === 0x80 && back < 3) { i--; back++; }
+  if (i < 0) return len;
+  const lead = buf[i];
+  const need = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 1;
+  return i + need <= len ? len : i;
+}
 function isUrgentLine(line) {
   const t = spokenText(line);
   if (URGENT_RE.test(t)) return true;
@@ -1518,7 +1538,11 @@ const server = http.createServer((req, res) => {
     let session = '';
     if (want) {
       const s = safeSession(want);
-      if (fs.existsSync(fileFor(s))) session = s;
+      // Any file of the session counts, not just the transcript. The documented recovery from the
+      // `undefined` incident is "ask the user to type in the panel chat, then attach to whatever session
+      // that arrived under" - and in exactly that scenario the panel's session has only a `.chat.txt`,
+      // because the transcript is going to the wrong file. Requiring `.txt` made the fix impossible.
+      if (fs.existsSync(fileFor(s)) || fs.existsSync(chatFileFor(s)) || fs.existsSync(wakeFileFor(s))) session = s;
     } else {
       let newest = 0;
       try {
@@ -1546,13 +1570,17 @@ const server = http.createServer((req, res) => {
         // name's date is unambiguous and is what the caller actually wants to reason about.
         const named = /^(\d{4}-\d{2}-\d{2})/.exec(session);
         if (named) date = named[1];
-        lines = fs.readFileSync(fileFor(session), 'utf8').split('\n').length - 1;
+        lines = fs.readFileSync(fileFor(session), 'utf8').split('\n').filter((l) => l !== '').length;
       } catch (_) {}
     }
+    const claim = session ? takeover.get(session) : null;
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       session: session || null, lines, date, startedAt,
-      otherAssistantAgeMs: ping ? Date.now() - ping : null,
+      assistantAgeMs: ping ? Date.now() - ping : null,
+      // Who holds it. Without the name, an assistant reconnecting to its OWN meeting cannot tell its own
+      // heartbeat from a rival's and talks itself out of a call it is already assisting.
+      assistant: claim ? claim.agent : null,
     }));
     return;
   }
@@ -1593,50 +1621,84 @@ const server = http.createServer((req, res) => {
     // worth a turn yet; forcing them out on a 2-second poll would make every poll return a batch and undo
     // the gate entirely (measured on a real call: 786 wakes gated down to 189). Nothing is stranded
     // either - WAKE_FORCE_MS bounds how long even pure chatter can sit there.
+    // Deliberately does NOT flush the wake buffer. Held lines are held because the gate judged them not
+    // worth a turn yet; forcing them out on a 2-second poll would make every poll return a batch and undo
+    // the gate entirely (measured on a real call: 786 wakes gated down to 189). Nothing is stranded
+    // either - WAKE_FORCE_MS bounds how long even pure chatter can sit there.
     const wf = wakeFileFor(s);
-    const offsets = pollOffsets.get(s) || {};
-    let from = offsets[consumer] || 0;
-    let batch = '';
+    // Object.create(null), because `consumer` is caller-supplied and survives sanitising as `constructor`,
+    // `toString` or `__proto__`. On a plain object those inherit from the prototype, so `offsets[consumer]`
+    // returned a function, `size > from` was never true, and that consumer received an empty batch forever
+    // with no error anywhere.
+    const all = pollOffsets.get(s);
+    const offsets = Object.assign(Object.create(null), all && typeof all === 'object' ? all : {});
+    let cur = offsets[consumer];
+    if (!cur || typeof cur !== 'object') cur = null;
+
     let size = 0;
+    try { size = fs.statSync(wf).size; } catch (_) { /* no wake file yet */ }
+
+    // A consumer nobody has seen before starts at the END, not at zero. Replaying an hour of a meeting
+    // into a fresh reader is never what it wanted - `transcript` exists for catching up deliberately, and
+    // it can be asked for a bounded amount. `backlog=1` opts into the whole thing.
+    if (!cur) cur = { wake: u.searchParams.get('backlog') === '1' ? 0 : size, chat: 0, callchat: 0, sig: '' };
+
+    let from = typeof cur.wake === 'number' ? cur.wake : 0;
+    let batch = '';
     try {
-      size = fs.statSync(wf).size;
       if (size < from) from = 0; // the meeting was cleared and the file restarted
       if (size > from) {
         const fd = fs.openSync(wf, 'r');
         try {
           const buf = Buffer.alloc(Math.min(size - from, POLL_MAX_BYTES));
           const read = fs.readSync(fd, buf, 0, buf.length, from);
-          batch = buf.slice(0, read).toString('utf8');
-          from += read; // a capped read leaves the rest for the next poll rather than dropping it
+          // Cut a capped read at the last complete line. The channel is line-oriented, so this both keeps
+          // the consumer from receiving half a sentence and keeps the byte offset off the middle of a
+          // multi-byte character - a Polish transcript hit at 64 KB would otherwise lose one character to
+          // a replacement glyph on each side of the boundary.
+          const usable = read < size - from ? utf8SafeCut(buf, read) : read;
+          batch = buf.slice(0, usable).toString('utf8');
+          from += usable; // the remainder waits for the next poll rather than being dropped
         } finally { fs.closeSync(fd); }
       }
-    } catch (_) { /* no wake file yet: nothing has been judged worth a turn */ }
-    offsets[consumer] = from;
-    pollOffsets.set(s, offsets);
+    } catch (_) { /* unreadable wake file: nothing to hand back, and the next poll retries */ }
+    cur.wake = from;
 
     const ccr = callChatResult.get(s) || { seq: 0, items: [] };
-    const ackKey = `${consumer}:callchat`;
-    const ackFrom = offsets[ackKey] || 0;
-    offsets[ackKey] = ccr.seq;
+    const ackFrom = typeof cur.callchat === 'number' ? cur.callchat : 0;
+    cur.callchat = ccr.seq;
 
     // The user typing in the panel is a first-class input, not a side channel, and it has to WAKE the
     // assistant: a question typed into a quiet meeting would otherwise sit unanswered until the next
     // caption happened to arrive. Only their side is delivered - handing back the assistant's own replies
     // would have it answer itself.
     const c = chat.get(s) || { seq: 0, items: [] };
-    const chatKey = `${consumer}:chat`;
-    const chatFrom = offsets[chatKey] || 0;
+    const chatFrom = typeof cur.chat === 'number' ? cur.chat : 0;
     const chatItems = c.items.filter((i) => i.seq > chatFrom && i.role === 'user');
-    offsets[chatKey] = c.seq;
+    cur.chat = c.seq;
 
     // A change the user made in the panel is worth an assistant turn on its own. Without this, pressing
     // Stop ended capture, the transcript stopped growing, nothing woke the assistant, and the wrap-up it
     // was supposed to write never happened. estTokens is excluded from the signature deliberately: it
     // moves with every caption, so including it would wake on every poll and defeat the gate entirely.
+    // A digest rather than the JSON: the full status ran to ~400 bytes per consumer, persisted and
+    // re-serialised on every snapshot tick.
     const { estTokens, ...stable } = status;
-    const sig = JSON.stringify(stable);
-    const statusChanged = offsets[`${consumer}:sig`] !== sig;
-    offsets[`${consumer}:sig`] = sig;
+    const sig = crypto.createHash('sha1').update(JSON.stringify(stable)).digest('base64').slice(0, 12);
+    const statusChanged = cur.sig !== sig;
+    cur.sig = sig;
+
+    cur.at = Date.now();
+    offsets[consumer] = cur;
+    // Bound the per-session consumer list. `consumer` comes off the query string, so every value ever used
+    // would otherwise persist for the life of the meeting; 2000 of them measured at 807 KB, re-serialised
+    // every snapshot tick. Evict least-recently-seen, which never touches an assistant that is polling.
+    const names = Object.keys(offsets);
+    if (names.length > POLL_MAX_CONSUMERS) {
+      names.sort((a, b) => (offsets[b].at || 0) - (offsets[a].at || 0));
+      for (const stale of names.slice(POLL_MAX_CONSUMERS)) delete offsets[stale];
+    }
+    pollOffsets.set(s, offsets);
 
     if (asText) {
       // Shaped for the wake loop: empty body means "nothing happened, do not wake anybody".
@@ -1650,6 +1712,9 @@ const server = http.createServer((req, res) => {
       for (const r of ccr.items.filter((i) => i.seq > ackFrom)) out += `callchat[${r.ok ? 'sent' : 'failed'}] ${r.reason || ''}\n`;
       // Prefixed, and above the transcript: the user asking you something directly outranks the meeting.
       for (const m of chatItems) out += `chat> ${String(m.text || '').replace(/\n/g, ' ')}\n`;
+      // The loop is told when it only got part of what was waiting, so the assistant knows to call `poll`
+      // for the rest instead of reasoning from a batch that stops mid-conversation.
+      if (size > from) out += `truncated: ${size - from} more bytes waiting - call poll\n`;
       if (batch) out += `${statusChanged || chatItems.length ? '--\n' : ''}${batch}`;
       res.writeHead(200, { 'Content-Type': 'text/plain' });
       res.end(out);
@@ -1680,14 +1745,26 @@ const server = http.createServer((req, res) => {
     let all = '';
     try { all = fs.readFileSync(fileFor(s), 'utf8'); } catch (_) {}
     const lines = all.split('\n').filter((l) => l !== '');
-    const slice = lines.slice(-tail);
-    let text = slice.join('\n');
-    // A whole meeting can outgrow the caller's context. Truncating from the front keeps the most recent
-    // exchange, which is what a mid-call question is almost always about.
-    const truncated = Buffer.byteLength(text) > POLL_MAX_BYTES;
-    if (truncated) text = text.slice(-POLL_MAX_BYTES);
+    let slice = lines.slice(-tail);
+    // A whole meeting can outgrow the caller's context, so cap it - dropping from the FRONT, because a
+    // mid-call question is almost always about the most recent exchange. Drop whole lines rather than
+    // slicing the string: the cap is in bytes while `String.slice` counts UTF-16 code units, so on Polish
+    // text it let through half again as much as documented (3x with emoji) and could leave a lone
+    // surrogate at the cut. `lines` then has to describe what was actually returned, not what was asked
+    // for, or a caller cannot tell it was shortened.
+    const truncated = Buffer.byteLength(slice.join('\n')) > POLL_MAX_BYTES;
+    if (truncated) {
+      let bytes = 0;
+      let keepFrom = slice.length;
+      for (let i = slice.length - 1; i >= 0; i--) {
+        bytes += Buffer.byteLength(slice[i]) + 1;
+        if (bytes > POLL_MAX_BYTES) break;
+        keepFrom = i;
+      }
+      slice = slice.slice(keepFrom);
+    }
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ session: s, text, lines: slice.length, totalLines: lines.length, truncated }));
+    res.end(JSON.stringify({ session: s, text: slice.join('\n'), lines: slice.length, totalLines: lines.length, truncated }));
     return;
   }
 

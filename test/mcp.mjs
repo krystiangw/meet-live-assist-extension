@@ -156,13 +156,25 @@ try {
   // data it would claim a meeting from months ago started today.
   check('attach reports the meeting date from its name', attached.data.date === '2026-02-02', JSON.stringify(attached.data.date));
 
-  // --- the keystone: poll ---
-  const first = await call(rpc, 'poll');
-  check('poll returns the transcript batch', !first.isError && /ship the release on Monday/.test(first.data.batch || ''), first.text);
-  check('poll returns panel state alongside it', typeof first.data?.status?.state === 'string', first.text);
+  // --- the keystone: the wake channel ---
+  // The wake loop is the reader that matters: it is the only thing that can start an assistant's turn, and
+  // `attach` hands out its URL. Test through that URL, not through the tool, because they are deliberately
+  // different readers - see below.
+  const loopUrl = attached.data.wakeLoop.match(/"(http:[^"]+)"/)[1];
+  const loop = () => fetch(loopUrl, { headers: auth }).then((r) => r.text());
 
-  const second = await call(rpc, 'poll');
-  check('a second poll does not replay the same batch', (second.data.batch || '').length === 0, second.text);
+  const first = await loop();
+  check('the wake loop receives the transcript batch', /ship the release on Monday/.test(first), JSON.stringify(first));
+  check('and leads with the panel state', /^state=running mode=auto/.test(first), JSON.stringify(first.slice(0, 80)));
+  check('a second read does not replay it', (await loop()) === '', 'expected an empty body');
+
+  // A reader nobody has seen before starts at the END of the channel. Replaying an hour of a meeting into a
+  // fresh reader is never what it wanted, and `transcript` exists for catching up deliberately.
+  const freshUrl = `${base}/poll?session=${encodeURIComponent(session)}&consumer=brand-new`;
+  const fresh = await (await fetch(freshUrl, { headers: auth })).json();
+  check('a brand-new reader starts at the end, not at the beginning', fresh.batch === '', JSON.stringify(fresh.batch));
+  const withBacklog = await (await fetch(`${base}/poll?session=${encodeURIComponent(session)}&consumer=catch-up&backlog=1`, { headers: auth })).json();
+  check('backlog=1 is how a reader asks for the meeting so far', /ship the release on Monday/.test(withBacklog.batch), JSON.stringify(withBacklog.batch));
 
   // poll must read the wake channel, never force it. An earlier version flushed the buffer on every poll
   // "so a poll never waits behind the coalescing window", which handed back every caption the gate was
@@ -170,27 +182,46 @@ try {
   await say('Bo: good morning, how are you? weather is nice.\n');
   await say('Ana: haha, thanks. no worries.\n');
   await sleep(800);
-  const quiet = await call(rpc, 'poll');
-  check('the wake gate still holds back small talk', (quiet.data.batch || '') === '', quiet.text);
+  check('the wake gate still holds back small talk', (await loop()) === '', 'expected an empty body');
 
   await say('Ana: blocker - the API deploy is rejected until QA signs off.\n');
   await sleep(800);
-  const third = await call(rpc, 'poll');
-  check('poll picks up substance that arrived after the last poll', /blocker/.test(third.data.batch || ''), third.text);
-  check('held small talk rides along with the next real batch instead of being lost', /good morning/.test(third.data.batch || ''), third.text);
+  const third = await loop();
+  check('the loop picks up substance that arrived after the last read', /blocker/.test(third), JSON.stringify(third));
+  check('held small talk rides along with the next real batch instead of being lost', /good morning/.test(third), JSON.stringify(third));
 
-  // The offset is per consumer, so a second assistant is not starved by the first one's polls.
-  const other = spawn(process.execPath, [path.join(ROOT, 'server', 'mcp-server.js')], {
-    env: { ...process.env, MLA_URL: base, MLA_TOKEN: token, TRANSCRIPTS_DIR: dir, MLA_AGENT: 'second-agent' },
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-  const rpc2 = client(other);
-  await rpc2.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke2', version: '0' } });
-  const otherAttach = await call(rpc2, 'attach', { session, force: true });
-  check('a second consumer can attach with force', !otherAttach.isError, otherAttach.text);
-  const otherPoll = await call(rpc2, 'poll', { session });
-  check('the poll offset is per consumer, not global', /ship the release on Monday/.test(otherPoll.data.batch || ''), otherPoll.text);
-  other.kill('SIGKILL');
+  // Reading a cursor is destructive, so the `poll` tool must NOT share the loop's. It used to, and then a
+  // mid-turn `poll` - which the skill explicitly permits - swallowed the state change the loop was about to
+  // wake on. Stop is the sharpest case: capture ends there, so the loop is its only possible route.
+  await fetch(`${base}/control`, { method: 'POST', headers: auth, body: JSON.stringify({ session, state: 'stopped' }) });
+  const midTurn = await call(rpc, 'poll');
+  check('a mid-turn poll sees the state change', midTurn.data?.status?.state === 'stopped', midTurn.text);
+  const loopAfter = await loop();
+  check('and the loop still wakes on it afterwards', /state=stopped/.test(loopAfter), JSON.stringify(loopAfter));
+  await fetch(`${base}/control`, { method: 'POST', headers: auth, body: JSON.stringify({ session, state: 'running' }) });
+  await loop(); // consume the change back to running
+
+  check('poll returns panel state alongside everything else', typeof midTurn.data?.status?.state === 'string', midTurn.text);
+
+  // A consumer name is caller-supplied and survives sanitising as `constructor` or `__proto__`. Looked up
+  // on a plain object those inherit from the prototype, so the offset came back as a function, the batch
+  // was never non-empty, and that reader was deaf for the rest of the meeting with no error anywhere.
+  for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+    const r = await (await fetch(`${base}/poll?session=${encodeURIComponent(session)}&consumer=${encodeURIComponent(name)}&backlog=1`, { headers: auth })).json();
+    check(`a reader named "${name}" is not deaf`, /ship the release on Monday/.test(r.batch || ''), JSON.stringify(r.batch));
+  }
+
+  // Read positions are bounded: `consumer` comes off the query string, so without a cap every value ever
+  // used would persist for the life of the meeting and be re-serialised on every snapshot tick.
+  for (let i = 0; i < 20; i++) await fetch(`${base}/poll?session=${encodeURIComponent(session)}&consumer=throwaway-${i}`, { headers: auth });
+  await sleep(400);
+  const stateFile = JSON.parse(readFileSync(path.join(dir, '.state', 'pollOffsets.json'), 'utf8'));
+  const kept = Object.keys((stateFile.find(([k]) => k === session) || [null, {}])[1]);
+  check('the number of remembered readers is bounded', kept.length <= 8, `${kept.length}: ${kept.join(',')}`);
+  // The loop is what must never be evicted, and it will not be: eviction is least-recently-seen and the
+  // loop is the reader that polls constantly.
+  await loop();
+  check('the wake loop keeps its position through eviction', (await loop()) === '', 'the loop lost its place');
 
   // --- the writes an assistant actually makes ---
   const advice = await call(rpc, 'advice', { text: 'QA is not done - do not commit to Friday', marker: 'RISK' });
@@ -320,6 +351,118 @@ try {
   const answered = pipedOut.trim().split('\n').map((l) => { try { return JSON.parse(l); } catch (_) { return {}; } });
   check('a request still in flight is answered before the process exits',
     answered.some((m) => m.id === 2 && m.result && !m.result.isError), pipedOut.slice(0, 200));
+
+  // --- the wake loop's own failure modes ------------------------------------------------------------
+  // The loop is the wake source, so its failures cost turns. With a token the server rejects, `curl -s`
+  // printed the 403 body - a non-empty body every 2 seconds, i.e. a wake every 2 seconds for as long as
+  // the call lasts. It has to say it once and then back off.
+  const loopScript = attached.data.wakeLoop.replace(/^T=.*$/m, 'T=definitely-wrong');
+  const badToken = spawn('sh', ['-c', loopScript], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let badOut = '';
+  badToken.stdout.on('data', (c) => { badOut += c; });
+  await sleep(6000); // three iterations at the 2s cadence, if it did not back off
+  badToken.kill('SIGKILL');
+  const complaints = badOut.split('\n').filter((l) => l.trim()).length;
+  check('a rejected token is reported once, not on every iteration', complaints === 1, `${complaints} lines: ${JSON.stringify(badOut)}`);
+  check('and it says what to do about it', /rejected the token/.test(badOut), JSON.stringify(badOut));
+
+  // A dead server used to be indistinguishable from a quiet meeting: `curl -s` prints nothing and exits
+  // non-zero. The loop claims to be the only route by which Stop reaches the assistant, so going blind is
+  // the one thing it must not do silently.
+  const deadLoop = attached.data.wakeLoop.replace(/http:\/\/127\.0\.0\.1:\d+/, 'http://127.0.0.1:1');
+  const dead = spawn('sh', ['-c', deadLoop], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let deadOut = '';
+  dead.stdout.on('data', (c) => { deadOut += c; });
+  await sleep(2500);
+  dead.kill('SIGKILL');
+  check('an unreachable server is reported, not silence', /cannot reach the bridge server/.test(deadOut), JSON.stringify(deadOut));
+
+  // --- protocol robustness: a bad line must not take the adapter down -------------------------------
+  // `null` parses as JSON but is not a request. Destructuring it threw, and the catch handler then threw
+  // again reading `msg.id`, so one stray line exited the process and left every later request unanswered.
+  const rough = spawn(process.execPath, [path.join(ROOT, 'server', 'mcp-server.js')], {
+    env: { ...process.env, MLA_URL: base, MLA_TOKEN: token, TRANSCRIPTS_DIR: dir, MLA_AGENT: 'rough' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const rpcRough = client(rough);
+  await rpcRough.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'rough', version: '0' } });
+  rough.stdin.write('null\n');
+  rough.stdin.write('"just a string"\n');
+  rough.stdin.write('not json at all\n');
+  const survived = await rpcRough.request('ping');
+  check('a null, a bare string and a bad line do not kill the adapter', !!survived.result, JSON.stringify(survived));
+  // Batching left the protocol after 2025-03-26. It used to be silently discarded, leaving the client to
+  // wait forever; an error is the one thing a client can actually act on.
+  rough.stdin.write(`${JSON.stringify([{ jsonrpc: '2.0', id: 90, method: 'ping' }])}\n`);
+  const batchNote = await new Promise((resolve) => {
+    const t = setTimeout(() => resolve(null), 3000);
+    const iv = setInterval(() => {
+      const m = rpcRough.notes.find((n) => n.includes('batched'));
+      if (m) { clearInterval(iv); clearTimeout(t); resolve(m); }
+    }, 100);
+  });
+  check('a batched request is refused rather than silently dropped', !!batchNote, JSON.stringify(rpcRough.notes).slice(0, 200));
+  rough.kill('SIGKILL');
+
+  // --- attach must not refuse the meeting it is already assisting -----------------------------------
+  // The heartbeat it checks is bumped by its own `working` calls, so without comparing the claim name an
+  // adapter restarted mid-call - a client reconnecting, which is routine - saw its own liveness and
+  // refused. The skill's documented answer to a refusal is to stop and tell the user, so this cost the
+  // assistant the rest of the call.
+  // An earlier check in this suite took the claim on purpose, so take it back first: the point here is a
+  // restart of the assistant that currently holds the meeting.
+  await call(rpc, 'attach', { session, force: true });
+  await call(rpc, 'working', { status: '' });
+  const rejoin = spawn(process.execPath, [path.join(ROOT, 'server', 'mcp-server.js')], {
+    env: { ...process.env, MLA_URL: base, MLA_TOKEN: token, TRANSCRIPTS_DIR: dir, MLA_AGENT: 'test-agent' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const rpcRejoin = client(rejoin);
+  await rpcRejoin.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'rejoin', version: '0' } });
+  const reattached = await call(rpcRejoin, 'attach', { session });
+  check('the same assistant can re-attach to its own live meeting', !reattached.isError, reattached.text);
+  rejoin.kill('SIGKILL');
+
+  // A different assistant is still refused, which is the rule this was protecting.
+  const rival = spawn(process.execPath, [path.join(ROOT, 'server', 'mcp-server.js')], {
+    env: { ...process.env, MLA_URL: base, MLA_TOKEN: token, TRANSCRIPTS_DIR: dir, MLA_AGENT: 'rival-agent' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const rpcRival = client(rival);
+  await rpcRival.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'rival', version: '0' } });
+  const refused = await call(rpcRival, 'attach', { session });
+  check('a different assistant is still refused', refused.isError && /already live/.test(refused.text), refused.text);
+  const forced = await call(rpcRival, 'attach', { session, force: true });
+  check('and can still take over on purpose', !forced.isError, forced.text);
+  rival.kill('SIGKILL');
+  await call(rpc, 'attach', { session, force: true }); // take our meeting back for the rest of the suite
+
+  // --- two tool calls in one turn must not write to the previous meeting ----------------------------
+  // `pinned` is set only after attach's round trips, so a write issued alongside it read the old session.
+  // Reproduced: advice meant for meeting B landed in meeting A.
+  const otherSession = '2026-02-03_second-meeting';
+  await fetch(`${base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session: otherSession, line: 'Cy: we decided to start a separate call.\n' }) });
+  await Promise.all([
+    call(rpc, 'attach', { session: otherSession, force: true }),
+    call(rpc, 'advice', { text: 'this belongs to the second meeting', marker: 'INFO' }),
+  ]);
+  const secondBoard = await (await fetch(`${base}/advice?session=${encodeURIComponent(otherSession)}&since=0`, { headers: auth })).json();
+  const firstBoard = await (await fetch(`${base}/advice?session=${encodeURIComponent(session)}&since=0`, { headers: auth })).json();
+  check('advice sent alongside an attach lands on the meeting that attach pinned',
+    secondBoard.items.some((i) => /second meeting/.test(i.text)), JSON.stringify(secondBoard.items));
+  check('and not on the previous one',
+    !firstBoard.items.some((i) => /second meeting/.test(i.text)), JSON.stringify(firstBoard.items.map((i) => i.text)));
+  await call(rpc, 'attach', { session, force: true });
+
+  // --- a chat-only session must be attachable -------------------------------------------------------
+  // This is the documented recovery from the `undefined` incident: ask the user to type in the panel, then
+  // attach to whatever session that arrived under. In exactly that scenario the panel's session has only a
+  // chat file, because the transcript is going to the wrong one.
+  const chatOnly = '2026-02-04_chat-only';
+  await fetch(`${base}/chat`, { method: 'POST', headers: auth, body: JSON.stringify({ session: chatOnly, role: 'user', text: 'x' }) });
+  const attachedChatOnly = await call(rpc, 'attach', { session: chatOnly, force: true });
+  check('a session with only a chat file can still be attached', !attachedChatOnly.isError && attachedChatOnly.data.session === chatOnly, attachedChatOnly.text);
+  await call(rpc, 'attach', { session, force: true });
 
   check('the adapter wrote nothing to stderr', mcpErr === '', mcpErr.slice(0, 300));
   check('the adapter sent no unsolicited messages', rpc.notes.length === 0, JSON.stringify(rpc.notes).slice(0, 300));

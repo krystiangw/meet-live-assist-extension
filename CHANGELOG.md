@@ -42,6 +42,43 @@ A restart no longer costs you a meeting, and the assistant reaches the server th
 - The skill (1.5.0) is rewritten around the tools. Raw HTTP remains only for the page-driving surface, which
   will never have a hosted equivalent.
 
+### A second review, and what it found
+
+Twelve more defects, each reproduced before being fixed. The ones that would have hurt most:
+
+- The adapter cached the data dir it discovered from the server, but latched the guess on **failure** too.
+  It starts with the client's session, normally *before* the server, so the usual case was: pin the wrong
+  directory, then report "token rejected" for the rest of the session while pointing at a path where no
+  token has ever been.
+- `attach` refused the meeting it was **already assisting**. The heartbeat it checked is bumped by the
+  assistant's own `working` calls, so a client reconnecting mid-call saw its own liveness, and the skill's
+  documented answer to a refusal is to stop and tell the user. It now compares the claim name; a different
+  assistant is still refused, and now named.
+- A mid-turn `poll` could swallow the wake the loop still owed - including **Stop**, which has no other
+  route. The loop and the tools now read under separate positions, which costs nothing because a reader
+  nobody has seen before starts at the end of the channel rather than replaying the meeting. `backlog=1`
+  is how the loop asks for the meeting so far on its first read.
+- A consumer name of `constructor` or `__proto__` survived sanitising and then inherited from
+  `Object.prototype`, so that reader's offset came back as a function and its batch was empty forever, with
+  no error anywhere.
+- One stray `null` on stdin killed the adapter: destructuring threw, and the catch handler threw again
+  reading `msg.id`. A batched request was silently discarded, leaving the client waiting forever.
+- Non-ASCII text at the size caps. The wake channel cut on a byte boundary, costing one replacement
+  character on each side and leaving the next read starting mid-character; `/transcript` capped by UTF-16
+  code units against a byte limit, letting through half again as much on Polish (3x with emoji) and able to
+  leave a lone surrogate at the cut. Both now cut on whole lines. `lines` reports what came back.
+- The wake loop's own failures were invisible: a rejected token printed the 403 body every two seconds - a
+  wake storm, the exact opposite of the gate's purpose - and a dead server was indistinguishable from a
+  quiet meeting. It now says either once, backs off, and has a timeout.
+- Two tool calls in one turn could write to the previous meeting, because `pinned` is set only after
+  `attach`'s round trips. Tool calls are serialised.
+- Read positions were unbounded: `consumer` comes off the query string, and 2000 of them measured 807 KB
+  re-serialised on every snapshot tick. Bounded to 8 per session, least-recently-seen evicted, and the
+  status signature is a digest instead of the whole status object.
+- `attach` could not target a session that has only a chat file - which is exactly the documented recovery
+  from the `undefined` incident, since in that scenario the transcript is going to the wrong file.
+- A session line count lost the last line of a file with no trailing newline.
+
 ### Fixes
 
 - A retention sweep could wipe the state of the meeting happening right now: one leftover `.mode.txt` past the
@@ -57,10 +94,11 @@ A restart no longer costs you a meeting, and the assistant reaches the server th
 
 ### Tests
 
-`npm test` is now four suites, ~143 checks: the server contract, **the panel's own request cycle replayed
-without a browser**, the MCP adapter over stdio, and retention plus cross-meeting leaks. Each fix above was
-reproduced first and is covered by a check that fails when the fix is reverted. Also validated against a copy
-of a real 113 MB data dir with 75 sessions, which is what surfaced three of the adapter bugs.
+`npm test` is now five suites, ~186 checks: the server contract, **the panel's own request cycle replayed
+without a browser**, the MCP adapter over stdio, **the size caps with non-ASCII text**, and retention plus
+cross-meeting leaks. Each fix above was reproduced first and is covered by a check that fails when the fix is
+reverted. Also validated against a copy of a real 113 MB data dir with 75 sessions, and by driving the adapter
+by hand over a pipe with no environment - between them that is where five of the defects came from.
 
 ## 0.3.0 - 2026-08-04
 

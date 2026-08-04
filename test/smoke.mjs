@@ -144,7 +144,9 @@ try {
   // Consume the wake channel first, so the restart can prove the read offset is durable too. Without
   // that, a restarted assistant replays the whole meeting as if it were new and re-advises all of it.
   // A non-empty first batch is what makes the empty one after the restart mean anything.
-  const pollUrl = `${base}/poll?session=${encodeURIComponent(session)}&consumer=smoke`;
+  // backlog=1: a consumer nobody has seen before starts at the end of the channel, which is right for a
+  // fresh reader but would give this check nothing to read.
+  const pollUrl = `${base}/poll?session=${encodeURIComponent(session)}&consumer=smoke&backlog=1`;
   await sleep(600); // let the wake gate release the urgent line
   const firstPoll = await (await fetch(pollUrl, { headers: auth })).json();
   check('poll returns the batch the wake gate released', firstPoll.batch.includes('must reach the transcript'), JSON.stringify(firstPoll.batch));
