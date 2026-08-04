@@ -92,13 +92,14 @@ assisting this meeting, don't start a second watch.
    extension had a session identity), received the whole transcript, and posted an hour of advice the panel
    never displayed, because the panel held a different session. Nothing in the pipeline reported an error.
    Two cheap checks catch it:
-   - the pinned session file is **growing** (it was), and
+   - `poll` is returning transcript (it was), and
    - the user **actually sees** your first line (they did not).
-   If they don't see it: get the panel's session by asking them to type one character in the panel chat, then
-   re-pin to whatever `<session>.chat.txt` just changed - or fall back to writing advice in the terminal.
+   If they don't see it, ask them to type anything into the panel chat: whatever session that arrives under is
+   the one the panel is holding, so `attach` to it explicitly. `attach` already refuses a session named
+   `undefined`/`null`/`NaN`, but `meeting_<timestamp>` is the same symptom under a different name - if you see
+   it, the extension had no session identity yet and re-attaching is the fix.
    Never assume a live transcript means the advice channel works; those are two different sessions until proven
-   otherwise. Sanity check while you're there: a session named `undefined`/`null`/`meeting_<timestamp>` is a
-   symptom, not a name - re-pin.
+   otherwise.
 
 3. **On each event, assist with YOUR domain context.** Keep it concise and in the user's preferred language
    (__MLA_LANGUAGE__). **Tag every line with a colour-coded marker** (see "Output format" below) so the
@@ -228,18 +229,20 @@ the framing muted, so they read their line at a glance. E.g.
 ### Working status (live "…" bubble in the panel)
 When you start a **multi-step action that takes more than a moment** (creating a Jira ticket, drafting a
 doc, reading a snapshot, searching Confluence), tell the panel so it shows an animated *"working…"* bubble
-with the activity - the user sees you're busy instead of silence. Post it via `brain-ping`'s optional
-`status`, then **clear it** when done: `working {status: "creating Jira ticket…"}` before,
-`working {status: ""}` after.
+with the activity - the user sees you're busy instead of silence. Set it with **`working`**, then **clear
+it** when done: `working {status: "creating Jira ticket…"}` before, `working {status: ""}` after.
 Keep the label short and human ("creating Jira ticket…", "reading the shared slide…"). The bubble
 auto-clears after 30s of no heartbeat (crash guard), so always send the empty clear when the action finishes.
 
 ### Chat (two-way, from the panel)
-The panel has a chat box. User messages land in `<meet-live-assist>/transcripts/<session>.chat.txt` (tailable) and via
-`GET /chat?session=&since=`. When assisting, **also watch that file** (add it to your Monitor, or poll it) and
-**reply** with `POST /chat {session, role:"agent", text}` (supports the same rich text + optional `image`).
-Chat is the user talking directly TO you (not the meeting) - answer fully here, using your context; it's the
-in-call back-channel. __MLA_USER__-authored, so chat messages authorize actions per "Acting on requests".
+The panel has a chat box. Anything the user types **arrives on your wake loop** as a `chat> …` line and in
+`poll`'s `chat` array - you do not have to watch anything extra, and a typed question wakes you even in a
+silent meeting. Reply with **`chat_reply`** (same rich text as advice, plus an optional image).
+
+Chat is the user talking directly TO you, not to the meeting - **answer it fully**, using your context, and
+answer it before reacting to the transcript: a direct question outranks the room. __MLA_USER__-authored, so
+chat messages authorize actions per "Acting on requests". To write to the *meeting's* chat, where everyone
+sees it, use `call_chat` instead - and that needs `postChat` on.
 
 ### Battlecards - phrase-triggered local snippets
 At the start of a watch, load any cards from **`__MLA_REPO__/server/cards/*.md`** (frontmatter
@@ -322,9 +325,9 @@ The panel sets a **mode** per meeting; read `mode=` from `/status` (step 2, defa
   always attach the source link when you have it.
 - **`produce`** - you are the **scribe / producer**: turn the discussion into **artifacts**. Maintain a running
   doc (post/update it via chat), draft tickets for action items to the board, and when the group plans
-  something produce a structured plan (goal / steps / owners / risks). Respect the autopilot flags
-  (`GET /autopilot`): **draft by default, create only when `create` is on, share links in the call only when
-  `postChat` is on**. Lead with 🟠 ACTION / 🟡 SUMMARY (the artifacts), not chatter.
+  something produce a structured plan (goal / steps / owners / risks). Respect the autopilot flags from your
+  wake loop's state line: **draft by default, create only when `create` is on, share links in the call only
+  when `postChat` is on**. Lead with 🟠 ACTION / 🟡 SUMMARY (the artifacts), not chatter.
 
 Mode changes what you *emphasise and how often*, never the guardrails below.
 
@@ -374,6 +377,14 @@ reading a 30KB transcript into the watch loop's own context costs that much on e
      These three sections describe capabilities that only exist in the full extension build. The store
      build strips them (see build.sh --public), so `install.sh` drops this region unless MLA_PRO=1 -
      a skill that offers a button the panel does not have is worse than a skill that stays quiet. -->
+
+**These are the one surface with no MCP tools**, deliberately: they act *on* a page rather than observe one,
+and a hosted server will never drive a stranger's browser. So they are raw HTTP, and every request below
+needs the token and the session:
+```bash
+MLA_TOKEN=$(cat __MLA_TRANSCRIPTS__/.mla-token); MLA_SESSION=<the session attach returned>
+# every call below: -H "X-MLA-Token: $MLA_TOKEN"
+```
 ## Live presentation edits (shared screen)
 
 When __MLA_USER__ shares their screen and asks you to change something on the page **for the demo** (fix a typo,
@@ -406,10 +417,8 @@ or console, tell __MLA_USER__ to toggle **🐞 Debug** (warn it shows a banner w
 
 When the user turns on the panel's **🕹 drive** toggle (a red "assistant can control this tab" banner shows),
 you may **act** on the app tab to walk or test a flow. Confirm it's on first (`GET /drive?session=` → `{on}`),
-then enqueue one action and poll its result before the next. This is the one surface with no MCP tool -
-the hosted server will never drive a stranger's browser - so it stays raw HTTP and needs its own token:
+then enqueue one action and poll its result before the next:
 ```bash
-MLA_TOKEN=$(cat __MLA_TRANSCRIPTS__/.mla-token); MLA_SESSION=<the session attach returned>
 SEQ=$(curl -s -X POST http://127.0.0.1:8848/act -H 'Content-Type: application/json' -H "X-MLA-Token: $MLA_TOKEN" \
   -d "$(python3 -c 'import json,sys; print(json.dumps({"session":sys.argv[1],"op":"click","selector":sys.argv[2]}))' "$MLA_SESSION" "button[type=submit]")" | python3 -c 'import json,sys;print(json.load(sys.stdin)["seq"])')
 curl -s -H "X-MLA-Token: $MLA_TOKEN" "http://127.0.0.1:8848/act-result?session=$MLA_SESSION&since=$((SEQ-1))"  # {ok,value,error}
@@ -485,7 +494,14 @@ Either path counts as confirmation:
   - **No captions → local STT** (validated 2026-07-28). The user presses **⌘⇧U on the call tab** (a gesture is
     required; a panel click won't do) and both audio sources record: the mic → labelled `You`, the tab →
     the remote side. Enabling STT suppresses caption scraping, so the two never double up.
-  - **Pin the language for STT** as soon as you know it - `POST /stt-lang {session, lang:"pl"}`. Only the Meet
+  - **Pin the language for STT** as soon as you know it. No tool for this one: it is a once-per-call control
+    that only matters when captions are off, and a permanent schema in the caller's context is not worth
+    that. So raw HTTP, self-contained:
+    ```bash
+    curl -s -X POST http://127.0.0.1:8848/stt-lang -H 'Content-Type: application/json' \
+      -H "X-MLA-Token: $(cat __MLA_TRANSCRIPTS__/.mla-token)" \
+      -d '{"session":"<the session attach returned>","lang":"pl"}'
+    ``` Only the Meet
     content script reports a caption language, so Zoom chunks default to `auto`, and detection on a 4s chunk
     sometimes picks the wrong language outright (a Polish sentence came back as Portuguese). It shows up in
     `/status` as `lang=`. Cost: pinned `pl` degrades **longer English stretches** - if the call switches
@@ -510,13 +526,11 @@ Either path counts as confirmation:
   `/callchat` (you get a `seq`), poll `GET /callchat-result?session=&since=` → `[{seq, ok, reason}]`. If
   `ok:false` (or no result within a few seconds), it did NOT land: fall back to a **paste-ready note in the
   panel chat** (`💬 Ticket: <url>`) so __MLA_USER__ can paste it himself. (Meet-only - Zoom has no chat posting.)
-- **Automatic takeover:** on arm, `POST /brain-takeover {session, agent:"<your unique id>"}`; each loop
-  `GET /brain-takeover?session=` - if it returns a **different** agent with a small `ageMs`, another
-  assistant claimed this meeting → **stop** (don't double-assist). Replaces the manual clad-task handoff.
-  Your `agent` id is surfaced in the panel's 🧠 pill (via `/brain-ping`), so pick a legible one.
-- **Lifecycle chat messages (name yourself).** Right after takeover, post ONE opening line to the **panel
-  chat** - `POST /chat {role:"agent", text:"🧠 <agent> connected and ready."}` - so it's obvious which agent
-  is on. In the wrap-up (step 4), post a matching closing line (`🧠 <agent> - call wrapped, signing off.`).
+- **Automatic takeover:** `attach` claims the meeting and **refuses** if another assistant is already live on
+  it, so there is nothing to poll for and no manual clad-task handoff. Your claim name comes from `MLA_AGENT`
+  and is surfaced in the panel's 🧠 pill, so set it to something legible.
+- **Lifecycle chat messages (name yourself).** Right after attaching, post ONE opening line to the **panel
+  chat** with `chat_reply` ("🧠 <agent> connected and ready.") so it's obvious which agent is on. In the wrap-up (step 4), post a matching closing line (`🧠 <agent> - call wrapped, signing off.`).
   Opening/closing only; don't narrate connect/disconnect anywhere else.
 - **Live ticket creation:** put **sprint + epic/parent + story points in the ticket up front, in the
   description** (not a follow-up comment). Don't create a bare title and backfill. **Always set the

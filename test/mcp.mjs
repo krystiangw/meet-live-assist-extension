@@ -239,12 +239,28 @@ try {
   const suppressed = await call(rpc, 'poll');
   check('poll reports topics the user dismissed', JSON.stringify(suppressed.data?.status?.suppress || []).includes('pricing'), suppressed.text);
 
+  // The user typing in the panel is how they talk to the assistant during a call. It must arrive through
+  // poll and it must wake the loop: a question typed into a quiet meeting would otherwise wait for the next
+  // caption. The assistant's own replies must not come back, or it answers itself.
+  await fetch(`${base}/chat`, { method: 'POST', headers: auth, body: JSON.stringify({ session, role: 'user', text: 'what did Bo object to?' }) });
+  const withChat = await call(rpc, 'poll');
+  check('a message typed in the panel reaches the assistant', (withChat.data.chat || []).some((m) => /Bo object/.test(m.text)), withChat.text);
+  await call(rpc, 'chat_reply', { text: 'QA not being done.' });
+  const afterReply = await call(rpc, 'poll');
+  check('the assistant does not get its own reply back', !(afterReply.data.chat || []).some((m) => /QA not being done/.test(m.text)), afterReply.text);
+  check('and the chat cursor advances', (afterReply.data.chat || []).length === 0, afterReply.text);
+
   // --- the wake loop's view: format=text, empty body means "do not wake anybody" ---
   const textUrl = `${base}/poll?session=${encodeURIComponent(session)}&consumer=wake-loop&format=text`;
   const t1 = await (await fetch(textUrl, { headers: auth })).text();
   check('the text format leads with the panel state', /^state=running mode=auto/.test(t1), JSON.stringify(t1.slice(0, 120)));
   const t2 = await (await fetch(textUrl, { headers: auth })).text();
   check('a quiet meeting produces an empty body, so the loop wakes nobody', t2 === '', JSON.stringify(t2));
+
+  // A typed message alone must produce a body, with no caption involved at all.
+  await fetch(`${base}/chat`, { method: 'POST', headers: auth, body: JSON.stringify({ session, role: 'user', text: 'ping from the panel' }) });
+  const tChat = await (await fetch(textUrl, { headers: auth })).text();
+  check('a typed message alone wakes the loop', /^chat> ping from the panel/m.test(tChat), JSON.stringify(tChat));
 
   await say('Bo: one more decision - we approved the migration ticket.\n');
   await sleep(800);

@@ -1616,6 +1616,16 @@ const server = http.createServer((req, res) => {
     const ackFrom = offsets[ackKey] || 0;
     offsets[ackKey] = ccr.seq;
 
+    // The user typing in the panel is a first-class input, not a side channel, and it has to WAKE the
+    // assistant: a question typed into a quiet meeting would otherwise sit unanswered until the next
+    // caption happened to arrive. Only their side is delivered - handing back the assistant's own replies
+    // would have it answer itself.
+    const c = chat.get(s) || { seq: 0, items: [] };
+    const chatKey = `${consumer}:chat`;
+    const chatFrom = offsets[chatKey] || 0;
+    const chatItems = c.items.filter((i) => i.seq > chatFrom && i.role === 'user');
+    offsets[chatKey] = c.seq;
+
     // A change the user made in the panel is worth an assistant turn on its own. Without this, pressing
     // Stop ended capture, the transcript stopped growing, nothing woke the assistant, and the wrap-up it
     // was supposed to write never happened. estTokens is excluded from the signature deliberately: it
@@ -1635,7 +1645,9 @@ const server = http.createServer((req, res) => {
         for (const e of status.suppress) out += `suppress[${e.kind || 'any'}] ${e.text}\n`;
       }
       for (const r of ccr.items.filter((i) => i.seq > ackFrom)) out += `callchat[${r.ok ? 'sent' : 'failed'}] ${r.reason || ''}\n`;
-      if (batch) out += `${statusChanged ? '--\n' : ''}${batch}`;
+      // Prefixed, and above the transcript: the user asking you something directly outranks the meeting.
+      for (const m of chatItems) out += `chat> ${String(m.text || '').replace(/\n/g, ' ')}\n`;
+      if (batch) out += `${statusChanged || chatItems.length ? '--\n' : ''}${batch}`;
       res.writeHead(200, { 'Content-Type': 'text/plain' });
       res.end(out);
       return;
@@ -1648,6 +1660,7 @@ const server = http.createServer((req, res) => {
       truncated: size > from,
       status,
       statusChanged,
+      chat: chatItems,
       pending: {
         callChatResults: ccr.items.filter((i) => i.seq > ackFrom),
         snapshotSeq: snapReq.get(s) || 0,
