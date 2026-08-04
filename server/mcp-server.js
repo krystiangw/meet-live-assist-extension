@@ -55,10 +55,20 @@ let TRANSCRIPTS_DIR = process.env.TRANSCRIPTS_DIR ? path.resolve(process.env.TRA
 // so every call would 403 on a token read from the wrong directory. /health needs no token, so ask.
 // Only meaningful for a local server, which is exactly the case that has a filesystem in common with us.
 let located = false;
+let locating = null;
+// Retrying is what makes this correct: the server normally starts after we do, so the first probe fails and
+// the answer arrives later. No cooldown between attempts - a cooldown means that for its duration every
+// call reports a bad token about a server that has just come up - but the probe is short, and while the
+// server is down the call was going to fail anyway.
 async function locateDataDir() {
   if (located || process.env.TRANSCRIPTS_DIR || process.env.MLA_TOKEN) return;
+  if (locating) return locating; // concurrent calls share one probe rather than each making their own
+  locating = attemptLocate().finally(() => { locating = null; });
+  return locating;
+}
+async function attemptLocate() {
   try {
-    const r = await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(5000) });
+    const r = await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(1500) });
     if (!r.ok) return;
     const { dir } = await r.json();
     if (dir && fs.existsSync(path.join(dir, '.mla-token'))) {
@@ -85,30 +95,34 @@ function headers() {
   return h;
 }
 
-// The wake loop, as a script rather than a one-liner, because three of its failure modes are silent and
-// each one costs the assistant the rest of the call:
-//   - no token: `curl -s` prints the 403 body, which is a non-empty body every 2 seconds, i.e. a wake
-//     storm - the exact opposite of what the gate exists for. Say it once, then back off.
-//   - server down: `curl -s` prints nothing and exits non-zero, so a dead server is indistinguishable
-//     from a quiet meeting. The loop claims to be the only way Stop reaches the assistant; it has to be
-//     able to say it went blind.
-//   - a hung server: no timeout means the loop stops polling and never says why.
+// The wake loop, as a script rather than a one-liner. It is the only thing that can start an assistant's
+// turn, so each of its failure modes costs the rest of a call, and all of them used to be silent.
+//
+// Decisions here that look fussy and are not:
+//   - The token is read from the FILE whenever there is one. This script runs in a shell the assistant
+//     spawns, which does not inherit this process's environment, so `$MLA_TOKEN` is empty there. The env
+//     branch exists only for a remote server, where there is no file to read.
+//   - The path is quoted. A data dir with a space in it made `cat` fail, and an empty token then produced
+//     a 403 reported to the user as "paste the token again" - about a token that was already correct.
+//   - `--fail-with-body` turns an HTTP error into exit 22 while still printing the body, so the three cases
+//     are told apart by exit code rather than by guessing from content. Matching the body against
+//     `forbidden*` swallowed any transcript line that happened to start with the word.
+//   - An unreachable server backs off like a rejected token does. Reporting it every two seconds is the
+//     wake storm the gate exists to prevent, only with no content at all.
 function wakeLoopFor(url) {
   const tokenFile = path.join(TRANSCRIPTS_DIR, '.mla-token');
-  // Prefer the file, so the token never appears in a command string the assistant will echo. With the
-  // token in the environment instead there is no file to read, so the loop inherits MLA_TOKEN.
-  const readToken = (!process.env.MLA_TOKEN && fs.existsSync(tokenFile))
-    ? `T=$(cat ${tokenFile})`
-    : 'T="$MLA_TOKEN"   # exported by whoever starts this loop';
+  const readToken = fs.existsSync(tokenFile)
+    ? `T=$(cat "${tokenFile}")`
+    : 'T="$MLA_TOKEN"   # remote server: no token file to read, so export it for this loop';
   return [
     readToken,
     'W=2',
     'while true; do',
-    `  B=$(curl -sS --max-time 10 -H "X-MLA-Token: $T" "${url}" 2>&1) || B="mla: cannot reach the bridge server"`,
-    '  case "$B" in',
-    '    forbidden*) [ "$W" = 2 ] && echo "mla: the server rejected the token - paste it again in the extension options"; W=30 ;;',
-    '    "") ;;',
-    '    *) printf "%s" "$B"; W=2 ;;',
+    `  B=$(curl -s --fail-with-body --max-time 10 -H "X-MLA-Token: $T" "${url}"); RC=$?`,
+    '  case "$RC" in',
+    '    0) [ -n "$B" ] && { printf "%s" "$B"; W=2; } ;;',
+    '    22) [ "$W" = 2 ] && echo "mla: the server rejected the request - check the token in the extension options"; W=30 ;;',
+    '    *) [ "$W" = 2 ] && echo "mla: cannot reach the bridge server - you are blind until it is back"; W=30 ;;',
     '  esac',
     '  sleep "$W"',
     'done',
@@ -196,9 +210,11 @@ const TOOLS = [
       // destructive, so sharing one meant a mid-turn `poll` could swallow the state change the loop was
       // about to wake on - including Stop, which is the one signal that has no other route. Separate
       // cursors cost nothing because a fresh consumer starts at the end of the channel, not at zero.
-      // `backlog=1` only matters the first time this consumer is seen, and then it is what gives an
-      // assistant joining a call in progress the meeting so far instead of silence.
-      const wakeUrl = `${BASE}/poll?session=${encodeURIComponent(pinned)}&consumer=${encodeURIComponent(AGENT)}&format=text&backlog=1`;
+      // Seed the loop's position at the start of the meeting HERE, rather than leaving `backlog=1` in the
+      // loop's URL for the rest of the call. With it in the URL, a position lost to eviction was recreated
+      // at zero and the loop replayed the whole meeting as if it had just been said.
+      await api('GET', `/poll?session=${encodeURIComponent(pinned)}&consumer=${encodeURIComponent(AGENT)}&backlog=1&seed=1`);
+      const wakeUrl = `${BASE}/poll?session=${encodeURIComponent(pinned)}&consumer=${encodeURIComponent(AGENT)}&format=text`;
       return {
         session: pinned, lines: info.lines, date: info.date, startedAt: info.startedAt, status: status.status,
         wakeLoop: wakeLoopFor(wakeUrl),

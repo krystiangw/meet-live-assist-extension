@@ -118,7 +118,19 @@ try {
   // The wake loop has to be told it only got part of what was waiting, or the assistant reasons from a
   // batch that stops mid-conversation without knowing it.
   const text = await (await fetch(`${base}/poll?session=${q}&consumer=limits-text&format=text&backlog=1`, { headers: auth })).text();
-  check('the text format says when it truncated', /truncated: \d+ more bytes waiting/.test(text), JSON.stringify(text.slice(0, 120)));
+  // It says the rest is queued, NOT "call poll": the tool reads under a different position and would hand
+  // back nothing at all.
+  check('the text format says when it truncated', /truncated: \d+ more bytes still queued/.test(text), JSON.stringify(text.slice(0, 140)));
+  check('and does not send the assistant to the wrong reader for the rest', !/call poll/.test(text), JSON.stringify(text.slice(0, 140)));
+
+  // A single line longer than the cap used to come back as an empty string, so its content was unreachable
+  // by any tail. /append takes a 1 MB body and does not insist on line breaks.
+  const huge = `${'z'.repeat(CAP + 1000)} - the tail of one enormous line\n`;
+  await fetch(`${base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session: 'one-huge-line', line: huge }) });
+  const oneLine = await (await fetch(`${base}/transcript?session=one-huge-line&tail=1`, { headers: auth })).json();
+  check('a single line longer than the cap still returns content', oneLine.text.length > 0, `${oneLine.text.length} chars`);
+  check('and it is the end of that line, which is what a tail means', /enormous line$/.test(oneLine.text.trim()), JSON.stringify(oneLine.text.slice(-40)));
+  check('within the cap', Buffer.byteLength(oneLine.text) <= CAP, `${Buffer.byteLength(oneLine.text)}`);
 
   // --- /transcript ----------------------------------------------------------------------------------
   const tr = await (await fetch(`${base}/transcript?session=${q}&tail=2000`, { headers: auth })).json();

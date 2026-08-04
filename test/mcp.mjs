@@ -137,10 +137,15 @@ try {
   check('attach pins the active meeting', !attached.isError && attached.data.session === session, attached.text);
   check('attach reports the panel state', !!attached.data?.status, attached.text);
   check('attach hands back a ready-to-run wake loop', /curl .*\/poll\?/.test(attached.data.wakeLoop || ''), attached.data.wakeLoop);
-  // The wake loop and this adapter are one assistant with one read position. If attach handed out a
-  // different consumer than `poll` uses, each would replay the meeting into the other's blind spot.
-  check('the wake loop polls under the same consumer as the poll tool',
-    (attached.data.wakeLoop || '').includes('consumer=test-agent'), attached.data.wakeLoop);
+  check('the wake loop polls under this assistant\'s own name', (attached.data.wakeLoop || '').includes('consumer=test-agent'), attached.data.wakeLoop);
+  // The loop's URL must NOT carry backlog: a position lost to eviction would then be recreated at zero and
+  // the whole meeting replayed as if it had just been said.
+  check('and its URL does not ask for the backlog every time', !(attached.data.wakeLoop || '').includes('backlog'), attached.data.wakeLoop);
+  // Re-attaching is routine (a client reconnects) and must not consume what the loop has not read yet.
+  // `attach` seeds the position; seeding only on creation meant the second attach fell through to a real
+  // read and ate the batch.
+  await call(rpc, 'attach');
+  await call(rpc, 'attach');
 
   // A meeting name that is the string "undefined" is what a caller writes after interpolating a variable
   // that was never set. Real data on this machine still contains one from the day an interview landed in
@@ -207,21 +212,40 @@ try {
   // on a plain object those inherit from the prototype, so the offset came back as a function, the batch
   // was never non-empty, and that reader was deaf for the rest of the meeting with no error anywhere.
   for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
-    const r = await (await fetch(`${base}/poll?session=${encodeURIComponent(session)}&consumer=${encodeURIComponent(name)}&backlog=1`, { headers: auth })).json();
+    const q = `session=${encodeURIComponent(session)}&consumer=${encodeURIComponent(name)}`;
+    const r = await (await fetch(`${base}/poll?${q}&backlog=1`, { headers: auth })).json();
     check(`a reader named "${name}" is not deaf`, /ship the release on Monday/.test(r.batch || ''), JSON.stringify(r.batch));
+    // "Not deaf" is not enough: on a plain object `__proto__` reached the prototype, which is truthy and an
+    // object, so the position was written onto Object.prototype for the whole process and the session's
+    // record stayed empty - and the reader still looked like it worked, because the position "advanced".
+    const again = await (await fetch(`${base}/poll?${q}`, { headers: auth })).json();
+    check(`and its position is remembered rather than written to a prototype`, (again.batch || '') === '', JSON.stringify(again.batch));
   }
+  await sleep(400);
+  const protoState = JSON.parse(readFileSync(path.join(dir, '.state', 'pollOffsets.json'), 'utf8'));
+  const protoKeys = Object.keys((protoState.find(([k]) => k === session) || [null, {}])[1]);
+  check('a prototype-named reader is a real stored key, not a lost write',
+    protoKeys.includes('__proto__') && protoKeys.includes('constructor'), protoKeys.join(','));
+  check('and nothing leaked onto Object.prototype in this process either', !('wake' in Object.prototype));
 
   // Read positions are bounded: `consumer` comes off the query string, so without a cap every value ever
-  // used would persist for the life of the meeting and be re-serialised on every snapshot tick.
-  for (let i = 0; i < 20; i++) await fetch(`${base}/poll?session=${encodeURIComponent(session)}&consumer=throwaway-${i}`, { headers: auth });
+  // used would persist for the life of the meeting and be re-serialised on every snapshot tick. But a reader
+  // that is actively polling must never be the one evicted - losing a wake loop's place is not a cache miss,
+  // it is a replay of the whole meeting or silence for the rest of the call.
+  await loop(); // leave the loop's position exactly at the end, so a replay would be obvious
+  for (let i = 0; i < 40; i++) await fetch(`${base}/poll?session=${encodeURIComponent(session)}&consumer=throwaway-${i}`, { headers: auth });
   await sleep(400);
   const stateFile = JSON.parse(readFileSync(path.join(dir, '.state', 'pollOffsets.json'), 'utf8'));
   const kept = Object.keys((stateFile.find(([k]) => k === session) || [null, {}])[1]);
   check('the number of remembered readers is bounded', kept.length <= 8, `${kept.length}: ${kept.join(',')}`);
-  // The loop is what must never be evicted, and it will not be: eviction is least-recently-seen and the
-  // loop is the reader that polls constantly.
-  await loop();
-  check('the wake loop keeps its position through eviction', (await loop()) === '', 'the loop lost its place');
+  check('and the wake loop is not among the evicted', kept.includes('test-agent'), kept.join(','));
+
+  await say('Ana: we agreed the migration lands this sprint.\n');
+  await sleep(800);
+  const afterEviction = await loop();
+  check('the loop reads only what is new after an eviction storm', /migration lands this sprint/.test(afterEviction), JSON.stringify(afterEviction));
+  check('and does not replay the meeting from the start',
+    !/ship the release on Monday/.test(afterEviction), JSON.stringify(afterEviction.slice(0, 120)));
 
   // --- the writes an assistant actually makes ---
   const advice = await call(rpc, 'advice', { text: 'QA is not done - do not commit to Friday', marker: 'RISK' });
@@ -352,6 +376,55 @@ try {
   check('a request still in flight is answered before the process exits',
     answered.some((m) => m.id === 2 && m.result && !m.result.isError), pipedOut.slice(0, 200));
 
+  // --- finding the data dir with no configuration at all --------------------------------------------
+  // Every other adapter here is handed both TRANSCRIPTS_DIR and MLA_TOKEN, so the discovery path never ran.
+  // It is the path a real install uses: `claude mcp add` passes no environment, and the adapter starts with
+  // the client's session, normally BEFORE the bridge server. Latching the guessed directory on that first
+  // failed probe reported "token rejected" for the rest of the session, at a path with no token in it.
+  const blind = spawn(process.execPath, [path.join(ROOT, 'server', 'mcp-server.js')], {
+    cwd: tmpdir(), // away from the repo, so the repo-adjacent guess cannot accidentally be right
+    env: { ...process.env, MLA_URL: base, MLA_AGENT: 'blind', TRANSCRIPTS_DIR: '', MLA_TOKEN: '' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const rpcBlind = client(blind);
+  await rpcBlind.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'blind', version: '0' } });
+  const found = await call(rpcBlind, 'attach', { session, force: true });
+  check('an adapter given no configuration finds the data dir by asking the server', !found.isError, found.text);
+  check('and works with the token it found there', found.data?.session === session, found.text);
+  blind.kill('SIGKILL');
+
+  // The startup order that actually happens: the adapter comes up with the client's session, BEFORE the
+  // bridge server. Its first probe fails, and the answer only exists later - so a failed probe must not be
+  // remembered as the answer. Latching it meant every call for the rest of the session reported a rejected
+  // token, at a directory that had never held one.
+  const latePort = await freePort();
+  const lateDir = mkdtempSync(path.join(tmpdir(), 'mla-late-'));
+  const early2 = spawn(process.execPath, [path.join(ROOT, 'server', 'mcp-server.js')], {
+    cwd: tmpdir(),
+    env: { ...process.env, MLA_URL: `http://127.0.0.1:${latePort}`, MLA_AGENT: 'early', TRANSCRIPTS_DIR: '', MLA_TOKEN: '' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const rpcEarly = client(early2);
+  await rpcEarly.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'early', version: '0' } });
+  const whileDown = await call(rpcEarly, 'attach', {});
+  check('a probe against a server that is not up yet reports unreachable, not a bad token',
+    whileDown.isError && /not reachable/.test(whileDown.text), whileDown.text);
+
+  const late = spawn(process.execPath, [path.join(ROOT, 'server', 'transcript-server.js')], {
+    env: { ...process.env, PORT: String(latePort), TRANSCRIPTS_DIR: lateDir },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  for (let i = 0; i < 40; i++) {
+    try { if ((await fetch(`http://127.0.0.1:${latePort}/health`)).ok) break; } catch (_) { await sleep(250); }
+  }
+  const lateAuth = { 'Content-Type': 'application/json', 'X-MLA-Token': readFileSync(path.join(lateDir, '.mla-token'), 'utf8').trim() };
+  await fetch(`http://127.0.0.1:${latePort}/append`, { method: 'POST', headers: lateAuth, body: JSON.stringify({ session: '2026-05-05_late', line: 'Ana: we decided to start late.\n' }) });
+  const afterUp = await call(rpcEarly, 'attach', {});
+  check('and once the server is up the same adapter finds it', !afterUp.isError && afterUp.data?.session === '2026-05-05_late', afterUp.text);
+  early2.kill('SIGKILL');
+  late.kill('SIGKILL');
+  rmSync(lateDir, { recursive: true, force: true });
+
   // --- the wake loop's own failure modes ------------------------------------------------------------
   // The loop is the wake source, so its failures cost turns. With a token the server rejects, `curl -s`
   // printed the 403 body - a non-empty body every 2 seconds, i.e. a wake every 2 seconds for as long as
@@ -364,7 +437,7 @@ try {
   badToken.kill('SIGKILL');
   const complaints = badOut.split('\n').filter((l) => l.trim()).length;
   check('a rejected token is reported once, not on every iteration', complaints === 1, `${complaints} lines: ${JSON.stringify(badOut)}`);
-  check('and it says what to do about it', /rejected the token/.test(badOut), JSON.stringify(badOut));
+  check('and it says what to do about it', /check the token/.test(badOut), JSON.stringify(badOut));
 
   // A dead server used to be indistinguishable from a quiet meeting: `curl -s` prints nothing and exits
   // non-zero. The loop claims to be the only route by which Stop reaches the assistant, so going blind is

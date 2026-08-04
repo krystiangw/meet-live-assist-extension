@@ -134,7 +134,9 @@ try {
   await post('/callchat-result', { session, seq: cc2.items[0].seq, ok: false, reason: 'chat panel not open' });
   const ccr = await (await get(`/callchat-result?session=${q}&since=0`)).json();
   check('the panel can report a delivery failure', ccr.items.length === 1 && ccr.items[0].ok === false, JSON.stringify(ccr.items));
-  const assistantSees = await (await get(`/poll?session=${q}&consumer=brain`)).json();
+  // backlog=1 mirrors what `attach` seeds for a real assistant: a reader created from nothing starts at
+  // the end, so without it this delivery failure predates its position.
+  const assistantSees = await (await get(`/poll?session=${q}&consumer=brain&backlog=1`)).json();
   check('and the assistant is told about it on its next poll',
     assistantSees.pending.callChatResults.some((r) => r.ok === false), JSON.stringify(assistantSees.pending));
 

@@ -523,9 +523,10 @@ const pollOffsets = store.map('pollOffsets');
 // to a model in one tool result is how you spend a context window on backlog. The remainder is not
 // dropped: a capped poll leaves the rest for the next one and says `truncated: true`.
 const POLL_MAX_BYTES = 64 * 1024;
-// How many distinct consumers a session remembers a read position for. One assistant needs two (its wake
-// loop and its tools); the rest of the room is for a handover or a second agent looking on.
-const POLL_MAX_CONSUMERS = 8; // session -> [{ at, src, norm }]
+// How many distinct readers a session remembers a position for. One assistant needs two (its wake loop and
+// its tools); the rest of the room is for a handover or a second agent looking on.
+const POLL_MAX_CONSUMERS = 8;
+ // session -> [{ at, src, norm }]
 const normStt = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 function isSttEcho(session, src, text) {
   const norm = normStt(text);
@@ -1559,13 +1560,18 @@ const server = http.createServer((req, res) => {
       } catch (_) {}
     }
     const claim = session ? takeover.get(session) : null;
+    const pingAge = ping ? Date.now() - ping : null;
+    const claimAge = claim ? Date.now() - claim.ts : null;
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       session: session || null, lines, date, startedAt,
-      assistantAgeMs: ping ? Date.now() - ping : null,
-      // Who holds it. Without the name, an assistant reconnecting to its OWN meeting cannot tell its own
-      // heartbeat from a rival's and talks itself out of a call it is already assisting.
+      // Who holds it, and how long ago each signal was. Without the name, an assistant reconnecting to its
+      // OWN meeting cannot tell its own liveness from a rival's and talks itself out of a call it is already
+      // assisting. Both ages are reported because the heartbeat is only bumped by the `working` tool: an
+      // assistant that polls and advises without calling it looked absent, and the claim is then the only
+      // evidence it exists.
       assistant: claim ? claim.agent : null,
+      assistantAgeMs: (pingAge != null && claimAge != null) ? Math.min(pingAge, claimAge) : (pingAge != null ? pingAge : claimAge),
     }));
     return;
   }
@@ -1619,10 +1625,37 @@ const server = http.createServer((req, res) => {
     let size = 0;
     try { size = fs.statSync(wf).size; } catch (_) { /* no wake file yet */ }
 
-    // A consumer nobody has seen before starts at the END, not at zero. Replaying an hour of a meeting
-    // into a fresh reader is never what it wanted - `transcript` exists for catching up deliberately, and
-    // it can be asked for a bounded amount. `backlog=1` opts into the whole thing.
-    if (!cur) cur = { wake: u.searchParams.get('backlog') === '1' ? 0 : size, chat: 0, callchat: 0, sig: '' };
+    // A reader nobody has seen before starts at the END of everything, not at zero. Replaying an hour of a
+    // meeting into a fresh reader is never what it wanted - `transcript` exists for catching up
+    // deliberately, and it can be asked for a bounded amount. This has to cover the chat and the delivery
+    // acks as well as the transcript: leaving those at 0 meant a reader's first poll returned every
+    // question the user had typed all meeting, and the assistant answered them all again.
+    const backlog = u.searchParams.get('backlog') === '1';
+    if (!cur) {
+      cur = {
+        wake: backlog ? 0 : size,
+        chat: backlog ? 0 : (chat.get(s) || { seq: 0 }).seq,
+        callchat: backlog ? 0 : (callChatResult.get(s) || { seq: 0 }).seq,
+        sig: '',
+      };
+    }
+
+    // `seed` creates the position if it is missing and then stops, reading nothing. It exists so `attach`
+    // can put a wake loop's cursor at the start of the meeting WITHOUT leaving `backlog` in the loop's URL
+    // for the rest of the call: with it there, a position lost to eviction was recreated at zero and the
+    // loop replayed the whole meeting as if it had just been said.
+    //
+    // It must return here even when the position already existed. Honouring it only on creation meant a
+    // re-attach - which happens whenever a client reconnects - fell through to a normal read and silently
+    // ate the batch the wake loop had not collected yet.
+    if (u.searchParams.get('seed') === '1') {
+      cur.at = Date.now();
+      offsets[consumer] = cur;
+      pollOffsets.set(s, offsets);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ session: s, seeded: true }));
+      return;
+    }
 
     let from = typeof cur.wake === 'number' ? cur.wake : 0;
     let batch = '';
@@ -1671,14 +1704,22 @@ const server = http.createServer((req, res) => {
     cur.sig = sig;
 
     cur.at = Date.now();
+    cur.n = (typeof cur.n === 'number' ? cur.n : 0) + 1; // how established this reader is; see the eviction below
     offsets[consumer] = cur;
     // Bound the per-session consumer list. `consumer` comes off the query string, so every value ever used
     // would otherwise persist for the life of the meeting; 2000 of them measured at 807 KB, re-serialised
     // every snapshot tick. Evict least-recently-seen, which never touches an assistant that is polling.
     const names = Object.keys(offsets);
     if (names.length > POLL_MAX_CONSUMERS) {
-      names.sort((a, b) => (offsets[b].at || 0) - (offsets[a].at || 0));
-      for (const stale of names.slice(POLL_MAX_CONSUMERS)) delete offsets[stale];
+      // Evict by how ESTABLISHED a reader is, not by how recently it was seen. Recency alone gets this
+      // backwards: forty one-shot readers are all newer than the wake loop, so the loop - the one reader
+      // whose position must not be lost - was the first to go. A loop polls every two seconds and has a
+      // count in the hundreds within minutes; a throwaway has one. Ties break on age.
+      const rec = (k) => (offsets[k] && typeof offsets[k] === 'object') ? offsets[k] : {};
+      const polls = (k) => (typeof rec(k).n === 'number' ? rec(k).n : 0);
+      const seenAt = (k) => (typeof rec(k).at === 'number' ? rec(k).at : 0);
+      names.sort((a, b) => (polls(a) - polls(b)) || (seenAt(a) - seenAt(b)));
+      for (const stale of names.slice(0, names.length - POLL_MAX_CONSUMERS)) delete offsets[stale];
     }
     pollOffsets.set(s, offsets);
 
@@ -1694,9 +1735,10 @@ const server = http.createServer((req, res) => {
       for (const r of ccr.items.filter((i) => i.seq > ackFrom)) out += `callchat[${r.ok ? 'sent' : 'failed'}] ${r.reason || ''}\n`;
       // Prefixed, and above the transcript: the user asking you something directly outranks the meeting.
       for (const m of chatItems) out += `chat> ${String(m.text || '').replace(/\n/g, ' ')}\n`;
-      // The loop is told when it only got part of what was waiting, so the assistant knows to call `poll`
-      // for the rest instead of reasoning from a batch that stops mid-conversation.
-      if (size > from) out += `truncated: ${size - from} more bytes waiting - call poll\n`;
+      // Say when this was only part of what was waiting, so the assistant knows it is reasoning from a batch
+      // that stops mid-conversation. NOT "call poll": the tool reads under a different position and would
+      // hand back nothing. The rest arrives on this loop's next read, two seconds later.
+      if (batch && size > from) out += `truncated: ${size - from} more bytes still queued, arriving next read\n`;
       if (batch) out += `${statusChanged || chatItems.length ? '--\n' : ''}${batch}`;
       res.writeHead(200, { 'Content-Type': 'text/plain' });
       res.end(out);
@@ -1743,7 +1785,15 @@ const server = http.createServer((req, res) => {
         if (bytes > POLL_MAX_BYTES) break;
         keepFrom = i;
       }
-      slice = slice.slice(keepFrom);
+      // Always hand back something. A single line longer than the cap - `/append` takes a 1 MB body and does
+      // not insist on line breaks - broke out on the first iteration and returned an empty string, so the
+      // content was unreachable by any `tail`. Cut that one line by bytes instead, keeping its end.
+      if (keepFrom >= slice.length) {
+        const last = Buffer.from(slice[slice.length - 1] || '', 'utf8');
+        slice = [last.slice(Math.max(0, last.length - POLL_MAX_BYTES)).toString('utf8').replace(/^\uFFFD/, '')];
+      } else {
+        slice = slice.slice(keepFrom);
+      }
     }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ session: s, text: slice.join('\n'), lines: slice.length, totalLines: lines.length, truncated }));
