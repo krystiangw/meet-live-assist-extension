@@ -20,6 +20,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { execFile, spawn } = require('child_process');
+const { createStore } = require('./state-store');
 
 const IS_MAC = process.platform === 'darwin';
 
@@ -317,6 +318,12 @@ const TRANSCRIPTS_DIR = process.env.TRANSCRIPTS_DIR
 
 fs.mkdirSync(TRANSCRIPTS_DIR, { recursive: true });
 
+// Live session state (advice, board, chat, wake buffer, ...) lived in plain Maps, so restarting the
+// server mid-call dropped the meeting's history. These are still Maps to every call site below; they
+// just load from and snapshot to <TRANSCRIPTS_DIR>/.state/. See state-store.js for why the snapshot
+// is periodic rather than write-through.
+const store = createStore({ dir: TRANSCRIPTS_DIR, log: (m) => console.log(m) });
+
 // Shared secret. Without it any website you visit could POST /speak, /edit or read /dom & /debug
 // (DOM + localStorage/cookies/network of the shared tab) on this localhost server. Every route but
 // /health requires the token in an `X-MLA-Token` header. Paste it into the extension options once;
@@ -339,10 +346,16 @@ function purgeOld() {
   const cutoff = Date.now() - RETENTION_DAYS * 864e5;
   try {
     for (const f of fs.readdirSync(TRANSCRIPTS_DIR)) {
-      if (f.startsWith('.')) continue; // never touch .mla-token etc.
+      if (f.startsWith('.')) continue; // never touch .mla-token or .state/
       if (!/\.(txt|md|wake|wakeall)$/.test(f)) continue; // .txt / .chat.txt / .mode.txt / .summary.md / .wake / .wakeall only
       const p = path.join(TRANSCRIPTS_DIR, f);
-      try { if (fs.statSync(p).mtimeMs < cutoff) fs.unlinkSync(p); } catch (_) {}
+      try {
+        if (fs.statSync(p).mtimeMs >= cutoff) continue;
+        fs.unlinkSync(p);
+        // Purging the transcript has to purge the session's live state too, or a retention sweep
+        // leaves advice and board items for a meeting whose text is gone.
+        store.forget(f.replace(/\.(chat\.txt|mode\.txt|summary\.md|txt|wake|wakeall)$/, ''));
+      } catch (_) {}
     }
     if (fs.existsSync(SNAP_DIR)) for (const d of fs.readdirSync(SNAP_DIR)) {
       const dp = path.join(SNAP_DIR, d);
@@ -351,71 +364,71 @@ function purgeOld() {
   } catch (_) {}
 }
 
-const seenSessions = new Set();
+const seenSessions = store.set('seenSessions');
 
 // Advice channel (Phase 1): the "brain" POSTs advice here; the side panel polls it.
 // In-memory only - advice is ephemeral live guidance, not a record.
-const advice = new Map(); // session -> { seq, items: [{ seq, ts, marker, text }] }
+const advice = store.map('advice'); // session -> { seq, items: [{ seq, ts, marker, text }] }
 const ADVICE_MAX = 200;
 const MARKERS = new Set(['SAY', 'INFO', 'SUMMARY', 'EXPLAIN', 'RISK', 'ACTION']);
 
 // Agent-requested snapshots: the brain bumps a seq; the side panel polls it and triggers a capture.
-const snapReq = new Map(); // session -> seq
+const snapReq = store.map('snapReq'); // session -> seq
 
 // Two-way chat: panel <-> brain. User messages are also appended to <session>.chat.txt so the
 // brain (Claude Code session) can tail them and reply via POST /chat {role:"agent"}.
-const chat = new Map(); // session -> { seq, items: [{ seq, ts, role, text, image }] }
+const chat = store.map('chat'); // session -> { seq, items: [{ seq, ts, role, text, image }] }
 const CHAT_MAX = 300;
 function chatFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.chat.txt`); }
 
 // Presentation-only live DOM edits: brain enqueues an edit; panel polls and applies it to the shared tab.
-const edits = new Map();  // session -> { seq, items: [cmd] }
-const domReq = new Map(); // session -> seq (brain asks the extension to capture the page DOM)
-const doms = new Map();   // session -> html (captured DOM for the brain to inspect)
+const edits = store.map('edits');  // session -> { seq, items: [cmd] }
+const domReq = store.map('domReq'); // session -> seq (brain asks the extension to capture the page DOM)
+const doms = store.map('doms');   // session -> html (captured DOM for the brain to inspect)
 
 // Live debugging: brain asks for a kind (storage/network/console); extension gathers and posts it back.
-const dbgReq = new Map();  // session -> { seq, kind }
-const dbgData = new Map(); // session -> { kind, data }
+const dbgReq = store.map('dbgReq');  // session -> { seq, kind }
+const dbgData = store.map('dbgData'); // session -> { kind, data }
 
 // Brain liveness: the brain (Claude session running the skill) heartbeats here each loop;
 // the panel polls it to show whether an assistant is actually attached to this meeting.
-const brainPing = new Map(); // session -> last heartbeat ms
-const brainStatus = new Map(); // session -> { text, ts } current agent activity ("creating Jira ticket…"); '' = idle
-const control = new Map(); // session -> 'running' | 'paused' | 'stopped' - panel drives it; the brain obeys
+const brainPing = store.map('brainPing'); // session -> last heartbeat ms
+const brainStatus = store.map('brainStatus'); // session -> { text, ts } current agent activity ("creating Jira ticket…"); '' = idle
+const control = store.map('control'); // session -> 'running' | 'paused' | 'stopped' - panel drives it; the brain obeys
 
 // Live decisions + action items captured by the brain during the call (the board; source for Jira drafts).
-const items = new Map(); // session -> { seq, list: [{ seq, ts, kind, text, owner, blockedBy }] }
+const items = store.map('items'); // session -> { seq, list: [{ seq, ts, kind, text, owner, blockedBy }] }
 const ITEMS_MAX = 200;
 const ITEM_KINDS = new Set(['decision', 'action']);
 
 // Autopilot: whether the brain may auto-create action items and post links to the call chat (user opt-in).
-const autopilot = new Map(); // session -> { create, postChat }
+const autopilot = store.map('autopilot'); // session -> { create, postChat }
 // Brain -> panel -> content script: messages to type into the meeting chat (gated by autopilot.postChat).
-const callChat = new Map(); // session -> { seq, items: [{ seq, text }] }
+const callChat = store.map('callChat'); // session -> { seq, items: [{ seq, text }] }
 // Content script -> panel -> server: delivery ACK for a /callchat message (did it actually land in Meet?).
-const callChatResult = new Map(); // session -> { seq, items: [{ seq, ok, reason }] }
+const callChatResult = store.map('callChatResult'); // session -> { seq, items: [{ seq, ok, reason }] }
 // Handoff between assistants: the latest brain to claim a meeting. A previous assistant sees a newer
 // agent here and yields, so takeover is automatic instead of a manual clad-task.
-const takeover = new Map(); // session -> { agent, ts }
+const takeover = store.map('takeover'); // session -> { agent, ts }
 
 // Agent-driven page actions (flow testing / debugging in the user's real tab). Gated by `drive` (panel
 // opt-in). Brain enqueues to /act, the extension executes on the app tab and posts the outcome to /act-result.
-const drive = new Map();       // session -> bool (is the user letting the agent control the tab?)
-const acts = new Map();        // session -> { seq, items: [cmd] }
-const actResults = new Map();  // session -> { seq, items: [{ seq, ok, value, error }] }
+const drive = store.map('drive');       // session -> bool (is the user letting the agent control the tab?)
+const acts = store.map('acts');        // session -> { seq, items: [cmd] }
+const actResults = store.map('actResults');  // session -> { seq, items: [{ seq, ok, value, error }] }
 const ACT_OPS = new Set(['click', 'type', 'press', 'navigate', 'waitFor', 'getText', 'exists', 'select', 'scroll']);
 
 // Suppressions: the user dismissed an advice/action and asked for "no more like this". The brain reads
 // these each turn and skips advice/actions on a suppressed topic.
-const suppress = new Map(); // session -> [{ text, kind, ts }]
+const suppress = store.map('suppress'); // session -> [{ text, kind, ts }]
 const SUPPRESS_TTL_MS = 8 * 3600 * 1000; // drop dismissals older than 8h (defensive against stale bleed)
 
 // Post-call artifact: the brain writes a summary + action items at wrap-up; the panel offers copy/download.
-const summaries = new Map(); // session -> markdown
+const summaries = store.map('summaries'); // session -> markdown
 function summaryFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.summary.md`); }
 
 // Meeting mode - steers how the brain advises. Panel sets it; brain reads it each turn.
-const modes = new Map(); // session -> mode
+const modes = store.map('modes'); // session -> mode
 const MODES = new Set(['auto', 'listener', 'lead', 'explain', 'produce']);
 function modeFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.mode.txt`); }
 
@@ -460,27 +473,36 @@ const WAKE_MAX_MS = parseInt(process.env.WAKE_MAX_MS || '90000', 10);     // wid
 const WAKE_MIN_GAP_MS = parseInt(process.env.WAKE_MIN_GAP_MS || '8000', 10); // never wake twice inside this
 const WAKE_FORCE_MS = parseInt(process.env.WAKE_FORCE_MS || '180000', 10);   // even pure chatter lands eventually - never go blind longer
 const WAKE_MAX_CHARS = parseInt(process.env.WAKE_MAX_CHARS || '4000', 10);   // a burst this big is substance by volume alone
-const wakeBuf = new Map(); // session -> { lines, firstAt, since, window, lastAt, timer }
+const wakeBuf = store.map('wakeBuf', { omit: ['timer'] }); // session -> { lines, firstAt, since, window, lastAt, timer }
 
 // Per-session escape hatch: wake on EVERY line, small talk included, so `.wake` mirrors `.txt`. For calls
 // where the brain must see the verbatim flow (dictation, note-taking, judging the gate itself) - it costs a
 // turn per batch, which is exactly what the gate exists to avoid, so the gate stays the default.
 // Set via POST /wake-mode; WAKE_ALL=1 flips the default for the whole server.
 const WAKE_ALL_DEFAULT = process.env.WAKE_ALL === '1';
-const wakeAll = new Map(); // session -> boolean
-const remoteNames = new Map(); // session -> display name for tab-audio STT lines (1:1 only)
+const wakeAll = store.map('wakeAll'); // session -> boolean
+const remoteNames = store.map('remoteNames'); // session -> display name for tab-audio STT lines (1:1 only)
 // Language for STT, pinned per session. Only the Meet content script can report the call's caption language,
 // so on Zoom every chunk ran with lang=auto - and auto-detect on a 4s chunk sometimes picks the wrong
 // language outright: a Polish sentence came back as "Por um tanto de burro." Pinning removes that class of
 // failure at no measured cost (a pinned 'pl' transcribed an English sample correctly anyway).
-const sttLangs = new Map(); // session -> 'pl' | 'en' | ...
+const sttLangs = store.map('sttLangs'); // session -> 'pl' | 'en' | ...
 
 // Cross-channel echo guard. The two STT channels can hear the same speech: if the other side has no
 // headphones, the user's voice returns through their mic into the tab channel (measured on a live call with
 // a second device in the room - the same utterance landed as both 'You' and the remote speaker). Keep a
 // short window of recent lines per session and drop one that just arrived on the OTHER channel.
 const STT_ECHO_MS = parseInt(process.env.STT_ECHO_MS || '9000', 10);
-const sttRecent = new Map(); // session -> [{ at, src, norm }]
+const sttRecent = store.map('sttRecent');
+
+// Where each assistant has read up to on the wake channel, so nobody keeps a byte offset in a shell
+// variable any more. Nested per session (session -> { consumer: offset }) rather than keyed
+// `session|consumer`, so wiping a meeting clears its offsets with everything else.
+const pollOffsets = store.map('pollOffsets');
+// Cap on a single poll or transcript read. A 40-minute call is a few hundred KB, and handing all of it
+// to a model in one tool result is how you spend a context window on backlog. The remainder is not
+// dropped: a capped poll leaves the rest for the next one and says `truncated: true`.
+const POLL_MAX_BYTES = 64 * 1024; // session -> [{ at, src, norm }]
 const normStt = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 function isSttEcho(session, src, text) {
   const norm = normStt(text);
@@ -1082,13 +1104,11 @@ const server = http.createServer((req, res) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const s = safeSession(d.session);
       for (const suf of ['.txt', '.wake', '.wakeall', '.chat.txt', '.mode.txt', '.summary.md']) { try { fs.unlinkSync(path.join(TRANSCRIPTS_DIR, s + suf)); } catch (_) {} }
-      wakeAll.delete(s);
-      remoteNames.delete(s);
-      sttLangs.delete(s);
       try { fs.rmSync(path.join(SNAP_DIR, s), { recursive: true, force: true }); } catch (_) {}
       { const b = wakeBuf.get(s); if (b && b.timer) clearTimeout(b.timer); }
-      for (const m of [advice, chat, items, modes, edits, domReq, doms, dbgReq, dbgData, snapReq, brainPing, brainStatus, control, wakeBuf, summaries, autopilot, callChat, callChatResult, takeover, drive, acts, actResults, suppress]) m.delete(s);
-      seenSessions.delete(s);
+      // Drops the key from every registered store. The hand-written list this replaced had grown to 27
+      // names and had already missed one (sttRecent), so a wiped meeting kept its STT dedup state.
+      store.forget(s);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     });
@@ -1445,13 +1465,201 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ---------------------------------------------------------------------------------------------------
+  // Assistant-facing reads, shaped for the MCP adapter (server/mcp-server.js).
+  //
+  // These exist because the assistant's two most important inputs were not HTTP at all: it resolved the
+  // active meeting with `ls -t` and read new captions by tailing `<session>.wake` with `tail -c +N`,
+  // keeping the byte offset in a shell variable. Both need a filesystem, so neither survives the
+  // assistant running anywhere but this machine. Same data, over the wire, with the offset held here.
+
+  // Which meeting is live, and is someone already assisting it?
+  if (req.method === 'GET' && req.url.startsWith('/sessions')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const want = u.searchParams.get('session');
+    let session = '';
+    if (want) {
+      const s = safeSession(want);
+      if (fs.existsSync(fileFor(s))) session = s;
+    } else {
+      let newest = 0;
+      try {
+        for (const f of fs.readdirSync(TRANSCRIPTS_DIR)) {
+          if (!f.endsWith('.txt') || f.endsWith('.chat.txt') || f.endsWith('.mode.txt')) continue;
+          const m = fs.statSync(path.join(TRANSCRIPTS_DIR, f)).mtimeMs;
+          if (m > newest) { newest = m; session = f.slice(0, -4); }
+        }
+      } catch (_) {}
+    }
+    const ping = session ? (brainPing.get(session) || 0) : 0;
+    let lines = 0; let startedAt = null;
+    if (session) {
+      try {
+        const st = fs.statSync(fileFor(session));
+        startedAt = new Date(st.birthtimeMs || st.mtimeMs).toISOString();
+        lines = fs.readFileSync(fileFor(session), 'utf8').split('\n').length - 1;
+      } catch (_) {}
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      session: session || null, lines, startedAt,
+      otherAssistantAgeMs: ping ? Date.now() - ping : null,
+    }));
+    return;
+  }
+
+  // The keystone. New wake batch since this consumer's last poll, plus everything the assistant used to
+  // fetch separately. `consumer` is per assistant, not per session, so two assistants do not eat each
+  // other's batches; `statusOnly` reads without consuming, for a first attach.
+  if (req.method === 'GET' && req.url.startsWith('/poll')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const s = safeSession(u.searchParams.get('session'));
+    const consumer = String(u.searchParams.get('consumer') || 'default').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 60);
+    const statusOnly = u.searchParams.get('statusOnly') === '1';
+    const asText = u.searchParams.get('format') === 'text';
+
+    const ap = autopilot.get(s) || { create: false, postChat: false };
+    const status = {
+      state: control.get(s) || 'running',
+      mode: modes.get(s) || 'auto',
+      wake: isWakeAll(s) ? 'all' : 'gated',
+      autopilot: { create: !!ap.create, postChat: !!ap.postChat },
+      remoteName: remoteNames.get(s) || null,
+      sttLang: sttLangs.get(s) || null,
+      suppress: (suppress.get(s) || [])
+        .filter((e) => !e.ts || Date.now() - e.ts < SUPPRESS_TTL_MS)
+        .map(({ text, kind }) => ({ text, kind })),
+      estTokens: estTokensFor(s),
+    };
+    if (statusOnly) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ session: s, batch: '', status }));
+      return;
+    }
+
+    // Deliberately does NOT flush the wake buffer. Held lines are held because the gate judged them not
+    // worth a turn yet; forcing them out on a 2-second poll would make every poll return a batch and undo
+    // the gate entirely (measured on a real call: 786 wakes gated down to 189). Nothing is stranded
+    // either - WAKE_FORCE_MS bounds how long even pure chatter can sit there.
+    const wf = wakeFileFor(s);
+    const offsets = pollOffsets.get(s) || {};
+    let from = offsets[consumer] || 0;
+    let batch = '';
+    let size = 0;
+    try {
+      size = fs.statSync(wf).size;
+      if (size < from) from = 0; // the meeting was cleared and the file restarted
+      if (size > from) {
+        const fd = fs.openSync(wf, 'r');
+        try {
+          const buf = Buffer.alloc(Math.min(size - from, POLL_MAX_BYTES));
+          const read = fs.readSync(fd, buf, 0, buf.length, from);
+          batch = buf.slice(0, read).toString('utf8');
+          from += read; // a capped read leaves the rest for the next poll rather than dropping it
+        } finally { fs.closeSync(fd); }
+      }
+    } catch (_) { /* no wake file yet: nothing has been judged worth a turn */ }
+    offsets[consumer] = from;
+    pollOffsets.set(s, offsets);
+
+    const ccr = callChatResult.get(s) || { seq: 0, items: [] };
+    const ackKey = `${consumer}:callchat`;
+    const ackFrom = offsets[ackKey] || 0;
+    offsets[ackKey] = ccr.seq;
+
+    // A change the user made in the panel is worth an assistant turn on its own. Without this, pressing
+    // Stop ended capture, the transcript stopped growing, nothing woke the assistant, and the wrap-up it
+    // was supposed to write never happened. estTokens is excluded from the signature deliberately: it
+    // moves with every caption, so including it would wake on every poll and defeat the gate entirely.
+    const { estTokens, ...stable } = status;
+    const sig = JSON.stringify(stable);
+    const statusChanged = offsets[`${consumer}:sig`] !== sig;
+    offsets[`${consumer}:sig`] = sig;
+
+    if (asText) {
+      // Shaped for the wake loop: empty body means "nothing happened, do not wake anybody".
+      let out = '';
+      if (statusChanged) {
+        out += `state=${status.state} mode=${status.mode} create=${status.autopilot.create ? 1 : 0}`
+          + ` postChat=${status.autopilot.postChat ? 1 : 0} wake=${status.wake}`
+          + `${status.remoteName ? ` remote=${status.remoteName}` : ''}${status.sttLang ? ` lang=${status.sttLang}` : ''}\n`;
+        for (const e of status.suppress) out += `suppress[${e.kind || 'any'}] ${e.text}\n`;
+      }
+      for (const r of ccr.items.filter((i) => i.seq > ackFrom)) out += `callchat[${r.ok ? 'sent' : 'failed'}] ${r.reason || ''}\n`;
+      if (batch) out += `${statusChanged ? '--\n' : ''}${batch}`;
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end(out);
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      session: s,
+      batch,
+      truncated: size > from,
+      status,
+      statusChanged,
+      pending: {
+        callChatResults: ccr.items.filter((i) => i.seq > ackFrom),
+        snapshotSeq: snapReq.get(s) || 0,
+      },
+    }));
+    return;
+  }
+
+  // The complete record, as opposed to the batches the wake gate let through.
+  if (req.method === 'GET' && req.url.startsWith('/transcript')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const s = safeSession(u.searchParams.get('session'));
+    const tail = Math.min(Math.max(parseInt(u.searchParams.get('tail') || '200', 10) || 200, 1), 2000);
+    let all = '';
+    try { all = fs.readFileSync(fileFor(s), 'utf8'); } catch (_) {}
+    const lines = all.split('\n').filter((l) => l !== '');
+    const slice = lines.slice(-tail);
+    let text = slice.join('\n');
+    // A whole meeting can outgrow the caller's context. Truncating from the front keeps the most recent
+    // exchange, which is what a mid-call question is almost always about.
+    const truncated = Buffer.byteLength(text) > POLL_MAX_BYTES;
+    if (truncated) text = text.slice(-POLL_MAX_BYTES);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ session: s, text, lines: slice.length, totalLines: lines.length, truncated }));
+    return;
+  }
+
+  // Captured screen snapshots, newest first. Paths, not bytes: the caller reads the image itself.
+  if (req.method === 'GET' && req.url.startsWith('/snapshots')) {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    const s = safeSession(u.searchParams.get('session'));
+    const limit = Math.min(Math.max(parseInt(u.searchParams.get('limit') || '5', 10) || 5, 1), SNAP_MAX);
+    const dir = path.join(SNAP_DIR, s);
+    let snapshots = [];
+    try {
+      snapshots = fs.readdirSync(dir)
+        .filter((f) => f.endsWith('.jpg'))
+        .map((f) => {
+          const p = path.join(dir, f);
+          const st = fs.statSync(p);
+          return { path: p, at: new Date(st.mtimeMs).toISOString(), bytes: st.size };
+        })
+        .sort((a, b) => (a.at < b.at ? 1 : -1))
+        .slice(0, limit);
+    } catch (_) { /* no snapshot dir: none captured */ }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ session: s, snapshots }));
+    return;
+  }
+
   res.writeHead(404); res.end('not found');
 });
 
 // Flush queued wakes before dying (launchd reload / Ctrl-C) so a pending batch isn't lost on restart.
 // The .txt needs no flushing - it's written line by line.
 for (const sig of ['SIGTERM', 'SIGINT']) {
-  process.on(sig, () => { for (const s of wakeBuf.keys()) flushWake(s); process.exit(0); });
+  process.on(sig, () => {
+    for (const s of wakeBuf.keys()) flushWake(s);
+    store.close(); // final snapshot, so a restart resumes from the last second rather than the last tick
+    process.exit(0);
+  });
 }
 
 server.listen(PORT, '127.0.0.1', () => {

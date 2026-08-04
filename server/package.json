@@ -5,11 +5,14 @@
   "keywords": ["meet", "zoom", "transcript", "meeting", "assistant", "localhost"],
   "homepage": "https://krystiangw.github.io/meet-live-assist/",
   "bin": {
-    "meet-live-assist-server": "transcript-server.js"
+    "meet-live-assist-server": "transcript-server.js",
+    "meet-live-assist-mcp": "mcp-server.js"
   },
   "main": "transcript-server.js",
   "files": [
     "transcript-server.js",
+    "mcp-server.js",
+    "state-store.js",
     "README.md"
   ],
   "engines": {

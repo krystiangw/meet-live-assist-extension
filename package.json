@@ -10,7 +10,9 @@
   "scripts": {
     "build": "./build.sh",
     "build:public": "./build.sh --public",
-    "test": "node test/smoke.mjs",
+    "test": "node test/smoke.mjs && node test/mcp.mjs",
+    "test:server": "node test/smoke.mjs",
+    "test:mcp": "node test/mcp.mjs",
     "lint": "for f in src/*.js server/*.js; do node --check \"$f\" || exit 1; done"
   }
 }
