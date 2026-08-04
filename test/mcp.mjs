@@ -136,6 +136,11 @@ try {
   const attached = await call(rpc, 'attach');
   check('attach pins the active meeting', !attached.isError && attached.data.session === session, attached.text);
   check('attach reports the panel state', !!attached.data?.status, attached.text);
+  check('attach hands back a ready-to-run wake loop', /curl .*\/poll\?/.test(attached.data.wakeLoop || ''), attached.data.wakeLoop);
+  // The wake loop and this adapter are one assistant with one read position. If attach handed out a
+  // different consumer than `poll` uses, each would replay the meeting into the other's blind spot.
+  check('the wake loop polls under the same consumer as the poll tool',
+    (attached.data.wakeLoop || '').includes('consumer=test-agent'), attached.data.wakeLoop);
 
   // --- the keystone: poll ---
   const first = await call(rpc, 'poll');

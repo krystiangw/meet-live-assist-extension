@@ -1,7 +1,7 @@
 ---
 name: meet-live-assist
-version: 1.4.0
-description: Live in-meeting assistant from a Google Meet transcript. Tail the local transcript file written during a call and feed the user real-time help - answers to questions aimed at them, data/context, risks, talking points - using THIS agent's own domain context. Use when the user wants you to "watch my meeting", "help me live during the call", or drop live meeting support in your context. On-demand: the agent whose context fits the meeting runs it.
+version: 1.5.0
+description: Live in-meeting assistant from a Google Meet transcript. Attach to the call over MCP and feed the user real-time help - answers to questions aimed at them, data/context, risks, talking points - using THIS agent's own domain context. Use when the user wants you to "watch my meeting", "help me live during the call", or drop live meeting support in your context. On-demand: the agent whose context fits the meeting runs it.
 ---
 
 # Live meeting assist (from Meet captions)
@@ -15,10 +15,19 @@ agent has the relevant context for *this* meeting runs it.
   `__MLA_REPO__/server/`.
 - The server (localhost `127.0.0.1:8848`) writes **two** files per meeting under
   `__MLA_TRANSCRIPTS__/`:
-  - **`<YYYY-MM-DD_meetingcode>.txt`** - every caption, nothing dropped. The record: read it for wrap-up,
-    reconciliation, and whenever you need more than the last batch.
-  - **`<session>.wake`** - only the batches worth a turn. **This is what you tail.** See step 2.
-- So any agent just needs to **tail the wake channel** and react. Nothing is agent-specific in the capture.
+  - **`<YYYY-MM-DD_meetingcode>.txt`** - every caption, nothing dropped. The record, reachable via the
+    `transcript` tool.
+  - **`<session>.wake`** - only the batches worth a turn. This is what `poll` reads.
+- **You talk to it through MCP tools**, not `curl`: `attach` `poll` `advice` `item` `chat_reply` `working`
+  `summary` `snapshot_request` `snapshot_read` `call_chat` `speak`. They are the same HTTP API with the
+  token handled for you and the read offset kept server-side, so nothing here needs a byte counter in a
+  shell variable.
+- Nothing is agent-specific in the capture, so any agent can assist any meeting.
+
+**If the tools are not connected**, register the adapter once and restart the session:
+`claude mcp add meet-live-assist -- node __MLA_REPO__/server/mcp-server.js`. Everything below is also
+reachable as plain HTTP on `127.0.0.1:8848` with an `X-MLA-Token` header (token in
+`__MLA_TRANSCRIPTS__/.mla-token`) - use that only as a fallback, and never mix the two in one call.
 
 ## Multiple Chrome profiles
 Capture is browser-side, so it is **per Chrome profile** - the server + transcript dir are shared (localhost, profile-agnostic). To enable a second profile: install **Tampermonkey** in that profile, install the userscript (open `file://__MLA_REPO__/server/legacy-userscript.meet-captions-to-file.user.js` → Install), then - the common gotcha - enable Chrome's MV3 setting **`chrome://extensions` → Tampermonkey → Details → "Allow user scripts"** (needs Developer mode if the toggle is hidden) and reload the Meet tab. Without that toggle the script is "enabled" in Tampermonkey but Chrome never runs it. The toggle is per-profile.
@@ -34,72 +43,48 @@ assisting this meeting, don't start a second watch.
 
 ## Steps
 
-1. **Check the capture server is up:**
-   ```bash
-   curl -s http://127.0.0.1:8848/health
-   ```
-   If it fails: start it (`node __MLA_REPO__/server/transcript-server.js`) or load the launchd agent
-   (`com.mla.meet-transcript-server.plist`). Also remind the user the userscript must be installed and Meet
-   captions will auto-enable.
+1. **`attach`.** One call: it finds the meeting active *now*, pins it, claims it, and hands back the panel
+   state. Pass a `session` only to assist a *specific* meeting instead of the current one.
+   - It **refuses** if another assistant is live on that call (the one-agent-per-meeting rule). Tell the user
+     and stop; `force: true` only if they explicitly want to take over.
+   - It **fails** if the server is down or no meeting has produced a transcript yet, and says which. Start the
+     server with `npx meet-live-assist-server`, or load the launchd agent
+     (`com.mla.meet-transcript-server.plist`). Also remind the user the extension must be capturing.
+   - The pin is sticky for the whole session. **A new call is not your call:** if the user joins a different
+     meeting, a *fresh* agent assists it. You stay on your pinned one and, when it ends, wrap up and stop.
 
-2. **Pin to THIS meeting, then arm a persistent Monitor.** Resolve the session active *now* and stick to it -
-   do **not** auto-follow to a newer meeting (that's how a stray agent ends up hijacking your next call).
-   First, honour **one agent per meeting**: if another brain is already live on this session, don't double up -
-   tell the user and stop instead of arming.
-   ```bash
-   DIR=__MLA_TRANSCRIPTS__
-   MLA_TOKEN=$(cat "$DIR/.mla-token" 2>/dev/null)   # server auth token (required on every route but /health)
-   SESS=$(basename "$(ls -t "$DIR"/*.txt 2>/dev/null | grep -v -e "\.chat\.txt$" -e "\.mode\.txt$" | head -1)" .txt)   # PIN: the meeting active right now
-   AGE=$(curl -s -H "X-MLA-Token: $MLA_TOKEN" "http://127.0.0.1:8848/brain-ping?session=$SESS" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("ageMs") or 999999)')
-   [ "$AGE" -lt 45000 ] && echo "ANOTHER ASSISTANT IS ALREADY ON $SESS - stopping." && exit 0
-   ```
-   Then arm the Monitor on the pinned session's **wake channel** - `<session>.wake`, NOT `<session>.txt`.
-   The server writes every caption to `.txt` (complete record) but only appends a batch to `.wake` when it
-   judges it worth a turn (decisions, blockers, your name, real questions, or accumulated substance; pure
-   small talk and connection chatter are held back and ride along with the next real wake, so nothing is
-   lost). Tailing `.txt` instead would wake you ~4x more often for the same content.
-   ```bash
-   f="$DIR/$SESS.wake"; off=0
-   while true; do
-     # Liveness heartbeat for the PINNED session (so the panel's 🧠 tracks THIS meeting, not the newest).
-     curl -s -X POST http://127.0.0.1:8848/brain-ping -H 'Content-Type: application/json' \
-       -H "X-MLA-Token: $MLA_TOKEN" -d "{\"session\":\"$SESS\"}" >/dev/null 2>&1
-     if [ -f "$f" ]; then
-       sz=$(stat -f %z "$f" 2>/dev/null || echo 0)
-       if [ "$sz" -lt "$off" ]; then off=0; fi
-       if [ "$sz" -gt "$off" ]; then tail -c +$((off+1)) "$f" 2>/dev/null; off=$sz; fi
-     fi
-     sleep 2
-   done
-   ```
-   Use Monitor with `persistent: true`. **A new call ≠ your call:** if the user joins a different meeting, a
-   *fresh* agent assists it (or the user re-invokes the skill) - you stay on your pinned session and, once it
-   ends (transcript stops growing / user says stop), do the wrap-up and **TaskStop your Monitor** so you don't
-   linger. (To assist a *specific* meeting only, replace `ls -t … head -1`
-   with a fixed file path for that meeting code.)
+2. **Arm a persistent Monitor as your wake source.** MCP cannot wake you - nothing starts a turn but the
+   Monitor. `attach` returns the loop ready to run as `wakeLoop`: **run it verbatim** with `persistent: true`.
+   Do not rewrite the URL. It carries the session and the consumer identity you share with your own `poll`
+   calls, and getting either wrong looks exactly like a dead server for the rest of the call. The loop prints
+   **only** when something happened, so a quiet meeting costs you nothing.
 
-   **Read `/status` each turn - ONE request for everything the panel controls.** It replaces the separate
-   `/control` + `/mode` + `/autopilot` + `/suppress` GETs (four JSON blobs a turn, each of which then sits in
-   your context forever) with one plain line:
-   ```bash
-   curl -s -H "X-MLA-Token: $MLA_TOKEN" "http://127.0.0.1:8848/status?session=$SESS"
-   # state=running mode=auto create=0 postChat=0 wake=gated
-   # suppress[advice] <topic the user dismissed>      ← only present when there are any
-   ```
-   - `state=paused` → **stay silent**: post no advice/actions this turn (the panel also stopped capture, so the
-     transcript won't grow anyway). Keep heartbeating so the 🧠 pill stays on; resume normally on `running`.
-   - `state=stopped` → do the **wrap-up** (step 4) and **TaskStop** - same as a real call ending.
+   What comes out, and why this and not a file tail:
+   - **Only batches worth a turn.** The server writes every caption to `.txt` but releases a batch to the
+     wake channel only when it judges it substantial (decisions, blockers, your name, real questions, or
+     accumulated volume). Small talk and connection chatter are held and ride along with the next real batch,
+     so nothing is lost. Tailing the raw transcript instead would wake you roughly 4x more often for the same
+     content.
+   - **A `state=…` line whenever the panel changed** - and *only* then, so it is a signal, not a banner. It is
+     also the only way you hear about **Stop**: capture ends there, so no further caption would ever wake you.
+   - The read offset is server-side per `consumer`, so a restarted loop neither replays nor skips.
+
+   Handle the state line as follows:
+   - `state=paused` → **stay silent** this turn: no advice, no actions. Keep calling `working` so the 🧠 pill
+     stays on; resume normally on `running`.
+   - `state=stopped` → do the **wrap-up** (step 4) and **TaskStop**, same as a real call ending.
    - `mode=` → see "Meeting modes"; `create=`/`postChat=` → see "Autopilot"; `suppress[...]` → don't re-post
-     advice/actions matching those topics.
-   - `wake=gated` (default) → the gate below is filtering; `wake=all` → **every line wakes you, small talk
-     included** (`.wake` mirrors `.txt`). In `all` the batch is no longer evidence that something mattered, so
-     judge each line on its content and stay just as silent on filler - and expect the turn cost the gate
-     normally saves. Flip it either way:
-     ```bash
-     curl -s -X POST http://127.0.0.1:8848/wake-mode -H 'Content-Type: application/json' \
-       -H "X-MLA-Token: $MLA_TOKEN" -d "{\"session\":\"$SESS\",\"all\":true}"   # false → back to gated
-     ```
-     Per-session, persisted (survives a server restart mid-call), and `WAKE_ALL=1` flips the server default.
+     advice or actions on those topics.
+   - `wake=all` → **every line reaches you, small talk included.** The batch is then no longer evidence that
+     something mattered, so judge each line on its own content and stay just as silent on filler. Expect the
+     turn cost the gate normally saves. `WAKE_ALL=1` flips the server default; the panel flips it per call.
+   - `callchat[failed] …` → your last message to the meeting chat did not go out. Say so rather than assuming
+     the room read it.
+
+   Call `working` once per turn regardless, so the panel's 🧠 pill tracks **your** meeting. Use `poll`
+   mid-turn only when you need to catch up on something the Monitor's output cut off (`truncated`), or to
+   re-read state after you changed it - the Monitor already consumed the batch, so a second `poll` normally
+   returns nothing.
 
    **Then verify the channel before you trust it - one exchange, at arm time.** Post a single advice line
    ("connected - say hello if you see this") and **ask the user to confirm they see it in the panel**. This is
@@ -134,10 +119,7 @@ assisting this meeting, don't start a second watch.
    user says "stop", before stopping, post an 🟠 **ACTION ITEMS** list: everything decided as a to-do, each
    with its owner, flagging which are **__MLA_USER__'s**. Also **save a post-call summary** so the panel's 📄
    button can copy/download it (markdown: overview + decisions + action items with owners):
-   ```bash
-   curl -s -X POST http://127.0.0.1:8848/summary -H 'Content-Type: application/json' -H "X-MLA-Token: $MLA_TOKEN" \
-     -d "$(python3 -c 'import json,sys; print(json.dumps({"session":sys.argv[1],"text":sys.argv[2]}))' "$MLA_SESSION" "$SUMMARY_MD")" >/dev/null
-   ```
+   Post it with **`summary`** `{markdown}`.
    Then ask which items to execute now. Do the ones they confirm (per "Acting on requests"); leave the rest
    as a clean list they can copy. **Then reconcile against audio** - see "Data fidelity → post-meeting
    reconciliation" below (whisper/Gemini diff vs the board) to catch caption-level number/name errors.
@@ -219,20 +201,7 @@ user reads advice beside the call. Same content as the terminal, but sent as `{m
 blockquote/markdown; 🟢 SAY text still in the meeting's spoken language). Skip filler exactly as in the
 terminal - silence stays silence in the panel too.
 
-Set the session once (basename of the active transcript file), then post per marker. **All requests need
-the auth token** (`X-MLA-Token`; read it from `.mla-token` in the transcripts dir - see server lockdown):
-```bash
-DIR=__MLA_TRANSCRIPTS__
-MLA_TOKEN=$(cat "$DIR/.mla-token" 2>/dev/null)
-MLA_SESSION=$(basename "$(ls -t "$DIR"/*.txt | grep -v -e "\.chat\.txt$" -e "\.mode\.txt$" | head -1)" .txt)
-mla_advice() { # usage: mla_advice SAY "the exact words to say"
-  curl -s -X POST http://127.0.0.1:8848/advice -H 'Content-Type: application/json' -H "X-MLA-Token: $MLA_TOKEN" \
-    -d "$(python3 -c 'import json,sys; print(json.dumps({"session":sys.argv[1],"marker":sys.argv[2],"text":sys.argv[3]}))' "$MLA_SESSION" "$1" "$2")" >/dev/null
-}
-# mla_advice RISK "That env reads feature flags from a local file, not from the remote service."
-```
-Every other `curl` to the server below (snapshot-request, chat, edit, dom, debug, mode) likewise needs
-`-H "X-MLA-Token: $MLA_TOKEN"`.
+Use the **`advice`** tool: `{marker, text}`. The session comes from `attach`, so you never pass it.
 **Don't write the same advice twice.** When the panel is up it is the ONLY place advice goes - post it and
 say nothing in the terminal. Repeating it as session text costs the same tokens again *and* is re-read on
 every later turn (measured: 12.6k of duplicated advice text on a 41-min call). Terminal output is the
@@ -260,14 +229,8 @@ the framing muted, so they read their line at a glance. E.g.
 When you start a **multi-step action that takes more than a moment** (creating a Jira ticket, drafting a
 doc, reading a snapshot, searching Confluence), tell the panel so it shows an animated *"working…"* bubble
 with the activity - the user sees you're busy instead of silence. Post it via `brain-ping`'s optional
-`status`, then **clear it** (`""`) when done:
-```bash
-mla_status() { # usage: mla_status "creating Jira ticket…"   /   mla_status ""  (clear)
-  curl -s -X POST http://127.0.0.1:8848/brain-ping -H 'Content-Type: application/json' -H "X-MLA-Token: $MLA_TOKEN" \
-    -d "$(python3 -c 'import json,sys; print(json.dumps({"session":sys.argv[1],"status":sys.argv[2]}))' "$MLA_SESSION" "$1")" >/dev/null
-}
-# mla_status "creating Jira ticket…"   → before;   mla_status ""   → after
-```
+`status`, then **clear it** when done: `working {status: "creating Jira ticket…"}` before,
+`working {status: ""}` after.
 Keep the label short and human ("creating Jira ticket…", "reading the shared slide…"). The bubble
 auto-clears after 30s of no heartbeat (crash guard), so always send the empty clear when the action finishes.
 
@@ -301,14 +264,8 @@ instead of more words:
 ### Decisions & action items board
 The panel has a **Decisions & action items** section. As the call produces them, capture each **once** to
 the board (don't re-post duplicates) so the user has a live, structured record - not just prose advice:
-```bash
-mla_item() { # usage: mla_item action|decision "text" ["owner"] ["blocked by"]
-  curl -s -X POST http://127.0.0.1:8848/items -H 'Content-Type: application/json' -H "X-MLA-Token: $MLA_TOKEN" \
-    -d "$(python3 -c 'import json,sys; print(json.dumps({"session":sys.argv[1],"kind":sys.argv[2],"text":sys.argv[3],"owner":sys.argv[4] if len(sys.argv)>4 else "","blockedBy":sys.argv[5] if len(sys.argv)>5 else ""}))' "$MLA_SESSION" "$1" "$2" "${3:-}" "${4:-}")" >/dev/null
-}
-# mla_item action "Write the partial-undo decision in the ticket" "__MLA_USER__"
-# mla_item decision "We will undo all parsings, not partial"
-```
+Use the **`item`** tool: `{kind: action|decision|blocker, text, owner?, blocked_by?}`. E.g.
+`{kind: "action", text: "Write the partial-undo decision in the ticket", owner: "__MLA_USER__"}`.
 Post a **decision** when the group settles something ("we'll do X", "let's hide it"), and an **action** when
 a to-do with an owner is assigned ("Gabor will…", "I'll create that after the call"). Tag the owner and any
 blocked-by when spoken. This board is separate from advice - advice is live guidance; the board is the record.
@@ -318,18 +275,15 @@ When the user clicks **Draft Jira** on an action item, a chat message arrives as
 (title = Conventional Commits + `[TICKET]`; body sections **Goal / Summary / Test plan**; Jira ref as a
 `Refs` footer, never in the scope) and post it back via chat. Create it only on explicit typed confirmation.
 
-**Autopilot (grooming / mob-testing).** Read `create=`/`postChat=` from `/status` (step 2) - no separate
-request needed.
+**Autopilot (grooming / mob-testing).** `create=`/`postChat=` arrive on the state line (step 2) - no
+separate request needed.
 - **`create` ON** = the user has authorized you to **create** action-item tickets/docs directly - standing
   Tier-1 authorization, no per-item confirm (still echo `🟠 ACTION → <what I created>` after). This is the
   "don't ask again": when OFF, propose each as a 🟠 ACTION and wait (per "Acting on requests"); once the user
   flips it ON, just create them as they come up.
 - **`postChat` ON** = after creating a ticket/doc, share its link with everyone in the meeting:
-  ```bash
-  curl -s -X POST http://127.0.0.1:8848/callchat -H 'Content-Type: application/json' -H "X-MLA-Token: $MLA_TOKEN" \
-    -d "$(python3 -c 'import json,sys; print(json.dumps({"session":sys.argv[1],"text":sys.argv[2]}))' "$MLA_SESSION" "Ticket: $URL")" >/dev/null
-  ```
-  The panel types it into the Meet/Zoom chat. **`postChat` is off by default - never post to the call chat
+  `call_chat {text: "Ticket: <url>"}`. The panel types it into the Meet/Zoom chat; a delivery failure comes
+  back on your next wake as `callchat[failed]`, so don't assume the room read it. **`postChat` is off by default - never post to the call chat
   unless it's on** (it's an outbound message to all participants; the toggle is the user's explicit opt-in).
 
 ### Visual context (snapshots)
@@ -347,15 +301,8 @@ when the discussion is actually visual.
 
 **You can request a fresh frame yourself** when the transcript implies something visual and no recent shot
 exists: bump a request that the panel picks up (~1-2s), then Read the newest file.
-```bash
-DIR=__MLA_TRANSCRIPTS__
-MLA_TOKEN=$(cat "$DIR/.mla-token" 2>/dev/null)
-MLA_SESSION=$(basename "$(ls -t "$DIR"/*.txt | grep -v -e "\.chat\.txt$" -e "\.mode\.txt$" | head -1)" .txt)
-curl -s -X POST http://127.0.0.1:8848/snapshot-request -H 'Content-Type: application/json' \
-  -H "X-MLA-Token: $MLA_TOKEN" -d "{\"session\":\"$MLA_SESSION\"}" >/dev/null
-sleep 2   # give the panel time to capture + upload
-ls -t "$DIR/snapshots/$MLA_SESSION"/*.jpg 2>/dev/null | head -1   # newest frame → Read it
-```
+Call **`snapshot_request`**, wait a couple of seconds for the panel to capture and upload, then
+**`snapshot_read`** for the newest paths and `Read` the top one.
 Requires the extension panel open on the Meet tab (it does the actual capture). If nothing new appears, the
 Meet tab probably isn't the active tab - fall back to advising from the transcript.
 
@@ -416,8 +363,8 @@ if the user or a counterpart mixes languages mid-sentence, keep detection langua
 The session name is `<YYYY-MM-DD>_<meetcode>` (no time component - a rejoin resumes the same file); a
 recurring series **reuses its meet code**. At the start, look for prior instances and carry continuity:
 ```bash
-CODE=${MLA_SESSION#*_}                                          # strip the leading date
-ls -t "$DIR"/*_"$CODE".txt 2>/dev/null | tail -n +2 | head -3   # previous meetings of THIS series
+DIR=__MLA_TRANSCRIPTS__; S=<the session attach returned>
+ls -t "$DIR"/*_"${S#*_}".txt 2>/dev/null | tail -n +2 | head -3   # previous meetings of THIS series
 ```
 Have a **subagent** skim the most recent prior one and return ≤10 lines (open action items / decisions) -
 reading a 30KB transcript into the watch loop's own context costs that much on every single batch. Surface
@@ -459,8 +406,10 @@ or console, tell __MLA_USER__ to toggle **🐞 Debug** (warn it shows a banner w
 
 When the user turns on the panel's **🕹 drive** toggle (a red "assistant can control this tab" banner shows),
 you may **act** on the app tab to walk or test a flow. Confirm it's on first (`GET /drive?session=` → `{on}`),
-then enqueue one action and poll its result before the next:
+then enqueue one action and poll its result before the next. This is the one surface with no MCP tool -
+the hosted server will never drive a stranger's browser - so it stays raw HTTP and needs its own token:
 ```bash
+MLA_TOKEN=$(cat __MLA_TRANSCRIPTS__/.mla-token); MLA_SESSION=<the session attach returned>
 SEQ=$(curl -s -X POST http://127.0.0.1:8848/act -H 'Content-Type: application/json' -H "X-MLA-Token: $MLA_TOKEN" \
   -d "$(python3 -c 'import json,sys; print(json.dumps({"session":sys.argv[1],"op":"click","selector":sys.argv[2]}))' "$MLA_SESSION" "button[type=submit]")" | python3 -c 'import json,sys;print(json.load(sys.stdin)["seq"])')
 curl -s -H "X-MLA-Token: $MLA_TOKEN" "http://127.0.0.1:8848/act-result?session=$MLA_SESSION&since=$((SEQ-1))"  # {ok,value,error}
@@ -601,13 +550,13 @@ Levers, in order of leverage:
   - **The session is a hot cache; the server is durable storage.** Anything you produce that has a home on
     the server - advice, board items, the summary - goes there and is **not** restated in the session. Same for
     anything you read: spill bulk to a file or a subagent and keep a one-line pointer. Measured on a 41-min
-    call, what persisted per turn was 88.5k of tool results, 46.3k of reasoning, 18.9k of curl arguments and
-    12.6k of advice text duplicated from the panel - versus only ~20k for the entire meeting's captions.
+    call, what persisted per turn was 88.5k of tool results, 46.3k of reasoning, 18.9k of request arguments
+    and 12.6k of advice text duplicated from the panel - versus only ~20k for the entire meeting's captions.
     Nothing can be pruned retroactively, so the decision has to happen when you write it.
   - **Keep your own exhaust small - it, not the meeting, is what you re-read.** Measured: the loop adds
     ~1.0-1.2k tokens of context per turn, of which ~2/3 is your own output and ~1/3 tool results; the actual
     captions of a 46-min call are only ~20k. So: `/effort low`, no narration, no holding lines, and don't
-    re-run status curls you don't need this turn.
+    don't call `poll` again for state the Monitor already handed you.
   - **You cannot `/compact` yourself** - it's a user command, and auto-compaction only fires near the window
     limit (measured: 707k → 73k, i.e. far too late to save anything). On a long call (>45 min) it is worth
     **asking __MLA_USER__ once, around the halfway mark, to type `/compact`** - one keystroke halves the baseline

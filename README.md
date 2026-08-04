@@ -114,9 +114,17 @@ curl -s http://127.0.0.1:8899/health
 | restart | `launchctl kickstart -k gui/$UID/com.mla.meet-transcript-server` |
 | stop for real | `launchctl unload -w ~/Library/LaunchAgents/com.mla.meet-transcript-server.plist` |
 
-`KeepAlive` is on, so `kill`/`pkill` does **not** stop it - launchd restarts it within seconds (and you lose
-the in-memory wake buffer). ⚠ **Never restart it during a live call**: capture gaps, and the buffered batch
-dies with the process.
+`KeepAlive` is on, so `kill`/`pkill` does **not** stop it - launchd restarts it within seconds.
+
+**A restart mid-call is survivable.** Advice, the decisions board, chat, the wrap-up, the wake buffer and
+each assistant's read position are snapshotted to `<transcripts>/.state/` and reloaded on boot, so a bounce
+costs at most the last couple of seconds (`STATE_SNAPSHOT_MS`, default 2000) rather than the meeting. Two
+things deliberately do **not** come back, because they are answers about one call and a recurring series
+reuses its meet code: the panel's Stop/pause state, and consent (🕹 drive, autopilot). You will still see a
+brief capture gap while the process is down.
+
+Only one process may write a given data dir. A second server on the same `TRANSCRIPTS_DIR` serves normally
+but does not persist (it logs why), so a sandbox run beside the launchd job cannot rewind the live meeting.
 
 **Config** (all optional, set in the plist's `EnvironmentVariables` or on the manual command line):
 

@@ -104,7 +104,15 @@ const TOOLS = [
       pinned = info.session;
       await api('POST', '/brain-takeover', { session: pinned, agent: AGENT });
       const status = await api('GET', `/poll?session=${encodeURIComponent(pinned)}&consumer=${encodeURIComponent(AGENT)}&statusOnly=1`);
-      return { session: pinned, lines: info.lines, startedAt: info.startedAt, status: status.status };
+      // Hand back the wake loop ready to run. The read offset is per consumer, so the loop and this
+      // adapter must poll under the SAME consumer or the two would each replay the whole meeting to the
+      // other's blind spot. Composing that URL by hand is exactly the kind of detail that goes wrong
+      // once and then looks like a broken server for the rest of the call.
+      const wakeUrl = `${BASE}/poll?session=${encodeURIComponent(pinned)}&consumer=${encodeURIComponent(AGENT)}&format=text`;
+      return {
+        session: pinned, lines: info.lines, startedAt: info.startedAt, status: status.status,
+        wakeLoop: `T=$(cat ${path.join(TRANSCRIPTS_DIR, '.mla-token')}); while true; do curl -s -H "X-MLA-Token: $T" "${wakeUrl}"; sleep 2; done`,
+      };
     },
   },
   {

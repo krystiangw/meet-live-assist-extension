@@ -7,7 +7,7 @@
 // standing between a visited web page and /edit, the session guard is what stopped an hour of a real
 // interview landing in `undefined.txt`, and the advice round-trip is the whole point of the server.
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -143,10 +143,22 @@ try {
 
   // Consume the wake channel first, so the restart can prove the read offset is durable too. Without
   // that, a restarted assistant replays the whole meeting as if it were new and re-advises all of it.
+  // A non-empty first batch is what makes the empty one after the restart mean anything.
   const pollUrl = `${base}/poll?session=${encodeURIComponent(session)}&consumer=smoke`;
   await sleep(600); // let the wake gate release the urgent line
   const firstPoll = await (await fetch(pollUrl, { headers: auth })).json();
   check('poll returns the batch the wake gate released', firstPoll.batch.includes('must reach the transcript'), JSON.stringify(firstPoll.batch));
+
+  // Consent and lifecycle must NOT be durable, which is the opposite requirement to everything else
+  // here. `drive` is the user allowing an agent to click inside their logged-in tab and `postChat` is it
+  // writing to the meeting chat; a recurring series reuses its meet code, so persisting either would
+  // hand back a Monday "yes" on Thursday. `stopped` is worse: it would kill the next call's assistant on
+  // its first turn, silently, because the skill treats it as "wrap up and stop".
+  await fetch(`${base}/drive`, { method: 'POST', headers: auth, body: JSON.stringify({ session, on: true }) });
+  await fetch(`${base}/autopilot`, { method: 'POST', headers: auth, body: JSON.stringify({ session, create: true, postChat: true }) });
+  await fetch(`${base}/control`, { method: 'POST', headers: auth, body: JSON.stringify({ session, state: 'stopped' }) });
+  check('the consent was actually granted before the restart',
+    (await (await fetch(`${base}/drive?session=${encodeURIComponent(session)}`, { headers: auth })).json()).on === true);
 
   await sleep(SNAPSHOT_MS * 4);
   server.kill('SIGKILL');
@@ -162,8 +174,27 @@ try {
   check('the in-place board mutation was persisted, not just the first item',
     afterBoard.items.some((i) => i.text === 'second item, added in place'), JSON.stringify(afterBoard));
 
+  // Posting after the restart is what actually tests the counter: without a resumed seq the panel's
+  // `since` bookkeeping would hand the user the same advice twice.
+  await fetch(`${base}/advice`, { method: 'POST', headers: auth, body: JSON.stringify({ session, marker: 'INFO', text: 'posted after the restart' }) });
+  const resumed = await (await fetch(`${base}/advice?session=${encodeURIComponent(session)}&since=1`, { headers: auth })).json();
+  check('a post after the restart continues the sequence instead of colliding', resumed.last === 2, `got ${resumed.last}`);
+  check('and only the new item comes back for since=1', resumed.items.length === 1 && /after the restart/.test(resumed.items[0].text), JSON.stringify(resumed.items));
+
   const afterPoll = await (await fetch(pollUrl, { headers: auth })).json();
   check('the poll offset survives a restart, so nothing is replayed', afterPoll.batch === '', JSON.stringify(afterPoll.batch));
+
+  const drive = await (await fetch(`${base}/drive?session=${encodeURIComponent(session)}`, { headers: auth })).json();
+  check('consent to drive the tab does NOT survive a restart', drive.on !== true, JSON.stringify(drive));
+  const ap = await (await fetch(`${base}/autopilot?session=${encodeURIComponent(session)}`, { headers: auth })).json();
+  check('consent to post in the meeting chat does NOT survive a restart', ap.postChat !== true, JSON.stringify(ap));
+  const ctl = await (await fetch(pollUrl.replace('consumer=smoke', 'consumer=smoke2'), { headers: auth })).json();
+  check('a stopped meeting does not stay stopped for the next one', ctl.status.state === 'running', JSON.stringify(ctl.status));
+
+  // The state dir holds meeting content. Files are 0600; the directory listing leaks meeting codes and
+  // titles to any local user unless it is 0700 too.
+  check('the state dir is not world-readable', (statSync(path.join(dir, '.state')).mode & 0o777) === 0o700,
+    (statSync(path.join(dir, '.state')).mode & 0o777).toString(8));
 
   // The token is the same file, so the same header must keep working after the restart.
   const afterAuth = await fetch(`${base}/auth-check`, { headers: { 'X-MLA-Token': token } });

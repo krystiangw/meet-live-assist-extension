@@ -30,8 +30,13 @@ not transmit data off your device on its own.
 - The local server is **token-authenticated** (`X-MLA-Token`) so no other site or app can read it.
 - Stored transcripts, chat, summaries and snapshots are **auto-purged after a retention window** (default
   14 days, configurable via `RETENTION_DAYS`).
+- Live meeting state (advice, the decisions board, chat) is also kept in `<transcripts>/.state/` so that
+  restarting the server does not lose a call in progress. It is covered by the same retention: when a
+  meeting's files are purged, its state is dropped with them. Files are owner-only (`0600`) and so is the
+  directory (`0700`). With `RETENTION_DAYS=0` nothing is purged at all - that is the documented meaning of
+  the setting, and it applies here too.
 - You can **wipe a single meeting's data** at any time from the panel (🗑), which deletes its transcript,
-  chat, summary and snapshots immediately.
+  chat, summary, snapshots **and stored state** immediately.
 
 ## Recording & consent
 Capturing a meeting transcript and screenshots is a form of recording. You are responsible for obtaining

@@ -345,6 +345,8 @@ function purgeOld() {
   if (!(RETENTION_DAYS > 0)) return;
   const cutoff = Date.now() - RETENTION_DAYS * 864e5;
   try {
+    const sessionOf = (f) => f.replace(/\.(chat\.txt|mode\.txt|summary\.md|txt|wake|wakeall)$/, '');
+    const touched = new Set();
     for (const f of fs.readdirSync(TRANSCRIPTS_DIR)) {
       if (f.startsWith('.')) continue; // never touch .mla-token or .state/
       if (!/\.(txt|md|wake|wakeall)$/.test(f)) continue; // .txt / .chat.txt / .mode.txt / .summary.md / .wake / .wakeall only
@@ -352,11 +354,15 @@ function purgeOld() {
       try {
         if (fs.statSync(p).mtimeMs >= cutoff) continue;
         fs.unlinkSync(p);
-        // Purging the transcript has to purge the session's live state too, or a retention sweep
-        // leaves advice and board items for a meeting whose text is gone.
-        store.forget(f.replace(/\.(chat\.txt|mode\.txt|summary\.md|txt|wake|wakeall)$/, ''));
+        touched.add(sessionOf(f));
       } catch (_) {}
     }
+    // Purging a session's text has to purge its live state too, or the sweep leaves advice and board
+    // items for a meeting whose transcript is gone. But only once NOTHING of the session is left:
+    // a recurring series reuses its meet code, so one forgotten `.mode.txt` from January was enough to
+    // wipe the advice and the board of the call happening right now. Verified, and it was a live bug.
+    const survivors = new Set(fs.readdirSync(TRANSCRIPTS_DIR).filter((f) => !f.startsWith('.')).map(sessionOf));
+    for (const s of touched) if (!survivors.has(s)) store.forget(s);
     if (fs.existsSync(SNAP_DIR)) for (const d of fs.readdirSync(SNAP_DIR)) {
       const dp = path.join(SNAP_DIR, d);
       try { if (fs.statSync(dp).mtimeMs < cutoff) fs.rmSync(dp, { recursive: true, force: true }); } catch (_) {}
@@ -364,10 +370,20 @@ function purgeOld() {
   } catch (_) {}
 }
 
+// Live session state. `store.map`/`store.set` reload from disk at boot and snapshot back, so a restart
+// no longer costs a meeting its history - EXCEPT where a store is declared `{ persist: false }`, which
+// is not an optimisation but a correctness rule with two cases:
+//   - consent and lifecycle (`drive`, `autopilot`, `control`, `takeover`, and the two liveness stores):
+//     "yes, the agent may drive my tab" and "stopped" are answers about one meeting. A recurring series
+//     reuses its meet code, so persisting them hands a Monday decision back on Thursday, and a Stop at
+//     the end of one call would kill the next call's assistant on its first turn.
+//   - request scratch (`doms`, `dbgData`, `edits`, `acts`, `actResults`, `sttRecent`): worthless once the
+//     request that asked for it is answered, and the first two are page content and debugger dumps we
+//     have no reason to leave on disk.
+// Adding a store? Decide which of the three it is before deciding anything else.
 const seenSessions = store.set('seenSessions');
 
 // Advice channel (Phase 1): the "brain" POSTs advice here; the side panel polls it.
-// In-memory only - advice is ephemeral live guidance, not a record.
 const advice = store.map('advice'); // session -> { seq, items: [{ seq, ts, marker, text }] }
 const ADVICE_MAX = 200;
 const MARKERS = new Set(['SAY', 'INFO', 'SUMMARY', 'EXPLAIN', 'RISK', 'ACTION']);
@@ -382,19 +398,21 @@ const CHAT_MAX = 300;
 function chatFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.chat.txt`); }
 
 // Presentation-only live DOM edits: brain enqueues an edit; panel polls and applies it to the shared tab.
-const edits = store.map('edits');  // session -> { seq, items: [cmd] }
+const edits = store.map('edits', { persist: false });  // session -> { seq, items: [cmd] }
 const domReq = store.map('domReq'); // session -> seq (brain asks the extension to capture the page DOM)
-const doms = store.map('doms');   // session -> html (captured DOM for the brain to inspect)
+const doms = store.map('doms', { persist: false });   // session -> html (captured DOM for the brain to inspect)
 
 // Live debugging: brain asks for a kind (storage/network/console); extension gathers and posts it back.
 const dbgReq = store.map('dbgReq');  // session -> { seq, kind }
-const dbgData = store.map('dbgData'); // session -> { kind, data }
+const dbgData = store.map('dbgData', { persist: false }); // session -> { kind, data }
 
 // Brain liveness: the brain (Claude session running the skill) heartbeats here each loop;
 // the panel polls it to show whether an assistant is actually attached to this meeting.
-const brainPing = store.map('brainPing'); // session -> last heartbeat ms
-const brainStatus = store.map('brainStatus'); // session -> { text, ts } current agent activity ("creating Jira ticket…"); '' = idle
-const control = store.map('control'); // session -> 'running' | 'paused' | 'stopped' - panel drives it; the brain obeys
+const brainPing = store.map('brainPing', { persist: false }); // session -> last heartbeat ms
+// Same 45s the panel and the service worker use to draw the 🧠 pill (sidepanel.js, background.js).
+const BRAIN_STALE_MS = 45000;
+const brainStatus = store.map('brainStatus', { persist: false }); // session -> { text, ts } current agent activity ("creating Jira ticket…"); '' = idle
+const control = store.map('control', { persist: false }); // session -> 'running' | 'paused' | 'stopped' - panel drives it; the brain obeys
 
 // Live decisions + action items captured by the brain during the call (the board; source for Jira drafts).
 const items = store.map('items'); // session -> { seq, list: [{ seq, ts, kind, text, owner, blockedBy }] }
@@ -402,20 +420,20 @@ const ITEMS_MAX = 200;
 const ITEM_KINDS = new Set(['decision', 'action']);
 
 // Autopilot: whether the brain may auto-create action items and post links to the call chat (user opt-in).
-const autopilot = store.map('autopilot'); // session -> { create, postChat }
+const autopilot = store.map('autopilot', { persist: false }); // session -> { create, postChat }
 // Brain -> panel -> content script: messages to type into the meeting chat (gated by autopilot.postChat).
 const callChat = store.map('callChat'); // session -> { seq, items: [{ seq, text }] }
 // Content script -> panel -> server: delivery ACK for a /callchat message (did it actually land in Meet?).
 const callChatResult = store.map('callChatResult'); // session -> { seq, items: [{ seq, ok, reason }] }
 // Handoff between assistants: the latest brain to claim a meeting. A previous assistant sees a newer
 // agent here and yields, so takeover is automatic instead of a manual clad-task.
-const takeover = store.map('takeover'); // session -> { agent, ts }
+const takeover = store.map('takeover', { persist: false }); // session -> { agent, ts }
 
 // Agent-driven page actions (flow testing / debugging in the user's real tab). Gated by `drive` (panel
 // opt-in). Brain enqueues to /act, the extension executes on the app tab and posts the outcome to /act-result.
-const drive = store.map('drive');       // session -> bool (is the user letting the agent control the tab?)
-const acts = store.map('acts');        // session -> { seq, items: [cmd] }
-const actResults = store.map('actResults');  // session -> { seq, items: [{ seq, ok, value, error }] }
+const drive = store.map('drive', { persist: false });       // session -> bool (is the user letting the agent control the tab?)
+const acts = store.map('acts', { persist: false });        // session -> { seq, items: [cmd] }
+const actResults = store.map('actResults', { persist: false });  // session -> { seq, items: [{ seq, ok, value, error }] }
 const ACT_OPS = new Set(['click', 'type', 'press', 'navigate', 'waitFor', 'getText', 'exists', 'select', 'scroll']);
 
 // Suppressions: the user dismissed an advice/action and asked for "no more like this". The brain reads
@@ -493,7 +511,7 @@ const sttLangs = store.map('sttLangs'); // session -> 'pl' | 'en' | ...
 // a second device in the room - the same utterance landed as both 'You' and the remote speaker). Keep a
 // short window of recent lines per session and drop one that just arrived on the OTHER channel.
 const STT_ECHO_MS = parseInt(process.env.STT_ECHO_MS || '9000', 10);
-const sttRecent = store.map('sttRecent');
+const sttRecent = store.map('sttRecent', { persist: false });
 
 // Where each assistant has read up to on the wake channel, so nobody keeps a byte offset in a shell
 // variable any more. Nested per session (session -> { consumer: offset }) rather than keyed
@@ -615,6 +633,23 @@ function flushWake(session) {
     console.log(`[wake] ${session} +${b.lines.length} lines (window ${b.window}ms)`);
   } catch (e) { console.error('[transcript] wake write failed', e); }
   b.lines = []; b.firstAt = 0; b.since = 0; b.lastAt = Date.now(); b.window = WAKE_BASE_MS;
+}
+
+// A buffer that came back from disk has its lines but not its timer - a setTimeout handle cannot be
+// serialized. Without this, held lines sat there until the same meeting code came round again and then
+// arrived in a batch the assistant reads as "what was just said", which is a leak across meetings, not
+// merely stale data. Overdue buffers are dropped rather than flushed: past WAKE_FORCE_MS the gate would
+// have released them long ago, so their moment has passed and they are not evidence of anything now.
+for (const s of [...wakeBuf.keys()]) {
+  const b = wakeBuf.get(s);
+  if (!b || !b.lines.length) { wakeBuf.delete(s); continue; }
+  b.timer = null;
+  if (!b.firstAt || Date.now() - b.firstAt >= WAKE_FORCE_MS) {
+    console.log(`[wake] dropped ${b.lines.length} stale buffered line(s) for ${s}`);
+    wakeBuf.delete(s);
+  } else {
+    scheduleWake(s);
+  }
 }
 
 function cors(req, res) {
@@ -972,7 +1007,9 @@ const server = http.createServer((req, res) => {
       ts, ageMs: ts ? Date.now() - ts : null,
       status: st ? st.text : '', statusAgeMs: st ? Date.now() - st.ts : null,
       estTokens: estTokensFor(u.searchParams.get('session')),
-      agent: tk ? tk.agent : null,
+      // A claim is only worth showing while the claimant is still heartbeating. Reporting the name of an
+      // assistant that died an hour ago puts a 🧠 pill on a panel nobody is behind.
+      agent: (tk && ts && Date.now() - ts < BRAIN_STALE_MS) ? tk.agent : null,
     }));
     return;
   }
