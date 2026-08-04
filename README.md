@@ -58,8 +58,16 @@ filesystem in reach, which is what a hosted deployment needs.
 
 What MCP does **not** do is wake the assistant: the protocol is client-pull, so nothing on the server can
 start a turn. A client-side loop polling `/poll?...&format=text` remains the wake source; it prints only
-when something happened, including when the panel's state changed, which is the only way pressing Stop can
-reach an assistant at all (capture ends there, so no later caption would).
+when something happened - a batch worth a turn, a panel state change, a message typed in the panel chat, a
+failed meeting-chat delivery, or its own inability to reach the server. The state change matters most: it is
+the only way pressing Stop can reach an assistant at all, since capture ends there and no later caption
+would arrive.
+
+Read positions are per **reader**, held server-side, and a reader nobody has seen before starts at the *end*
+of the channel - `backlog=1` is how the wake loop asks for the meeting so far on its first read. The loop and
+the `poll` tool are deliberately separate readers: reading is destructive, so sharing a position let a
+mid-turn tool call swallow a wake the loop still owed. Positions are bounded per meeting and evicted
+least-recently-seen, which never touches a loop that is polling.
 
 **Auth:** every route except `/health` requires an `X-MLA-Token` header. The server generates the token
 into `<transcripts>/.mla-token` on first start; **paste it into the extension Options once** (and the brain
@@ -190,19 +198,21 @@ canonical personal skill rather than a copy of the template.
 
 ```bash
 npm run lint            # node --check over src/ and server/
-npm test                # all four suites below, ~140 checks
+npm test                # all five suites below, ~186 checks
 npm run test:server     # auth gate, session guard, round-trips, restart survival
 npm run test:panel      # every request sidepanel.js makes, replayed without a browser
 npm run test:mcp        # the MCP adapter over stdio JSON-RPC
-npm run test:retention   # the retention sweep, and content not leaking between meetings
+npm run test:limits     # the size caps, with non-ASCII text
+npm run test:retention  # the retention sweep, and content not leaking between meetings
 ```
 
 Both run in CI on every push, along with both builds.
 
 The suites are split by what they protect, not by layer. `test:panel` exists because the panel is the half
 of the product a server test never touches - a renamed route or a cursor that stops advancing looks fine
-from the assistant's side and leaves the user staring at an empty panel. `test:retention` needs file
-timestamps and restarts with a gap, so it does not belong in the fast path.
+from the assistant's side and leaves the user staring at an empty panel. `test:limits` is the only suite that
+uses non-ASCII text, and three real defects were hiding behind English-only fixtures. `test:retention` needs
+file timestamps and restarts with a gap, so it does not belong in the fast path.
 
 ## Load it (unpacked)
 
