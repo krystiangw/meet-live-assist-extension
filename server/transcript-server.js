@@ -22,7 +22,7 @@ const crypto = require('crypto');
 const { execFile, spawn } = require('child_process');
 const { createStore } = require('./state-store');
 const { utf8SafeCut, utf8SafeStart } = require('./wake-cut');
-const { LOCAL_USER, safeSession, safeUser, keyOf, partsOf, nameOf, createScope } = require('./scope');
+const { LOCAL_USER, SEP, safeSession, safeUser, keyOf, partsOf, nameOf, createScope } = require('./scope');
 
 const IS_MAC = process.platform === 'darwin';
 
@@ -324,7 +324,14 @@ fs.mkdirSync(TRANSCRIPTS_DIR, { recursive: true });
 // server mid-call dropped the meeting's history. These are still Maps to every call site below; they
 // just load from and snapshot to <TRANSCRIPTS_DIR>/.state/. See state-store.js for why the snapshot
 // is periodic rather than write-through.
-const store = createStore({ dir: TRANSCRIPTS_DIR, log: (m) => console.log(m) });
+const store = createStore({
+  dir: TRANSCRIPTS_DIR,
+  log: (m) => console.log(m),
+  // State written before meetings were keyed by (user, session) holds bare session names. Left alone it
+  // would be stranded: a live call's advice and board would vanish on the upgrade restart, and the entries
+  // would sit on disk forever because neither /clear nor the retention sweep would ever match them again.
+  migrateKey: (k) => (typeof k === 'string' && !k.includes(SEP) ? keyOf(LOCAL_USER, k) : k),
+});
 
 // Shared secret. Without it any website you visit could POST /speak, /edit or read /dom & /debug
 // (DOM + localStorage/cookies/network of the shared tab) on this localhost server. Every route but
@@ -463,8 +470,10 @@ const { dirForUser, pathFor, snapDirFor } = SCOPE;
 function userOf(_req) { return LOCAL_USER; }
 function keyFor(req, rawSession) { return keyOf(userOf(req), rawSession); }
 
+// The transcript is the only path a caller can bring into being just by talking, so it is the one that
+// creates the user's directory. Every other helper reads or writes beside a file this already made.
 function fileFor(key) {
-  return pathFor(key, '.txt');
+  return pathFor(key, '.txt', { create: true });
 }
 
 // Rough, volume-based estimate of tokens the brain has processed this call: transcript + chat bytes ÷ 4.
@@ -642,7 +651,7 @@ function flushWake(session) {
   try {
     fs.appendFileSync(wakeFileFor(session), b.lines.join(''));
     // One line per brain turn - this is the log to read when tuning the WAKE_* thresholds for a real call.
-    console.log(`[wake] ${session} +${b.lines.length} lines (window ${b.window}ms)`);
+    console.log(`[wake] ${nameOf(session)} +${b.lines.length} lines (window ${b.window}ms)`);
   } catch (e) { console.error('[transcript] wake write failed', e); }
   b.lines = []; b.firstAt = 0; b.since = 0; b.lastAt = Date.now(); b.window = WAKE_BASE_MS;
 }
@@ -657,7 +666,7 @@ for (const s of [...wakeBuf.keys()]) {
   if (!b || !b.lines.length) { wakeBuf.delete(s); continue; }
   b.timer = null;
   if (!b.firstAt || Date.now() - b.firstAt >= WAKE_FORCE_MS) {
-    console.log(`[wake] dropped ${b.lines.length} stale buffered line(s) for ${s}`);
+    console.log(`[wake] dropped ${b.lines.length} stale buffered line(s) for ${nameOf(s)}`);
     wakeBuf.delete(s);
   } else {
     scheduleWake(s);
@@ -740,7 +749,7 @@ const server = http.createServer((req, res) => {
       try {
         if (!seenSessions.has(session)) {
           seenSessions.add(session);
-          fs.appendFileSync(file, `==== ${session} - started ${new Date().toISOString()} ====\n`);
+          fs.appendFileSync(file, `==== ${nameOf(session)} - started ${new Date().toISOString()} ====\n`);
           console.log(`[transcript] new session → ${file}`);
         }
         if (line) {
@@ -862,7 +871,7 @@ const server = http.createServer((req, res) => {
             const file = fileFor(session);
             if (!seenSessions.has(session)) {
               seenSessions.add(session);
-              fs.appendFileSync(file, `==== ${session} - started ${new Date().toISOString()} ====\n`);
+              fs.appendFileSync(file, `==== ${nameOf(session)} - started ${new Date().toISOString()} ====\n`);
             }
             // Mic STT is the user (co-pilot) → 'You' (authorizes actions). tabCapture STT is remote
             // participants; whisper does no diarization, so there is no name to attach - unless the user
@@ -1014,7 +1023,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({
       ts, ageMs: ts ? Date.now() - ts : null,
       status: st ? st.text : '', statusAgeMs: st ? Date.now() - st.ts : null,
-      estTokens: estTokensFor(u.searchParams.get('session')),
+      estTokens: estTokensFor(keyFor(req, u.searchParams.get('session'))),
       // A claim is only worth showing while the claimant is still heartbeating. Reporting the name of an
       // assistant that died an hour ago puts a 🧠 pill on a panel nobody is behind.
       agent: (tk && ts && Date.now() - ts < BRAIN_STALE_MS) ? tk.agent : null,
@@ -1085,7 +1094,7 @@ const server = http.createServer((req, res) => {
       const s2 = keyFor(req, d.session);
       const lang = String(d.lang || '').trim().toLowerCase().slice(0, 5);
       if (lang && lang !== 'auto') sttLangs.set(s2, lang); else sttLangs.delete(s2);
-      console.log(`[stt] ${s2} language = ${lang || 'auto'}`);
+      console.log(`[stt] ${nameOf(s2)} language = ${lang || 'auto'}`);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, lang: lang || 'auto' }));
     });
@@ -1100,7 +1109,7 @@ const server = http.createServer((req, res) => {
       const s = keyFor(req, d.session);
       const name = String(d.name || '').replace(/[\r\n:]/g, ' ').trim().slice(0, 40);
       if (name) remoteNames.set(s, name); else remoteNames.delete(s);
-      console.log(`[stt] ${s} remote name = ${name || '(unattributed)'}`);
+      console.log(`[stt] ${nameOf(s)} remote name = ${name || '(unattributed)'}`);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, name: name || null }));
     });
@@ -1117,7 +1126,7 @@ const server = http.createServer((req, res) => {
       wakeAll.set(s, on);
       try { if (on) fs.writeFileSync(wakeAllFileFor(s), '1'); else fs.unlinkSync(wakeAllFileFor(s)); } catch (_) {}
       flushWake(s);
-      console.log(`[wake] ${s} mode=${on ? 'all' : 'gated'}`);
+      console.log(`[wake] ${nameOf(s)} mode=${on ? 'all' : 'gated'}`);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, mode: on ? 'all' : 'gated' }));
     });
@@ -1136,7 +1145,7 @@ const server = http.createServer((req, res) => {
     readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const s = keyFor(req, d.session);
-      for (const suf of ['.txt', '.wake', '.wakeall', '.chat.txt', '.mode.txt', '.summary.md']) { try { fs.unlinkSync(path.join(TRANSCRIPTS_DIR, s + suf)); } catch (_) {} }
+      for (const suf of ['.txt', '.wake', '.wakeall', '.chat.txt', '.mode.txt', '.summary.md']) { try { fs.unlinkSync(pathFor(s, suf)); } catch (_) {} }
       try { fs.rmSync(snapDirFor(s), { recursive: true, force: true }); } catch (_) {}
       { const b = wakeBuf.get(s); if (b && b.timer) clearTimeout(b.timer); }
       // Drops the key from every registered store. The hand-written list this replaced had grown to 27
@@ -1268,7 +1277,7 @@ const server = http.createServer((req, res) => {
       const hms = [dt.getHours(), dt.getMinutes(), dt.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
       try {
         const file = fileFor(session);
-        if (!seenSessions.has(session)) { seenSessions.add(session); fs.appendFileSync(file, `==== ${session} - started ${new Date().toISOString()} ====\n`); }
+        if (!seenSessions.has(session)) { seenSessions.add(session); fs.appendFileSync(file, `==== ${nameOf(session)} - started ${new Date().toISOString()} ====\n`); }
         const block = `\n[${hms}] ===== PRE-JOIN CONTEXT (imported) =====\n${text}\n=================================================\n`;
         fs.appendFileSync(file, block);
         queueForWake(session, block); // imported background is worth a turn
@@ -1782,7 +1791,7 @@ const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://127.0.0.1');
     const s = keyFor(req, u.searchParams.get('session'));
     const limit = Math.min(Math.max(parseInt(u.searchParams.get('limit') || '5', 10) || 5, 1), SNAP_MAX);
-    const dir = path.join(SNAP_DIR, s);
+    const dir = snapDirFor(s);
     let snapshots = [];
     try {
       snapshots = fs.readdirSync(dir)

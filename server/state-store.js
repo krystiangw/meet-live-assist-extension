@@ -29,7 +29,7 @@ const path = require('path');
 
 const SNAPSHOT_MS = parseInt(process.env.STATE_SNAPSHOT_MS || '2000', 10);
 
-function createStore({ dir, log = () => {} }) {
+function createStore({ dir, log = () => {}, migrateKey = null }) {
   const stateDir = path.join(dir, '.state');
   const registered = [];
   let timer = null;
@@ -50,11 +50,29 @@ function createStore({ dir, log = () => {} }) {
     return out;
   }
 
+  // State written before a key format change would otherwise hydrate under keys nothing looks up again:
+  // present on disk, invisible to every request, and never purged because the sweep does not know them
+  // either. The caller supplies the mapping; entries that are already current are returned untouched.
+  function migrate(entries, name) {
+    if (!migrateKey) return entries;
+    let changed = 0;
+    const out = entries.map((e) => {
+      const isPair = Array.isArray(e) && e.length === 2;
+      const key = isPair ? e[0] : e;
+      const next = migrateKey(key);
+      if (next === key) return e;
+      changed++;
+      return isPair ? [next, e[1]] : next;
+    });
+    if (changed) log(`[state] ${name}: migrated ${changed} key(s) to the current format`);
+    return out;
+  }
+
   function hydrate(name) {
     try {
       const raw = fs.readFileSync(fileFor(name), 'utf8');
       const entries = JSON.parse(raw);
-      if (Array.isArray(entries)) return entries;
+      if (Array.isArray(entries)) return migrate(entries, name);
       log(`[state] ${name}.json is not an array - ignoring it`);
     } catch (e) {
       // Absent is the normal first-boot case and says nothing. Present but unreadable means we are

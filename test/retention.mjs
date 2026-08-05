@@ -294,11 +294,69 @@ try {
 
     // And the name a client sees is the plain one, never the internal key - a client hands it straight
     // back on the next request, where a key would be scoped a second time into a different meeting.
+    // /clear has to remove the FILES, not just the in-memory state. It did not for a while, and reported
+    // success while doing nothing: the key reached fs.unlinkSync, which rejects it, straight into an empty
+    // catch. Worse than a no-op, because the meeting also lost its "already started" marker, so the next
+    // call on the same meet code appended a second header to the transcript nobody had wiped.
+    await fetch(`${s4.base}/snapshot-request`, { method: 'POST', headers: auth, body: JSON.stringify({ session }) });
+    const cleared = await fetch(`${s4.base}/clear`, { method: 'POST', headers: auth, body: JSON.stringify({ session }) });
+    check('/clear is accepted', cleared.ok);
+    const left = readdirSync(dir).filter((f) => f.startsWith(session));
+    check('/clear removes every file of the meeting, not just its memory', left.length === 0, left.join(','));
+    const afterWipe = await (await fetch(`${s4.base}/sessions`, { headers: auth })).json();
+    check('and the wiped meeting is no longer the newest one', afterWipe.session !== session, JSON.stringify(afterWipe.session));
+
+    // The transcript header is file CONTENT, and content comes back over the wire. A key in it leaks the
+    // internal format into /transcript and into the assistant's batch.
+    await fetch(`${s4.base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session, line: 'Ann: starting again.\n' }) });
+    const body = readFileSync(path.join(dir, `${session}.txt`), 'utf8');
+    check('the transcript header carries the plain session name', body.includes(`==== ${session} - started`), body.split('\n')[0]);
+    check('and no internal key reached the file', !body.includes('local~'), body.split('\n')[0]);
+
     const seen = await (await fetch(`${s4.base}/sessions`, { headers: auth })).json();
     check('the API reports the plain session name, not an internal key', seen.session === session, JSON.stringify(seen.session));
     const polled = await (await fetch(`${s4.base}/poll?session=${encodeURIComponent(seen.session)}&consumer=x`, { headers: auth })).json();
     check('and handing that name back resolves to the same meeting', polled.session === session, JSON.stringify(polled.session));
+    // Snapshots are read through their own directory helper, which was the other path a key silently broke:
+    // readdirSync rejected it, the catch called it "none captured", and the assistant's visual context was
+    // gone with no error anywhere.
+    mkdirSync(path.join(dir, 'snapshots', session), { recursive: true });
+    writeFileSync(path.join(dir, 'snapshots', session, '1700000000000.jpg'), 'not really a jpeg');
+    const shots = await (await fetch(`${s4.base}/snapshots?session=${encodeURIComponent(session)}`, { headers: auth })).json();
+    check('a captured snapshot is actually listed', shots.snapshots.length === 1, JSON.stringify(shots));
     s4.proc.kill('SIGKILL');
+  }
+
+  // --- 8: state written before the key format changed must not be stranded ----------------------------
+  // An upgrade restart would otherwise lose a live call's advice and board, and leave entries on disk that
+  // neither /clear nor the retention sweep can ever match again.
+  {
+    const dir = tmpDir();
+    const port = await freePort();
+    const session = '2026-10-10_upgrade';
+    mkdirSync(path.join(dir, '.state'), { recursive: true });
+    // Exactly the shape the previous version wrote: bare session names as keys.
+    writeFileSync(path.join(dir, '.state', 'advice.json'),
+      JSON.stringify([[session, { seq: 2, items: [{ seq: 1, ts: '2026-10-10T09:00:00.000Z', marker: 'RISK', text: 'from before the upgrade' }] }]]));
+    writeFileSync(path.join(dir, '.state', 'modes.json'), JSON.stringify([[session, 'lead']]));
+    writeFileSync(path.join(dir, '.state', 'seenSessions.json'), JSON.stringify([session]));
+
+    const s5 = await boot(port, dir);
+    procs.push(s5.proc);
+    const token = readFileSync(path.join(dir, '.mla-token'), 'utf8').trim();
+    const auth = { 'Content-Type': 'application/json', 'X-MLA-Token': token };
+    const advice = await (await fetch(`${s5.base}/advice?session=${encodeURIComponent(session)}&since=0`, { headers: auth })).json();
+    check('advice written before the upgrade is still reachable', advice.items.length === 1, JSON.stringify(advice.items));
+    check('and its sequence continues rather than restarting', advice.last === 2, `${advice.last}`);
+    const mode = await (await fetch(`${s5.base}/mode?session=${encodeURIComponent(session)}`, { headers: auth })).json();
+    check('so is the meeting mode', mode.mode === 'lead', JSON.stringify(mode));
+    check('and the migration is logged rather than done silently', /migrated \d+ key/.test(s5.log()), s5.log().slice(-200));
+
+    // seenSessions carried over too, so the transcript does not gain a second header mid-meeting.
+    await fetch(`${s5.base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session, line: 'Ann: continuing after the upgrade.\n' }) });
+    const text = readFileSync(path.join(dir, `${session}.txt`), 'utf8');
+    check('an upgraded meeting does not gain a second "started" header', (text.match(/started/g) || []).length === 0, text.slice(0, 120));
+    s5.proc.kill('SIGKILL');
   }
 } catch (e) {
   check('the suite ran to completion', false, String((e && e.stack) || e));

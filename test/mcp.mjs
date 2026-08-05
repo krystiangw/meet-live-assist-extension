@@ -301,7 +301,7 @@ try {
   }
   await sleep(400);
   const protoState = JSON.parse(readFileSync(path.join(dir, '.state', 'pollOffsets.json'), 'utf8'));
-  const protoKeys = Object.keys((protoState.find(([k]) => k.endsWith(session)) || [null, {}])[1]);
+  const protoKeys = Object.keys((protoState.find(([k]) => k === `local~${session}`) || [null, {}])[1]);
   check('a prototype-named reader is a real stored key, not a lost write',
     protoKeys.includes('__proto__') && protoKeys.includes('constructor'), protoKeys.join(','));
   check('and nothing leaked onto Object.prototype in this process either', !('wake' in Object.prototype));
@@ -316,7 +316,9 @@ try {
   // Stores are keyed by (user, session) internally, so match on the session part rather than assuming the
   // key format - the layout of that key is the server's business, not this test's.
   const stateFile = JSON.parse(readFileSync(path.join(dir, '.state', 'pollOffsets.json'), 'utf8'));
-  const kept = Object.keys((stateFile.find(([k]) => k.endsWith(session)) || [null, {}])[1]);
+  // Exact match on the scoped key, not endsWith: `endsWith` also accepts a doubly-scoped
+  // `local~local~session`, which is precisely the regression this is here to catch.
+  const kept = Object.keys((stateFile.find(([k]) => k === `local~${session}`) || [null, {}])[1]);
   check('the number of remembered readers is bounded', kept.length <= 8, `${kept.length}: ${kept.join(',')}`);
   check('and the wake loop is not among the evicted', kept.includes('test-agent'), kept.join(','));
 
@@ -384,7 +386,13 @@ try {
   const snapReq = await call(rpc, 'snapshot_request');
   check('snapshot_request bumps a request seq', !snapReq.isError && typeof snapReq.data.seq === 'number', snapReq.text);
   const snaps = await call(rpc, 'snapshot_read');
-  check('snapshot_read answers with an empty list before any capture', !snaps.isError && Array.isArray(snaps.data.snapshots), snaps.text);
+  check('snapshot_read answers with an empty list before any capture', !snaps.isError && snaps.data.snapshots.length === 0, snaps.text);
+  // ...and a non-empty one after. The previous check passed for a year of a reason: the list was empty
+  // unconditionally, because the directory helper had been missed and its error swallowed.
+  mkdirSync(path.join(dir, 'snapshots', session), { recursive: true });
+  writeFileSync(path.join(dir, 'snapshots', session, '1700000000001.jpg'), 'x');
+  const snaps2 = await call(rpc, 'snapshot_read');
+  check('and lists a capture once one exists', snaps2.data.snapshots.length === 1, snaps2.text);
 
   // --- the assistant must be told to shut up when the user pauses it ---
   await fetch(`${base}/control`, { method: 'POST', headers: auth, body: JSON.stringify({ session, state: 'paused' }) });
