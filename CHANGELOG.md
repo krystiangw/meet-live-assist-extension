@@ -123,6 +123,34 @@ character whose bytes straddled a 64 KB boundary was destroyed - silently, in ex
 product carries: long Polish captions and the wrap-up summary. They now share one helper that concatenates
 bytes and decodes once.
 
+### Keyed by (user, session)
+
+The prerequisite for ever running this for more than one person. Every store
+and every path is now derived from a `(user, session)` pair rather than a session name alone.
+
+**For a local install this is invisible, deliberately.** The single-user profile resolves with no extra path
+segment, so the file names, the directory and the layout are exactly what they were: an existing install
+needs no migration, and a server can be swapped underneath one that is already running. `test/scope.mjs`
+and a listing assertion in `test/retention.mjs` are there to fail if that ever stops being true.
+
+`server/scope.js` owns the rules. Its own module because the two failure modes are severe in opposite
+directions - too strict and a meeting becomes unreachable, too loose and one user reads another's call -
+and because with one user nothing else in the suite can exercise the second one.
+
+The pair travels as a single string joined by NUL, which cannot appear in a sanitised segment or in a
+filename. A plain `user:session` prefix would let someone name their meeting `bob:standup` and read Bob's;
+this cannot be forged, and the suite proves it for several spellings of the attempt.
+
+`userOf()` is the seam and currently returns a constant. Step 4 (per-user tokens on the extension side,
+OAuth on the MCP side) is the only thing that has to change to make it real.
+
+The refactor shipped four regressions of its own, all with the same root cause: the pair was joined with
+NUL, so a key that reached a path helper by mistake made the fs call throw into one of the empty catch
+blocks this server uses for missing files. A missed site therefore failed **silently and reported
+success** - `/clear` deleted nothing, `/snapshots` returned an empty list. The separator is a plain `~`
+now, and a missed site produces a visibly wrong file that a listing assertion catches. State written under
+the old keys is migrated on boot rather than stranded.
+
 ### Fixes
 
 - A retention sweep could wipe the state of the meeting happening right now: one leftover `.mode.txt` past the
@@ -138,7 +166,7 @@ bytes and decodes once.
 
 ### Tests
 
-`npm test` is now five suites, ~242 checks: the server contract, **the panel's own request cycle replayed
+`npm test` is now five suites, ~296 checks: the server contract, **the panel's own request cycle replayed
 without a browser**, the MCP adapter over stdio, **the size caps with non-ASCII text**, and retention plus
 cross-meeting leaks. Each fix above was reproduced first and is covered by a check that fails when the fix is
 reverted. Also validated against a copy of a real 113 MB data dir with 75 sessions, and by driving the adapter

@@ -69,6 +69,11 @@ the `poll` tool are deliberately separate readers: reading is destructive, so sh
 mid-turn tool call swallow a wake the loop still owed. Positions are bounded per meeting and evicted
 least-recently-seen, which never touches a loop that is polling.
 
+**Multi-tenancy seam.** State is keyed by `(user, session)`; see `server/scope.js`. On a local install the
+single user resolves to the data dir itself, so nothing about the layout changes. The seam exists so a
+hosted profile can namespace users without a second code path, and so the guarantee that one user cannot
+reach another's meeting is stated in one place and tested directly.
+
 **Auth:** every route except `/health` requires an `X-MLA-Token` header. The server generates the token
 into `<transcripts>/.mla-token` on first start; **paste it into the extension Options once** (and the brain
 reads the same file). Without it any website you visit could reach the localhost server.
@@ -198,7 +203,8 @@ canonical personal skill rather than a copy of the template.
 
 ```bash
 npm run lint            # node --check over src/ and server/
-npm test                # all five suites below, ~242 checks
+npm test                # all five suites below, ~296 checks
+npm run test:scope      # the (user, session) rules in isolation
 npm run test:server     # auth gate, session guard, round-trips, restart survival
 npm run test:panel      # every request sidepanel.js makes, replayed without a browser
 npm run test:mcp        # the MCP adapter over stdio JSON-RPC
