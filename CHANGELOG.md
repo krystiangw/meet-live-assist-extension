@@ -102,6 +102,27 @@ reasons** - including the headline one, which no test touched at all because eve
 handed both environment variables and so never ran the discovery path. Each now has a check that fails when
 the fix is reverted.
 
+### A fourth review, of the third's fixes
+
+Seven more, two of them introduced by the third round's fixes. The critical one: an assistant attaching to a
+meeting that already held the maximum number of readers received **nothing at all** and woke every two
+seconds for the rest of the call - ranking eviction by how established a reader is put a freshly created one
+last, so it was evicted before its first read and recreated at the end of the channel by its own next poll.
+
+The wake loop needed rewriting again. It glued the last line of every batch to the first line of the next
+(`$(...)` strips trailing newlines) in the assistant's primary input; it used `--fail-with-body`, which
+landed in curl 7.76, so on Debian 11, Ubuntu 20.04, RHEL 8 or macOS 11 it reported a perfectly healthy
+server as unreachable, permanently; and it tied "report this once" to the retry cadence, so a second failure
+was reported to nobody and a recovered server went unnoticed for thirty seconds. **None of this was caught
+by four rounds of review because no test ever ran the script against a working server** - only against a
+dead one. It does now.
+
+**And one older than all of it, found while testing the above: every request body was corrupted at chunk
+boundaries.** Twenty-nine handlers accumulated `body += chunk`, decoding each Buffer separately, so any
+character whose bytes straddled a 64 KB boundary was destroyed - silently, in exactly the two things this
+product carries: long Polish captions and the wrap-up summary. They now share one helper that concatenates
+bytes and decodes once.
+
 ### Fixes
 
 - A retention sweep could wipe the state of the meeting happening right now: one leftover `.mode.txt` past the
@@ -117,7 +138,7 @@ the fix is reverted.
 
 ### Tests
 
-`npm test` is now five suites, ~215 checks: the server contract, **the panel's own request cycle replayed
+`npm test` is now five suites, ~242 checks: the server contract, **the panel's own request cycle replayed
 without a browser**, the MCP adapter over stdio, **the size caps with non-ASCII text**, and retention plus
 cross-meeting leaks. Each fix above was reproduced first and is covered by a check that fails when the fix is
 reverted. Also validated against a copy of a real 113 MB data dir with 75 sessions, and by driving the adapter
