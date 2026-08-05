@@ -31,4 +31,17 @@ function utf8SafeCut(buf, len) {
   return i + need <= end ? end : i;
 }
 
-module.exports = { utf8SafeCut };
+// The mirror of the above, for cutting the FRONT off a buffer: where a slice may legally start. Decoding
+// from the middle of a multi-byte sequence yields one U+FFFD per orphaned byte - up to three - and each of
+// those is three bytes once re-encoded, so "slice then strip the replacement chars" both leaves some behind
+// and pushes the result back over the byte cap it was cutting to.
+function utf8SafeStart(buf, from) {
+  let i = Math.max(0, Math.min(from, buf.length));
+  // Continuation bytes are 10xxxxxx. Skip them and we land on a lead byte, which is where a character
+  // begins. Four is the longest sequence, so this can never walk far.
+  let steps = 0;
+  while (i < buf.length && (buf[i] & 0xc0) === 0x80 && steps < 3) { i++; steps++; }
+  return i;
+}
+
+module.exports = { utf8SafeCut, utf8SafeStart };

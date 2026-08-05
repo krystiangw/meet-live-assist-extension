@@ -125,12 +125,54 @@ try {
 
   // A single line longer than the cap used to come back as an empty string, so its content was unreachable
   // by any tail. /append takes a 1 MB body and does not insist on line breaks.
-  const huge = `${'z'.repeat(CAP + 1000)} - the tail of one enormous line\n`;
+  // Emoji, not ASCII: the cap is in bytes, and cutting a 4-byte character mid-sequence is what produces
+  // replacement characters - each of which re-encodes to 3 bytes and pushed the answer back OVER the cap it
+  // was cutting to. An ASCII fixture makes that check vacuous, which is how it shipped.
+  const huge = `${'🔵'.repeat(Math.ceil(CAP / 4) + 200)} - the tail of one enormous line\n`;
   await fetch(`${base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session: 'one-huge-line', line: huge }) });
   const oneLine = await (await fetch(`${base}/transcript?session=one-huge-line&tail=1`, { headers: auth })).json();
   check('a single line longer than the cap still returns content', oneLine.text.length > 0, `${oneLine.text.length} chars`);
   check('and it is the end of that line, which is what a tail means', /enormous line$/.test(oneLine.text.trim()), JSON.stringify(oneLine.text.slice(-40)));
   check('within the cap', Buffer.byteLength(oneLine.text) <= CAP, `${Buffer.byteLength(oneLine.text)}`);
+  check('with no replacement characters from cutting mid-character', !oneLine.text.includes('\uFFFD'), JSON.stringify(oneLine.text.slice(0, 12)));
+  check('and it is well-formed text', oneLine.text.isWellFormed(), JSON.stringify(oneLine.text.slice(0, 12)));
+
+  // The other half of the same helper: where a slice may START. Same failure mode, opposite end.
+  {
+    const { utf8SafeStart } = await import(new URL('../server/wake-cut.js', import.meta.url));
+    const four = Buffer.from('🔵');
+    const cases = [
+      ['a boundary is left alone', Buffer.from('ab🔵'), 2, 2],
+      ['one orphaned byte is skipped', Buffer.concat([four, Buffer.from('ab')]), 1, 4],
+      ['as are three', Buffer.concat([four, Buffer.from('ab')]), 3, 4],
+      ['past the end is clamped', Buffer.from('ab'), 99, 2],
+      ['before the start is clamped', Buffer.from('ab'), -5, 0],
+    ];
+    for (const [name, buf, from, want] of cases) {
+      const got = utf8SafeStart(buf, from);
+      check(name, got === want, `got ${got}, wanted ${want}`);
+    }
+    let dirty = 0;
+    const fuzz = Buffer.from('Zażółć 🔵 gęślą');
+    for (let i = 0; i <= fuzz.length; i++) if (fuzz.slice(utf8SafeStart(fuzz, i)).toString('utf8').includes('\uFFFD')) dirty++;
+    check('no start offset ever decodes to a replacement character', dirty === 0, `${dirty} offsets`);
+  }
+
+  // --- request bodies survive being split across chunk boundaries ------------------------------------
+  // Chunks arrive as Buffers and were concatenated as strings, decoding each on its own, so a character
+  // whose bytes straddled a 64 KB boundary was destroyed. Silent, and it hits exactly the two things this
+  // product carries: long Polish captions and the wrap-up summary.
+  const polish = `${'Zażółć gęślą jaźń '.repeat(6000)}\n`;
+  const bigSession = 'chunk-boundary';
+  await fetch(`${base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session: bigSession, line: polish }) });
+  await sleep(400);
+  const stored = readFileSync(path.join(dir, `${bigSession}.txt`), 'utf8');
+  check('a caption bigger than a chunk survives intact', !stored.includes('\uFFFD'), `first bad at ${stored.indexOf('\uFFFD')}`);
+  check('and nothing was lost from it', stored.includes(polish.trim()), `${stored.length} chars`);
+
+  await fetch(`${base}/summary`, { method: 'POST', headers: auth, body: JSON.stringify({ session: bigSession, text: polish }) });
+  const backAgain = await (await fetch(`${base}/summary?session=${encodeURIComponent(bigSession)}`, { headers: auth })).json();
+  check('so does a wrap-up summary, which is prose in the user\'s language', !(backAgain.text || '').includes('\uFFFD'));
 
   // --- /transcript ----------------------------------------------------------------------------------
   const tr = await (await fetch(`${base}/transcript?session=${q}&tail=2000`, { headers: auth })).json();

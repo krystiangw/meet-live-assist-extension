@@ -7,7 +7,7 @@
 // assistant does to a call is an HTTP effect, so a fake transcript pushed through /append is
 // indistinguishable from a real one.
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -165,8 +165,86 @@ try {
   // The wake loop is the reader that matters: it is the only thing that can start an assistant's turn, and
   // `attach` hands out its URL. Test through that URL, not through the tool, because they are deliberately
   // different readers - see below.
-  const loopUrl = attached.data.wakeLoop.match(/"(http:[^"]+)"/)[1];
+  const loopUrl = attached.data.wakeLoop.match(/'(http:[^']+)'/)[1];
   const loop = () => fetch(loopUrl, { headers: auth }).then((r) => r.text());
+
+  // Run the ACTUAL emitted script against a live server, which no test did until now - which is why three
+  // defects in it survived three reviews: the script glued each batch's last line to the next batch's
+  // first, used a curl option that does not exist before 7.76 (making every supported Linux report a
+  // healthy server as unreachable, forever), and never returned to its 2s cadence after any blip.
+  const scriptSession = '2026-06-06_script';
+  await fetch(`${base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session: scriptSession, line: 'Ann: we decided line one.\n' }) });
+  await sleep(600);
+  const scriptAttach = await call(rpc, 'attach', { session: scriptSession, force: true });
+  const runner = spawn('sh', ['-c', scriptAttach.data.wakeLoop], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let scriptOut = '';
+  let scriptErr = '';
+  runner.stdout.on('data', (c) => { scriptOut += c; });
+  runner.stderr.on('data', (c) => { scriptErr += c; });
+  await sleep(3000);
+  await fetch(`${base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session: scriptSession, line: 'Ann: and we agreed line two.\n' }) });
+  await sleep(4000);
+  runner.kill('SIGKILL');
+  check('the emitted script actually delivers the transcript', /decided line one/.test(scriptOut), JSON.stringify(scriptOut.slice(0, 200)));
+  check('and the batch that arrived later too', /agreed line two/.test(scriptOut), JSON.stringify(scriptOut.slice(0, 300)));
+  // Command substitution strips trailing newlines. Printing the body alone glued the last line of a batch
+  // to the first line of the next, in the assistant's primary input.
+  check('consecutive batches are not glued into one line', !/line one\.Ann:/.test(scriptOut), JSON.stringify(scriptOut));
+  check('the script writes nothing to stderr', scriptErr === '', scriptErr.slice(0, 200));
+
+  // The cadence must come back to 2s after a failure. Resetting it only on a NON-EMPTY body meant that
+  // after any blip the loop stayed at 30s through a quiet meeting, so the next real event arrived up to
+  // 30s late - Stop included, which has no other route - and the "say it once" guard stayed latched, so a
+  // second failure was reported to nobody.
+  const flakyPort = await freePort();
+  const flakyDir = mkdtempSync(path.join(tmpdir(), 'mla-flaky-'));
+  const flakyAttach = { session: '2026-06-07_flaky' };
+  let flaky = spawn(process.execPath, [path.join(ROOT, 'server', 'transcript-server.js')], {
+    env: { ...process.env, PORT: String(flakyPort), TRANSCRIPTS_DIR: flakyDir },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  for (let i = 0; i < 40; i++) {
+    try { if ((await fetch(`http://127.0.0.1:${flakyPort}/health`)).ok) break; } catch (_) { await sleep(250); }
+  }
+  const flakyToken = readFileSync(path.join(flakyDir, '.mla-token'), 'utf8').trim();
+  const flakyAuth = { 'Content-Type': 'application/json', 'X-MLA-Token': flakyToken };
+  const flakyMcp = spawn(process.execPath, [path.join(ROOT, 'server', 'mcp-server.js')], {
+    env: { ...process.env, MLA_URL: `http://127.0.0.1:${flakyPort}`, MLA_TOKEN: flakyToken, TRANSCRIPTS_DIR: flakyDir, MLA_AGENT: 'flaky' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const rpcFlaky = client(flakyMcp);
+  await rpcFlaky.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'f', version: '0' } });
+  await fetch(`http://127.0.0.1:${flakyPort}/append`, { method: 'POST', headers: flakyAuth, body: JSON.stringify({ ...flakyAttach, line: 'Ann: we decided to begin.\n' }) });
+  await sleep(600);
+  const fa = await call(rpcFlaky, 'attach', flakyAttach);
+  const flakyRunner = spawn('sh', ['-c', fa.data.wakeLoop], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let flakyOut = '';
+  flakyRunner.stdout.on('data', (c) => { flakyOut += c; });
+  await sleep(2500);
+  flaky.kill('SIGKILL');            // the blip
+  await sleep(3000);                 // the loop notices and backs off
+  flaky = spawn(process.execPath, [path.join(ROOT, 'server', 'transcript-server.js')], {
+    env: { ...process.env, PORT: String(flakyPort), TRANSCRIPTS_DIR: flakyDir },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  for (let i = 0; i < 40; i++) {
+    try { if ((await fetch(`http://127.0.0.1:${flakyPort}/health`)).ok) break; } catch (_) { await sleep(250); }
+  }
+  check('an outage is reported to the assistant', /cannot reach the bridge server/.test(flakyOut), JSON.stringify(flakyOut));
+  const beforeRecovery = flakyOut.length;
+  await sleep(4000);                 // quiet meeting: the server is back but has nothing to say
+  await fetch(`http://127.0.0.1:${flakyPort}/append`, { method: 'POST', headers: flakyAuth, body: JSON.stringify({ ...flakyAttach, line: 'Ann: and we agreed to finish.\n' }) });
+  await sleep(5000);                 // well under 30s: only a recovered cadence delivers this in time
+  flakyRunner.kill('SIGKILL');
+  const recovery = flakyOut.slice(beforeRecovery);
+  check('the loop says when the server is back', /the bridge server is back/.test(recovery), JSON.stringify(recovery));
+  check('and returns to its normal cadence after a quiet recovery',
+    /agreed to finish/.test(recovery), JSON.stringify(recovery));
+  flakyMcp.kill('SIGKILL');
+  flaky.kill('SIGKILL');
+  rmSync(flakyDir, { recursive: true, force: true });
+  await call(rpc, 'attach', { session, force: true });
+
 
   const first = await loop();
   check('the wake loop receives the transcript batch', /ship the release on Monday/.test(first), JSON.stringify(first));
@@ -244,6 +322,28 @@ try {
   await sleep(800);
   const afterEviction = await loop();
   check('the loop reads only what is new after an eviction storm', /migration lands this sprint/.test(afterEviction), JSON.stringify(afterEviction));
+
+  // The other end of the same rule, and the sharper case: an assistant attaching to a session that ALREADY
+  // holds the maximum number of readers. A reader created by `attach` has polled zero times, so ranking by
+  // how established a reader is put it last - it was evicted before its first read, recreated at the end of
+  // the channel by its own next poll (losing every caption), and returned a non-empty body each time,
+  // because a fresh cursor has no status signature and so every poll looked like a state change. A wake
+  // every two seconds, with no content, for the whole meeting.
+  const crowded = '2026-06-08_crowded';
+  await fetch(`${base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session: crowded, line: 'Ann: we decided this before the assistant joined.\n' }) });
+  await sleep(600);
+  for (let i = 0; i < 8; i++) {
+    for (let j = 0; j < 3; j++) await fetch(`${base}/poll?session=${encodeURIComponent(crowded)}&consumer=incumbent-${i}`, { headers: auth });
+  }
+  const lateJoin = await call(rpc, 'attach', { session: crowded, force: true });
+  const crowdedUrl = lateJoin.data.wakeLoop.match(/'(http:[^']+)'/)[1];
+  await fetch(`${base}/poll?session=${encodeURIComponent(crowded)}&consumer=incumbent-0`, { headers: auth }); // trigger eviction
+  const lateRead = await (await fetch(crowdedUrl, { headers: auth })).text();
+  check('an assistant joining a session that is already at the reader limit still gets the meeting',
+    /decided this before the assistant joined/.test(lateRead), JSON.stringify(lateRead));
+  const quietAfter = await (await fetch(crowdedUrl, { headers: auth })).text();
+  check('and its next read is quiet, rather than a state banner every two seconds', quietAfter === '', JSON.stringify(quietAfter));
+  await call(rpc, 'attach', { session, force: true });
   check('and does not replay the meeting from the start',
     !/ship the release on Monday/.test(afterEviction), JSON.stringify(afterEviction.slice(0, 120)));
 
@@ -429,7 +529,7 @@ try {
   // The loop is the wake source, so its failures cost turns. With a token the server rejects, `curl -s`
   // printed the 403 body - a non-empty body every 2 seconds, i.e. a wake every 2 seconds for as long as
   // the call lasts. It has to say it once and then back off.
-  const loopScript = attached.data.wakeLoop.replace(/^T=.*$/m, 'T=definitely-wrong');
+  const loopScript = attached.data.wakeLoop.replace(/^ *T=.*$/m, '  T=definitely-wrong');
   const badToken = spawn('sh', ['-c', loopScript], { stdio: ['ignore', 'pipe', 'pipe'] });
   let badOut = '';
   badToken.stdout.on('data', (c) => { badOut += c; });
@@ -437,7 +537,7 @@ try {
   badToken.kill('SIGKILL');
   const complaints = badOut.split('\n').filter((l) => l.trim()).length;
   check('a rejected token is reported once, not on every iteration', complaints === 1, `${complaints} lines: ${JSON.stringify(badOut)}`);
-  check('and it says what to do about it', /check the token/.test(badOut), JSON.stringify(badOut));
+  check('and it says what to do about it', /re-check it in the extension options/.test(badOut), JSON.stringify(badOut));
 
   // A dead server used to be indistinguishable from a quiet meeting: `curl -s` prints nothing and exits
   // non-zero. The loop claims to be the only route by which Stop reaches the assistant, so going blind is
@@ -493,8 +593,24 @@ try {
   const fromDir = await named(ROOT);
   await named(path.join(ROOT, 'test'));
   const claim = await (await fetch(`${base}/brain-ping?session=${encodeURIComponent(session)}`, { headers: auth })).json();
-  check('an assistant with no MLA_AGENT is named after its working directory', claim.agent === 'test', JSON.stringify(claim.agent));
-  check('so two assistants in different projects are not the same claimant', !fromDir.isError, fromDir.text);
+  check('an assistant with no MLA_AGENT is named after its working directory', /^test-[0-9a-f]{4}$/.test(claim.agent || ''), JSON.stringify(claim.agent));
+  // Distinctness is the point, and a bare basename does not have it: two checkouts both called `frontend`
+  // would share a name, and two assistants sharing a name share a read position, so captions go to
+  // whichever polls first. The name must still be stable across a reconnect, which rules out a pid.
+  const nameA = (await named(ROOT)).data?.session ? claim.agent : null;
+  const dirA = path.join(ROOT, 'test');
+  const dirB = path.join(dir, 'test');
+  mkdirSync(dirB, { recursive: true });
+  await named(dirA);
+  const claimA = (await (await fetch(`${base}/brain-ping?session=${encodeURIComponent(session)}`, { headers: auth })).json()).agent;
+  await named(dirB);
+  const claimB = (await (await fetch(`${base}/brain-ping?session=${encodeURIComponent(session)}`, { headers: auth })).json()).agent;
+  check('two directories with the SAME basename get different names', claimA !== claimB, `${claimA} vs ${claimB}`);
+  check('and both still start with that basename', /^test-/.test(claimA) && /^test-/.test(claimB), `${claimA} / ${claimB}`);
+  await named(dirA);
+  const claimAgain = (await (await fetch(`${base}/brain-ping?session=${encodeURIComponent(session)}`, { headers: auth })).json()).agent;
+  check('and the name is stable across a restart from the same directory', claimAgain === claimA, `${claimAgain} vs ${claimA}`);
+  check('so a reconnecting assistant is not refused its own meeting', !fromDir.isError, fromDir.text);
 
   // --- attach must not refuse the meeting it is already assisting -----------------------------------
   // The heartbeat it checks is bumped by its own `working` calls, so without comparing the claim name an

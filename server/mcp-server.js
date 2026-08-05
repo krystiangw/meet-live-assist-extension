@@ -24,6 +24,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const readline = require('readline');
+const crypto = require('crypto');
 
 const VERSION = '0.4.0';
 const BASE = (process.env.MLA_URL || 'http://127.0.0.1:8848').replace(/\/$/, '');
@@ -34,8 +35,14 @@ const BASE = (process.env.MLA_URL || 'http://127.0.0.1:8848').replace(/\/$/, '')
 // reconnects. MLA_AGENT overrides it, and should, when a name would be nicer in the panel's pill.
 function defaultAgentName() {
   try {
-    const base = path.basename(process.cwd());
-    if (base && base !== '/' && base !== '.') return base;
+    const cwd = process.cwd();
+    const base = path.basename(cwd);
+    // The bare basename is not distinct enough: two checkouts both called `frontend`, or two clients started
+    // from `$HOME`, produce the same name - and two assistants sharing a name share a read position, so
+    // captions go to whichever polls first. The path suffix makes it distinct while keeping it stable
+    // across a reconnect, which is the other half of the requirement.
+    const tag = crypto.createHash('sha1').update(cwd).digest('hex').slice(0, 4);
+    if (base && base !== '/' && base !== '.') return `${base}-${tag}`;
   } catch (_) {}
   return 'assistant';
 }
@@ -95,35 +102,61 @@ function headers() {
   return h;
 }
 
-// The wake loop, as a script rather than a one-liner. It is the only thing that can start an assistant's
-// turn, so each of its failure modes costs the rest of a call, and all of them used to be silent.
+// The wake loop: a POSIX shell script the assistant runs under a persistent Monitor. It is the only thing
+// that can start an assistant's turn, so every one of its failure modes costs the rest of a meeting, and
+// all of them are silent by nature. Four reviews have now found bugs in these twelve lines; the notes are
+// what each of them cost.
 //
-// Decisions here that look fussy and are not:
-//   - The token is read from the FILE whenever there is one. This script runs in a shell the assistant
-//     spawns, which does not inherit this process's environment, so `$MLA_TOKEN` is empty there. The env
-//     branch exists only for a remote server, where there is no file to read.
-//   - The path is quoted. A data dir with a space in it made `cat` fail, and an empty token then produced
-//     a 403 reported to the user as "paste the token again" - about a token that was already correct.
-//   - `--fail-with-body` turns an HTTP error into exit 22 while still printing the body, so the three cases
-//     are told apart by exit code rather than by guessing from content. Matching the body against
-//     `forbidden*` swallowed any transcript line that happened to start with the word.
-//   - An unreachable server backs off like a rejected token does. Reporting it every two seconds is the
-//     wake storm the gate exists to prevent, only with no content at all.
+//   - The HTTP status comes from `-w %{http_code}` appended to the body, and is split off with POSIX
+//     parameter expansion (it is always exactly three characters). `--fail-with-body` would be tidier but
+//     landed in curl 7.76: on Debian 11, Ubuntu 20.04, RHEL 8 or macOS 11 it makes curl exit 2, which read
+//     as "server unreachable" while the server was fine, and printed an unknown-option line every two
+//     seconds forever.
+//   - Splitting this way also PRESERVES the batch's trailing newline. `$(...)` strips trailing newlines, so
+//     printing the body alone glued the last line of each batch to the first line of the next.
+//   - The cadence resets on any successful request, not on a non-empty one. Resetting only on content meant
+//     that after a blip the loop stayed at 30s for the rest of a quiet meeting, so the next real event -
+//     Stop included, which has no other route - arrived up to 30s late, and a second failure was never
+//     reported because the "say it once" guard stayed latched.
+//   - The token is re-read every iteration. It is minted by the server on its first boot, which routinely
+//     happens after this loop was armed.
+function shQuote(v) { return `'${String(v).replace(/'/g, `'\\''`)}'`; }
+
 function wakeLoopFor(url) {
   const tokenFile = path.join(TRANSCRIPTS_DIR, '.mla-token');
-  const readToken = fs.existsSync(tokenFile)
-    ? `T=$(cat "${tokenFile}")`
-    : 'T="$MLA_TOKEN"   # remote server: no token file to read, so export it for this loop';
+  // The loop runs in a shell the assistant spawns, which does not inherit this process's environment, so
+  // `$MLA_TOKEN` is empty there. Read the file when it holds the token we are actually using; otherwise
+  // there is nothing to read and the value has to travel in the script itself.
+  let fileToken = '';
+  try { fileToken = fs.readFileSync(tokenFile, 'utf8').trim(); } catch (_) {}
+  const envToken = (process.env.MLA_TOKEN || '').trim();
+  const readToken = (fileToken && (!envToken || fileToken === envToken))
+    ? `T=$(cat ${shQuote(tokenFile)})`
+    : `T=${shQuote(envToken)}`;
   return [
-    readToken,
-    'W=2',
+    // W is the cadence, E latches the reporting. Keeping them separate matters: tying "say it once" to the
+    // cadence meant a second failure was never reported, and a 30s cadence after an outage meant the server
+    // coming back went unnoticed for half a minute. An unreachable local server is a cheap, instant
+    // ECONNREFUSED, and launchd restarts it in seconds, so retrying at 5s costs nothing and recovers fast.
+    // A rejected token needs a human, so that one waits.
+    'W=2; E=0',
     'while true; do',
-    `  B=$(curl -s --fail-with-body --max-time 10 -H "X-MLA-Token: $T" "${url}"); RC=$?`,
-    '  case "$RC" in',
-    '    0) [ -n "$B" ] && { printf "%s" "$B"; W=2; } ;;',
-    '    22) [ "$W" = 2 ] && echo "mla: the server rejected the request - check the token in the extension options"; W=30 ;;',
-    '    *) [ "$W" = 2 ] && echo "mla: cannot reach the bridge server - you are blind until it is back"; W=30 ;;',
-    '  esac',
+    `  ${readToken}`,
+    `  R=$(curl -s --max-time 10 -w '%{http_code}' -H "X-MLA-Token: $T" ${shQuote(url)}); RC=$?`,
+    '  C=${R#"${R%???}"}; B=${R%???}',
+    '  if [ "$RC" != 0 ]; then',
+    '    [ "$E" = 0 ] && echo "mla: cannot reach the bridge server - you are blind until it is back"',
+    '    E=1; W=5',
+    '  elif [ "$C" = 200 ]; then',
+    '    [ "$E" = 1 ] && echo "mla: the bridge server is back"',
+    '    E=0; W=2; [ -n "$B" ] && printf %s "$B"',
+    '  elif [ "$C" = 403 ]; then',
+    '    [ "$E" = 0 ] && echo "mla: the server rejected the token - re-check it in the extension options"',
+    '    E=1; W=30',
+    '  else',
+    '    [ "$E" = 0 ] && echo "mla: the bridge server answered $C - the wake channel is not working"',
+    '    E=1; W=30',
+    '  fi',
     '  sleep "$W"',
     'done',
   ].join('\n');

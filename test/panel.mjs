@@ -125,6 +125,10 @@ try {
   const snapSeq2 = await (await get(`/snapshot-request?session=${q}`)).json();
   check('an assistant request bumps the counter the panel watches', snapSeq2.seq === snapSeq.seq + 1, `${snapSeq.seq} -> ${snapSeq2.seq}`);
 
+  // The assistant's reader has to exist BEFORE the panel reports anything, which is the real ordering: it
+  // attaches at the start of the call. A reader created afterwards starts at "now" by design, so an ack
+  // from before it existed is not its business - replaying those is how an assistant re-answers a meeting.
+  await get(`/poll?session=${q}&consumer=brain`);
   const cc = await (await get(`/callchat?session=${q}&since=${Math.max(lastCallChatSeq, 0)}`)).json();
   check('the meeting-chat queue starts empty', cc.items.length === 0, JSON.stringify(cc.items));
   await post('/callchat', { session, text: 'Ticket: EXAMPLE-1' });
@@ -134,9 +138,7 @@ try {
   await post('/callchat-result', { session, seq: cc2.items[0].seq, ok: false, reason: 'chat panel not open' });
   const ccr = await (await get(`/callchat-result?session=${q}&since=0`)).json();
   check('the panel can report a delivery failure', ccr.items.length === 1 && ccr.items[0].ok === false, JSON.stringify(ccr.items));
-  // backlog=1 mirrors what `attach` seeds for a real assistant: a reader created from nothing starts at
-  // the end, so without it this delivery failure predates its position.
-  const assistantSees = await (await get(`/poll?session=${q}&consumer=brain&backlog=1`)).json();
+  const assistantSees = await (await get(`/poll?session=${q}&consumer=brain`)).json();
   check('and the assistant is told about it on its next poll',
     assistantSees.pending.callChatResults.some((r) => r.ok === false), JSON.stringify(assistantSees.pending));
 

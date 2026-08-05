@@ -3,7 +3,7 @@
 //
 //   node test/retention.mjs
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -200,6 +200,71 @@ try {
       texts.includes('second, while B is running'), JSON.stringify(texts));
     check('and it reports why it is not persisting', /state lock|not persisting|cannot claim/.test(b.log()) || texts.length > 0, b.log().slice(-200));
     a.proc.kill('SIGKILL'); b.proc.kill('SIGKILL');
+  }
+  // --- 5: a data dir whose path contains a space -----------------------------------------------------
+  // The wake loop is a shell script with that path interpolated into it. Unquoted, `cat` failed, the token
+  // came out empty, and the loop reported a rejected token - about a token that was correct.
+  {
+    const parent = tmpDir();
+    const dir = path.join(parent, 'my meetings');
+    mkdirSync(dir, { recursive: true });
+    const port = await freePort();
+    const s2 = await boot(port, dir);
+    procs.push(s2.proc);
+    const token = readFileSync(path.join(dir, '.mla-token'), 'utf8').trim();
+    const auth = { 'Content-Type': 'application/json', 'X-MLA-Token': token };
+    const session = 'spaced';
+    await fetch(`${s2.base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session, line: 'Ann: we decided it works.\n' }) });
+    await sleep(600);
+
+    const mcp = spawn(process.execPath, [path.join(ROOT, 'server', 'mcp-server.js')], {
+      env: { ...process.env, MLA_URL: s2.base, TRANSCRIPTS_DIR: dir, MLA_TOKEN: '', MLA_AGENT: 'spaced' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    procs.push(mcp);
+    let out = '';
+    mcp.stdout.on('data', (c) => { out += c; });
+    mcp.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } } })}\n`);
+    mcp.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'attach', arguments: { session } } })}\n`);
+    for (let i = 0; i < 60 && !out.includes('"id":2'); i++) await sleep(100);
+    const reply = out.split('\n').map((l) => { try { return JSON.parse(l); } catch (_) { return {}; } }).find((m) => m.id === 2);
+    const payload = JSON.parse(reply.result.content[0].text);
+    const runner = spawn('sh', ['-c', payload.wakeLoop], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let loopOut = '';
+    let loopErr = '';
+    runner.stdout.on('data', (c) => { loopOut += c; });
+    runner.stderr.on('data', (c) => { loopErr += c; });
+    await sleep(3000);
+    runner.kill('SIGKILL');
+    check('a data dir with a space in it still delivers to the wake loop', /we decided it works/.test(loopOut), JSON.stringify(loopOut.slice(0, 160)));
+    check('and produces no shell errors', loopErr === '', loopErr.slice(0, 200));
+    mcp.kill('SIGKILL');
+    s2.proc.kill('SIGKILL');
+  }
+
+  // --- 6: the wake file shrinking under a reader -------------------------------------------------------
+  // /clear truncates it. A read that comes back empty must not advance a position past captions nobody saw.
+  {
+    const dir = tmpDir();
+    const port = await freePort();
+    const s3 = await boot(port, dir);
+    procs.push(s3.proc);
+    const token = readFileSync(path.join(dir, '.mla-token'), 'utf8').trim();
+    const auth = { 'Content-Type': 'application/json', 'X-MLA-Token': token };
+    const session = 'shrinking';
+    await fetch(`${s3.base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session, line: 'Ann: we decided the first thing.\n' }) });
+    await sleep(600);
+    const url = `${s3.base}/poll?session=${session}&consumer=r&backlog=1`;
+    const before = await (await fetch(url, { headers: auth })).json();
+    check('the reader got the first batch', /first thing/.test(before.batch), JSON.stringify(before.batch));
+
+    await fetch(`${s3.base}/clear`, { method: 'POST', headers: auth, body: JSON.stringify({ session }) });
+    await fetch(`${s3.base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session, line: 'Ann: we decided the second thing.\n' }) });
+    await sleep(700);
+    const after = await (await fetch(url, { headers: auth })).json();
+    check('and after a wipe restarts the file, reads it from the beginning rather than skipping it',
+      /second thing/.test(after.batch), JSON.stringify(after.batch));
+    s3.proc.kill('SIGKILL');
   }
 } catch (e) {
   check('the suite ran to completion', false, String((e && e.stack) || e));

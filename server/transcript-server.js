@@ -21,7 +21,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { execFile, spawn } = require('child_process');
 const { createStore } = require('./state-store');
-const { utf8SafeCut } = require('./wake-cut');
+const { utf8SafeCut, utf8SafeStart } = require('./wake-cut');
 
 const IS_MAC = process.platform === 'darwin';
 
@@ -526,6 +526,9 @@ const POLL_MAX_BYTES = 64 * 1024;
 // How many distinct readers a session remembers a position for. One assistant needs two (its wake loop and
 // its tools); the rest of the room is for a handover or a second agent looking on.
 const POLL_MAX_CONSUMERS = 8;
+// Standing granted to a reader created by `attach`, in units of polls. Enough to outrank an anonymous
+// reader that has polled a handful of times; a real wake loop passes it in under a minute.
+const POLL_SEED_STANDING = 30;
  // session -> [{ at, src, norm }]
 const normStt = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 function isSttEcho(session, src, text) {
@@ -659,6 +662,22 @@ for (const s of [...wakeBuf.keys()]) {
   }
 }
 
+// Read a request body as text. Chunks arrive as Buffers, and concatenating them as strings decodes each
+// one separately - so a character whose bytes straddle a chunk boundary is destroyed. At 64 KB chunks that
+// is every long Polish caption, pasted context or wrap-up summary, silently, one character at a time.
+// Collect bytes and decode once.
+function readBody(req, limit, done) {
+  const chunks = [];
+  let size = 0;
+  let ended = false;
+  req.on('data', (c) => {
+    size += c.length;
+    if (size > limit) { ended = true; req.destroy(); return; }
+    chunks.push(c);
+  });
+  req.on('end', () => { if (!ended) done(Buffer.concat(chunks).toString('utf8')); });
+}
+
 function cors(req, res) {
   // Reflect only the extension's own origin - never a web page's. A malicious site's cross-origin
   // request then fails its preflight (custom X-MLA-Token header forces one) and is never sent.
@@ -701,9 +720,7 @@ const server = http.createServer((req, res) => {
   if ((req.headers['x-mla-token'] || '') !== TOKEN) { res.writeHead(403); return res.end('forbidden'); }
 
   if (req.method === 'POST' && req.url === '/append') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e6) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e6, (body) => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       // Refuse a session-less append instead of letting safeSession() mint `meeting_<timestamp>`: that turned
@@ -742,9 +759,7 @@ const server = http.createServer((req, res) => {
 
   // Brain -> server: push one piece of live advice.
   if (req.method === 'POST' && req.url === '/advice') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e6) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e6, (body) => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       const session = safeSession(data.session);
@@ -766,9 +781,7 @@ const server = http.createServer((req, res) => {
 
   // Extension -> server: store a Meet-tab snapshot (base64 data URL) for visual context.
   if (req.method === 'POST' && req.url === '/snapshot') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 8e6) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 8e6, (body) => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       const session = safeSession(data.session);
@@ -795,9 +808,7 @@ const server = http.createServer((req, res) => {
 
   // Brain -> server: ask the extension to capture a snapshot now (agent-initiated).
   if (req.method === 'POST' && req.url === '/snapshot-request') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e5, (body) => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       const session = safeSession(data.session);
@@ -888,9 +899,7 @@ const server = http.createServer((req, res) => {
 
   // Brain -> server: enqueue a presentation DOM edit; panel polls and applies it to the shared tab.
   if (req.method === 'POST' && req.url === '/edit') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 2e6) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 2e6, (body) => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       const session = safeSession(data.session);
@@ -918,9 +927,7 @@ const server = http.createServer((req, res) => {
 
   // DOM capture: brain requests it, extension posts it, brain reads it (to target selector-based edits).
   if (req.method === 'POST' && req.url === '/dom-request') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const session = safeSession(d.session);
       domReq.set(session, (domReq.get(session) || 0) + 1);
@@ -936,9 +943,7 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (req.method === 'POST' && req.url === '/dom') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 4e6) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 4e6, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       doms.set(safeSession(d.session), String(d.html || ''));
       res.writeHead(200); res.end('ok');
@@ -954,9 +959,7 @@ const server = http.createServer((req, res) => {
 
   // Brain -> server: ask the extension for debug data of a given kind.
   if (req.method === 'POST' && req.url === '/debug-request') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const session = safeSession(d.session);
       const prev = dbgReq.get(session) || { seq: 0 };
@@ -973,9 +976,7 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (req.method === 'POST' && req.url === '/debug') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 8e6) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 8e6, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       dbgData.set(safeSession(d.session), { kind: d.kind, data: d.data });
       res.writeHead(200); res.end('ok');
@@ -991,9 +992,7 @@ const server = http.createServer((req, res) => {
 
   // Brain -> server: liveness heartbeat (call each monitoring-loop turn). Panel <- server: read age.
   if (req.method === 'POST' && req.url === '/brain-ping') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const s = safeSession(d.session);
       brainPing.set(s, Date.now());
@@ -1024,9 +1023,7 @@ const server = http.createServer((req, res) => {
   // Brain -> server: claim a meeting ("I'm taking this session now"). Other assistants GET this and, on
   // seeing a NEWER agent than themselves, yield - automatic handoff instead of a manual clad-task.
   if (req.method === 'POST' && req.url === '/brain-takeover') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const agent = String(d.agent || '').slice(0, 80);
       if (!agent) { res.writeHead(400); return res.end('agent required'); }
@@ -1047,9 +1044,7 @@ const server = http.createServer((req, res) => {
   // Panel -> server: session control the brain obeys. paused = stay silent (panel also stops capture);
   // stopped = do the wrap-up and TaskStop. Panel sets it; the brain GETs it each loop.
   if (req.method === 'POST' && req.url === '/control') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const state = ['running', 'paused', 'stopped'].includes(d.state) ? d.state : null;
       if (!state) { res.writeHead(400); return res.end('bad state'); }
@@ -1083,9 +1078,7 @@ const server = http.createServer((req, res) => {
 
   // Pin the STT language for a session (removes wrong-language transcriptions; see sttLangs).
   if (req.method === 'POST' && req.url === '/stt-lang') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const s2 = safeSession(d.session);
       const lang = String(d.lang || '').trim().toLowerCase().slice(0, 5);
@@ -1100,9 +1093,7 @@ const server = http.createServer((req, res) => {
   // Who the tab-audio STT lines belong to. Only meaningful in a 1:1 (whisper does no diarization); with a
   // third participant the label would be plain wrong, so it is opt-in per session and never inferred.
   if (req.method === 'POST' && req.url === '/remote-name') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const s = safeSession(d.session);
       const name = String(d.name || '').replace(/[\r\n:]/g, ' ').trim().slice(0, 40);
@@ -1117,9 +1108,7 @@ const server = http.createServer((req, res) => {
   // Wake mode: `gated` (default - only batches worth a turn reach .wake) or `all` (everything, small talk
   // included). Panel or brain can flip it mid-call; a pending batch is flushed so nothing waits behind it.
   if (req.method === 'POST' && req.url === '/wake-mode') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const s = safeSession(d.session);
       const on = d.all === true || d.all === 'true' || d.mode === 'all';
@@ -1142,9 +1131,7 @@ const server = http.createServer((req, res) => {
 
   // Panel -> server: wipe everything for one meeting (transcript, chat, mode, snapshots, in-memory).
   if (req.method === 'POST' && req.url === '/clear') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const s = safeSession(d.session);
       for (const suf of ['.txt', '.wake', '.wakeall', '.chat.txt', '.mode.txt', '.summary.md']) { try { fs.unlinkSync(path.join(TRANSCRIPTS_DIR, s + suf)); } catch (_) {} }
@@ -1161,9 +1148,7 @@ const server = http.createServer((req, res) => {
 
   // Brain -> server: save the post-call summary. Panel <- server: fetch it for copy/download.
   if (req.method === 'POST' && req.url === '/summary') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 2e6) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 2e6, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       const s = safeSession(d.session);
       const text = typeof d.text === 'string' ? d.text : '';
@@ -1187,9 +1172,7 @@ const server = http.createServer((req, res) => {
 
   // Autopilot flags: panel sets them; brain reads them each turn to decide auto-create / post-to-chat.
   if (req.method === 'POST' && req.url === '/autopilot') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       autopilot.set(safeSession(d.session), { create: !!d.create, postChat: !!d.postChat });
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1206,9 +1189,7 @@ const server = http.createServer((req, res) => {
 
   // Drive flag: panel opt-in for the agent to control the tab. Panel sets; brain reads before acting.
   if (req.method === 'POST' && req.url === '/drive') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       drive.set(safeSession(d.session), !!d.on);
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1225,9 +1206,7 @@ const server = http.createServer((req, res) => {
 
   // Brain -> server: enqueue a page action. Panel polls + relays to the app tab (only while drive is on).
   if (req.method === 'POST' && req.url === '/act') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e5, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       const session = safeSession(d.session);
       if (!ACT_OPS.has(d.op)) { res.writeHead(400); return res.end('bad op'); }
@@ -1262,9 +1241,7 @@ const server = http.createServer((req, res) => {
   }
   // Extension -> server: the outcome of an action (brain polls this).
   if (req.method === 'POST' && req.url === '/act-result') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 2e6) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 2e6, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const session = safeSession(d.session);
       let r = actResults.get(session);
@@ -1280,9 +1257,7 @@ const server = http.createServer((req, res) => {
   // Panel -> server: import pre-join context (e.g. a Gemini / Zoom-AI "summarize so far") into the
   // transcript so the brain has what happened before capture started.
   if (req.method === 'POST' && req.url === '/context') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e6) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e6, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       const session = safeSession(d.session);
       const text = typeof d.text === 'string' ? d.text.trim() : '';
@@ -1305,9 +1280,7 @@ const server = http.createServer((req, res) => {
 
   // Brain -> server: enqueue a message to send into the meeting chat. Panel polls + relays to the tab.
   if (req.method === 'POST' && req.url === '/callchat') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e5, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const session = safeSession(d.session);
       const text = typeof d.text === 'string' ? d.text.trim() : '';
@@ -1324,9 +1297,7 @@ const server = http.createServer((req, res) => {
   // Extension -> server: did a /callchat message actually land in Meet? (delivery ACK, so the brain isn't
   // posting into the void). MUST be matched before GET /callchat (startsWith).
   if (req.method === 'POST' && req.url === '/callchat-result') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e5, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const session = safeSession(d.session);
       let cr = callChatResult.get(session);
@@ -1360,9 +1331,7 @@ const server = http.createServer((req, res) => {
 
   // Panel -> server: suppress a topic ("don't suggest similar"). Brain <- server: read + honour it.
   if (req.method === 'POST' && req.url === '/suppress') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e5, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const session = safeSession(d.session);
       const text = typeof d.text === 'string' ? d.text.trim().slice(0, 500) : '';
@@ -1387,9 +1356,7 @@ const server = http.createServer((req, res) => {
 
   // Brain -> server: capture a decision or action item. Panel <- server: poll the board.
   if (req.method === 'POST' && req.url === '/items') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e5, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       const session = safeSession(d.session);
       const text = typeof d.text === 'string' ? d.text.trim() : '';
@@ -1419,9 +1386,7 @@ const server = http.createServer((req, res) => {
 
   // Meeting mode: panel sets it; brain reads it (also written to <session>.mode.txt for a cheap cat).
   if (req.method === 'POST' && req.url === '/mode') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e4) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e4, (body) => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       const session = safeSession(data.session);
@@ -1443,9 +1408,7 @@ const server = http.createServer((req, res) => {
 
   // Chat write: panel posts role="user", brain posts role="agent".
   if (req.method === 'POST' && req.url === '/chat') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 2e6) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 2e6, (body) => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       const session = safeSession(data.session);
@@ -1483,9 +1446,7 @@ const server = http.createServer((req, res) => {
   // Brain/panel -> server: speak text aloud (TTS). No device = default output (you hear it);
   // a CoreAudio device index = routed there (into Meet via BlackHole, Phase 2b).
   if (req.method === 'POST' && req.url === '/speak') {
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 1e5) req.destroy(); });
-    req.on('end', () => {
+    readBody(req, 1e5, (body) => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       const device = data.device != null ? data.device : null;
@@ -1633,9 +1594,13 @@ const server = http.createServer((req, res) => {
     const backlog = u.searchParams.get('backlog') === '1';
     if (!cur) {
       cur = {
+        // `backlog` is about the TRANSCRIPT only: an assistant joining a call in progress wants what was
+        // said, and gets it once. It must not extend to the panel chat or the delivery acks - replaying
+        // those means answering every question the user typed all meeting a second time, and `attach`
+        // passes backlog, so the wake loop was exactly the reader it happened to.
         wake: backlog ? 0 : size,
-        chat: backlog ? 0 : (chat.get(s) || { seq: 0 }).seq,
-        callchat: backlog ? 0 : (callChatResult.get(s) || { seq: 0 }).seq,
+        chat: (chat.get(s) || { seq: 0 }).seq,
+        callchat: (callChatResult.get(s) || { seq: 0 }).seq,
         sig: '',
       };
     }
@@ -1650,6 +1615,13 @@ const server = http.createServer((req, res) => {
     // ate the batch the wake loop had not collected yet.
     if (u.searchParams.get('seed') === '1') {
       cur.at = Date.now();
+      // Seeding grants standing. Eviction ranks by how established a reader is, and a reader created here
+      // has polled zero times - so on a session already holding the maximum, an assistant's wake loop was
+      // evicted before its first read, then recreated at the end of the channel by its own next poll,
+      // losing every caption AND returning a non-empty body each time (a fresh cursor has no status
+      // signature, so every poll looked like a state change). That is a wake every two seconds, with no
+      // content, for the whole meeting. A loop earns this much standing in under a minute anyway.
+      cur.n = Math.max(cur.n || 0, POLL_SEED_STANDING);
       offsets[consumer] = cur;
       pollOffsets.set(s, offsets);
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1790,7 +1762,10 @@ const server = http.createServer((req, res) => {
       // content was unreachable by any `tail`. Cut that one line by bytes instead, keeping its end.
       if (keepFrom >= slice.length) {
         const last = Buffer.from(slice[slice.length - 1] || '', 'utf8');
-        slice = [last.slice(Math.max(0, last.length - POLL_MAX_BYTES)).toString('utf8').replace(/^\uFFFD/, '')];
+        // Start on a character boundary rather than slicing at an arbitrary byte and mopping up afterwards:
+        // a mid-sequence cut yields up to three U+FFFD, each of which re-encodes to three bytes and pushed
+        // the answer back over the cap it was cutting to.
+        slice = [last.slice(utf8SafeStart(last, Math.max(0, last.length - POLL_MAX_BYTES))).toString('utf8')];
       } else {
         slice = slice.slice(keepFrom);
       }
