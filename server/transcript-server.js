@@ -22,6 +22,7 @@ const crypto = require('crypto');
 const { execFile, spawn } = require('child_process');
 const { createStore } = require('./state-store');
 const { utf8SafeCut, utf8SafeStart } = require('./wake-cut');
+const { LOCAL_USER, safeSession, safeUser, keyOf, partsOf, nameOf, createScope } = require('./scope');
 
 const IS_MAC = process.platform === 'darwin';
 
@@ -355,14 +356,14 @@ function purgeOld() {
       try {
         if (fs.statSync(p).mtimeMs >= cutoff) continue;
         fs.unlinkSync(p);
-        touched.add(sessionOf(f));
+        touched.add(keyFor(null, sessionOf(f)));
       } catch (_) {}
     }
     // Purging a session's text has to purge its live state too, or the sweep leaves advice and board
     // items for a meeting whose transcript is gone. But only once NOTHING of the session is left:
     // a recurring series reuses its meet code, so one forgotten `.mode.txt` from January was enough to
     // wipe the advice and the board of the call happening right now. Verified, and it was a live bug.
-    const survivors = new Set(fs.readdirSync(TRANSCRIPTS_DIR).filter((f) => !f.startsWith('.')).map(sessionOf));
+    const survivors = new Set(fs.readdirSync(TRANSCRIPTS_DIR).filter((f) => !f.startsWith('.')).map((f) => keyFor(null, sessionOf(f))));
     for (const s of touched) if (!survivors.has(s)) store.forget(s);
     if (fs.existsSync(SNAP_DIR)) for (const d of fs.readdirSync(SNAP_DIR)) {
       const dp = path.join(SNAP_DIR, d);
@@ -396,7 +397,7 @@ const snapReq = store.map('snapReq'); // session -> seq
 // typed message wake it; <session>.chat.txt is still written as a plain-text record.
 const chat = store.map('chat'); // session -> { seq, items: [{ seq, ts, role, text, image }] }
 const CHAT_MAX = 300;
-function chatFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.chat.txt`); }
+function chatFileFor(key) { return pathFor(key, '.chat.txt'); }
 
 // Presentation-only live DOM edits: brain enqueues an edit; panel polls and applies it to the shared tab.
 const edits = store.map('edits', { persist: false });  // session -> { seq, items: [cmd] }
@@ -445,24 +446,25 @@ const SUPPRESS_TTL_MS = 8 * 3600 * 1000; // drop dismissals older than 8h (defen
 
 // Post-call artifact: the brain writes a summary + action items at wrap-up; the panel offers copy/download.
 const summaries = store.map('summaries'); // session -> markdown
-function summaryFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.summary.md`); }
+function summaryFileFor(key) { return pathFor(key, '.summary.md'); }
 
 // Meeting mode - steers how the brain advises. Panel sets it; brain reads it each turn.
 const modes = store.map('modes'); // session -> mode
 const MODES = new Set(['auto', 'listener', 'lead', 'explain', 'produce']);
-function modeFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.mode.txt`); }
+function modeFileFor(key) { return pathFor(key, '.mode.txt'); }
 
-// Only allow safe, contained filenames (no path traversal).
-function safeSession(name) {
-  const cleaned = String(name || '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120);
-  // Reject pure-dot names ('.', '..'): joined with a dir they'd escape it (e.g. /clear on '..' would
-  // recursively delete the whole transcripts dir). Any other name stays inside TRANSCRIPTS_DIR.
-  if (!cleaned || /^\.+$/.test(cleaned)) return `meeting_${Date.now()}`;
-  return cleaned;
-}
+// Session state is keyed by (user, session); see server/scope.js for the rules and for why the local
+// profile keeps this machine's file layout byte for byte.
+const SCOPE = createScope({ dataDir: TRANSCRIPTS_DIR, snapDir: SNAP_DIR });
+const { dirForUser, pathFor, snapDirFor } = SCOPE;
 
-function fileFor(session) {
-  return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.txt`);
+// Who a request belongs to. One user for now; multi-user support would need per-user tokens ( on the extension
+// side, OAuth on the MCP side) is what fills this in, and it is the only place that has to change.
+function userOf(_req) { return LOCAL_USER; }
+function keyFor(req, rawSession) { return keyOf(userOf(req), rawSession); }
+
+function fileFor(key) {
+  return pathFor(key, '.txt');
 }
 
 // Rough, volume-based estimate of tokens the brain has processed this call: transcript + chat bytes ÷ 4.
@@ -553,7 +555,7 @@ function isSttEcho(session, src, text) {
   sttRecent.set(session, recent);
   return echo;
 }
-const wakeAllFileFor = (session) => path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.wakeall`);
+const wakeAllFileFor = (key) => pathFor(key, '.wakeall');
 function isWakeAll(session) {
   if (wakeAll.has(session)) return wakeAll.get(session);
   // Survive a restart mid-call: the flag is a marker file, same as the meeting mode.
@@ -579,7 +581,7 @@ const TECH_NOISE_RE = /\b(can you hear|you'?re muted|i'?m muted|mute|unmute|my (
 function spokenText(line) { // strip "[hh:mm:ss] Speaker: " to classify the actual words
   return line.replace(/^\[[^\]]*\]\s*/, '').replace(/^[^:]{1,40}:\s*/, '').trim();
 }
-function wakeFileFor(session) { return path.join(TRANSCRIPTS_DIR, `${safeSession(session)}.wake`); }
+function wakeFileFor(key) { return pathFor(key, '.wake'); }
 
 function isUrgentLine(line) {
   const t = spokenText(line);
@@ -732,7 +734,7 @@ const server = http.createServer((req, res) => {
       if (!/\S/.test(String(data.session || '')) || /^(undefined|null|NaN)$/i.test(String(data.session).trim())) {
         res.writeHead(400); return res.end('missing or invalid session');
       }
-      const session = safeSession(data.session);
+      const session = keyFor(req, data.session);
       const line = typeof data.line === 'string' ? data.line : '';
       const file = fileFor(session);
       try {
@@ -762,7 +764,7 @@ const server = http.createServer((req, res) => {
     readBody(req, 1e6, (body) => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
-      const session = safeSession(data.session);
+      const session = keyFor(req, data.session);
       const marker = String(data.marker || 'INFO').toUpperCase();
       const text = typeof data.text === 'string' ? data.text.trim() : '';
       const image = typeof data.image === 'string' && /^(https?:|data:image\/)/.test(data.image) ? data.image : null;
@@ -784,10 +786,10 @@ const server = http.createServer((req, res) => {
     readBody(req, 8e6, (body) => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
-      const session = safeSession(data.session);
+      const session = keyFor(req, data.session);
       const m = /^data:image\/(jpeg|png);base64,(.+)$/s.exec(String(data.dataUrl || ''));
       if (!m) { res.writeHead(400); return res.end('bad dataUrl'); }
-      const dir = path.join(SNAP_DIR, session);
+      const dir = snapDirFor(session);
       try {
         fs.mkdirSync(dir, { recursive: true });
         const file = path.join(dir, `${Date.now()}.${m[1] === 'png' ? 'png' : 'jpg'}`);
@@ -811,7 +813,7 @@ const server = http.createServer((req, res) => {
     readBody(req, 1e5, (body) => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
-      const session = safeSession(data.session);
+      const session = keyFor(req, data.session);
       const seq = (snapReq.get(session) || 0) + 1;
       snapReq.set(session, seq);
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -823,7 +825,7 @@ const server = http.createServer((req, res) => {
   // Side panel <- server: poll for a pending snapshot request.
   if (req.method === 'GET' && req.url.startsWith('/snapshot-request')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const session = safeSession(u.searchParams.get('session'));
+    const session = keyFor(req, u.searchParams.get('session'));
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ seq: snapReq.get(session) || 0 }));
     return;
@@ -836,7 +838,7 @@ const server = http.createServer((req, res) => {
     if (!rawSession || /^(undefined|null|NaN)$/i.test(rawSession)) {
       res.writeHead(400); return res.end('missing or invalid session'); // see /append - no phantom sessions
     }
-    const session = safeSession(rawSession);
+    const session = keyFor(req, rawSession);
     // A session pin wins over whatever the extension sends - the panel has no Zoom language selector.
     const lang = sttLangs.get(session) || (u.searchParams.get('lang') || 'auto').slice(0, 5);
     const src = u.searchParams.get('src') === 'mic' ? 'mic' : 'tab';
@@ -902,7 +904,7 @@ const server = http.createServer((req, res) => {
     readBody(req, 2e6, (body) => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
-      const session = safeSession(data.session);
+      const session = keyFor(req, data.session);
       if (!data.op) { res.writeHead(400); return res.end('no op'); }
       let e = edits.get(session);
       if (!e) { e = { seq: 0, items: [] }; edits.set(session, e); }
@@ -917,7 +919,7 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && req.url.startsWith('/edit')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const session = safeSession(u.searchParams.get('session'));
+    const session = keyFor(req, u.searchParams.get('session'));
     const since = parseInt(u.searchParams.get('since') || '0', 10) || 0;
     const e = edits.get(session) || { seq: 0, items: [] };
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -929,7 +931,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/dom-request') {
     readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
-      const session = safeSession(d.session);
+      const session = keyFor(req, d.session);
       domReq.set(session, (domReq.get(session) || 0) + 1);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ seq: domReq.get(session) }));
@@ -939,13 +941,13 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/dom-request')) {
     const u = new URL(req.url, 'http://127.0.0.1');
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ seq: domReq.get(safeSession(u.searchParams.get('session'))) || 0 }));
+    res.end(JSON.stringify({ seq: domReq.get(keyFor(req, u.searchParams.get('session'))) || 0 }));
     return;
   }
   if (req.method === 'POST' && req.url === '/dom') {
     readBody(req, 4e6, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
-      doms.set(safeSession(d.session), String(d.html || ''));
+      doms.set(keyFor(req, d.session), String(d.html || ''));
       res.writeHead(200); res.end('ok');
     });
     return;
@@ -953,7 +955,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/dom')) {
     const u = new URL(req.url, 'http://127.0.0.1');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(doms.get(safeSession(u.searchParams.get('session'))) || '');
+    res.end(doms.get(keyFor(req, u.searchParams.get('session'))) || '');
     return;
   }
 
@@ -961,7 +963,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/debug-request') {
     readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
-      const session = safeSession(d.session);
+      const session = keyFor(req, d.session);
       const prev = dbgReq.get(session) || { seq: 0 };
       dbgReq.set(session, { seq: prev.seq + 1, kind: String(d.kind || 'storage') });
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -972,13 +974,13 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/debug-request')) {
     const u = new URL(req.url, 'http://127.0.0.1');
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(dbgReq.get(safeSession(u.searchParams.get('session'))) || { seq: 0, kind: null }));
+    res.end(JSON.stringify(dbgReq.get(keyFor(req, u.searchParams.get('session'))) || { seq: 0, kind: null }));
     return;
   }
   if (req.method === 'POST' && req.url === '/debug') {
     readBody(req, 8e6, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
-      dbgData.set(safeSession(d.session), { kind: d.kind, data: d.data });
+      dbgData.set(keyFor(req, d.session), { kind: d.kind, data: d.data });
       res.writeHead(200); res.end('ok');
     });
     return;
@@ -986,7 +988,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/debug')) {
     const u = new URL(req.url, 'http://127.0.0.1');
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(dbgData.get(safeSession(u.searchParams.get('session'))) || { kind: null, data: null }));
+    res.end(JSON.stringify(dbgData.get(keyFor(req, u.searchParams.get('session'))) || { kind: null, data: null }));
     return;
   }
 
@@ -994,7 +996,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/brain-ping') {
     readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
-      const s = safeSession(d.session);
+      const s = keyFor(req, d.session);
       brainPing.set(s, Date.now());
       // Optional: current activity to surface in the panel. Sent each turn; '' clears it.
       if (d.status !== undefined) brainStatus.set(s, { text: String(d.status || '').slice(0, 120), ts: Date.now() });
@@ -1005,9 +1007,9 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && req.url.startsWith('/brain-ping')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const ts = brainPing.get(safeSession(u.searchParams.get('session'))) || 0;
-    const st = brainStatus.get(safeSession(u.searchParams.get('session')));
-    const tk = takeover.get(safeSession(u.searchParams.get('session')));
+    const ts = brainPing.get(keyFor(req, u.searchParams.get('session'))) || 0;
+    const st = brainStatus.get(keyFor(req, u.searchParams.get('session')));
+    const tk = takeover.get(keyFor(req, u.searchParams.get('session')));
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       ts, ageMs: ts ? Date.now() - ts : null,
@@ -1027,7 +1029,7 @@ const server = http.createServer((req, res) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const agent = String(d.agent || '').slice(0, 80);
       if (!agent) { res.writeHead(400); return res.end('agent required'); }
-      takeover.set(safeSession(d.session), { agent, ts: Date.now() });
+      takeover.set(keyFor(req, d.session), { agent, ts: Date.now() });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     });
@@ -1035,7 +1037,7 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && req.url.startsWith('/brain-takeover')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const t = takeover.get(safeSession(u.searchParams.get('session')));
+    const t = takeover.get(keyFor(req, u.searchParams.get('session')));
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ agent: t ? t.agent : null, ageMs: t ? Date.now() - t.ts : null }));
     return;
@@ -1048,7 +1050,7 @@ const server = http.createServer((req, res) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const state = ['running', 'paused', 'stopped'].includes(d.state) ? d.state : null;
       if (!state) { res.writeHead(400); return res.end('bad state'); }
-      control.set(safeSession(d.session), state);
+      control.set(keyFor(req, d.session), state);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, state }));
     });
@@ -1057,7 +1059,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/control')) {
     const u = new URL(req.url, 'http://127.0.0.1');
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ state: control.get(safeSession(u.searchParams.get('session'))) || 'running' }));
+    res.end(JSON.stringify({ state: control.get(keyFor(req, u.searchParams.get('session'))) || 'running' }));
     return;
   }
 
@@ -1066,7 +1068,7 @@ const server = http.createServer((req, res) => {
   // later turn; plain text keeps that to a handful of tokens. Suppression texts appear only if there are any.
   if (req.method === 'GET' && req.url.startsWith('/status')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const s = safeSession(u.searchParams.get('session'));
+    const s = keyFor(req, u.searchParams.get('session'));
     const ap = autopilot.get(s) || { create: false, postChat: false };
     const sup = (suppress.get(s) || []).filter((e) => !e.ts || Date.now() - e.ts < SUPPRESS_TTL_MS);
     const lines = [`state=${control.get(s) || 'running'} mode=${modes.get(s) || 'auto'} create=${ap.create ? 1 : 0} postChat=${ap.postChat ? 1 : 0} wake=${isWakeAll(s) ? 'all' : 'gated'}${remoteNames.get(s) ? ` remote=${remoteNames.get(s)}` : ''}${sttLangs.get(s) ? ` lang=${sttLangs.get(s)}` : ''}`];
@@ -1080,7 +1082,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/stt-lang') {
     readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
-      const s2 = safeSession(d.session);
+      const s2 = keyFor(req, d.session);
       const lang = String(d.lang || '').trim().toLowerCase().slice(0, 5);
       if (lang && lang !== 'auto') sttLangs.set(s2, lang); else sttLangs.delete(s2);
       console.log(`[stt] ${s2} language = ${lang || 'auto'}`);
@@ -1095,7 +1097,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/remote-name') {
     readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
-      const s = safeSession(d.session);
+      const s = keyFor(req, d.session);
       const name = String(d.name || '').replace(/[\r\n:]/g, ' ').trim().slice(0, 40);
       if (name) remoteNames.set(s, name); else remoteNames.delete(s);
       console.log(`[stt] ${s} remote name = ${name || '(unattributed)'}`);
@@ -1110,7 +1112,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/wake-mode') {
     readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
-      const s = safeSession(d.session);
+      const s = keyFor(req, d.session);
       const on = d.all === true || d.all === 'true' || d.mode === 'all';
       wakeAll.set(s, on);
       try { if (on) fs.writeFileSync(wakeAllFileFor(s), '1'); else fs.unlinkSync(wakeAllFileFor(s)); } catch (_) {}
@@ -1123,7 +1125,7 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && req.url.startsWith('/wake-mode')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const s = safeSession(u.searchParams.get('session'));
+    const s = keyFor(req, u.searchParams.get('session'));
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ mode: isWakeAll(s) ? 'all' : 'gated' }));
     return;
@@ -1133,9 +1135,9 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/clear') {
     readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
-      const s = safeSession(d.session);
+      const s = keyFor(req, d.session);
       for (const suf of ['.txt', '.wake', '.wakeall', '.chat.txt', '.mode.txt', '.summary.md']) { try { fs.unlinkSync(path.join(TRANSCRIPTS_DIR, s + suf)); } catch (_) {} }
-      try { fs.rmSync(path.join(SNAP_DIR, s), { recursive: true, force: true }); } catch (_) {}
+      try { fs.rmSync(snapDirFor(s), { recursive: true, force: true }); } catch (_) {}
       { const b = wakeBuf.get(s); if (b && b.timer) clearTimeout(b.timer); }
       // Drops the key from every registered store. The hand-written list this replaced had grown to 27
       // names and had already missed one (sttRecent), so a wiped meeting kept its STT dedup state.
@@ -1150,7 +1152,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/summary') {
     readBody(req, 2e6, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
-      const s = safeSession(d.session);
+      const s = keyFor(req, d.session);
       const text = typeof d.text === 'string' ? d.text : '';
       if (!text.trim()) { res.writeHead(400); return res.end('empty'); }
       summaries.set(s, text);
@@ -1162,7 +1164,7 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && req.url.startsWith('/summary')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const s = safeSession(u.searchParams.get('session'));
+    const s = keyFor(req, u.searchParams.get('session'));
     let text = summaries.get(s);
     if (text == null) { try { text = fs.readFileSync(summaryFileFor(s), 'utf8'); } catch (_) { text = ''; } }
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1174,16 +1176,16 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/autopilot') {
     readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
-      autopilot.set(safeSession(d.session), { create: !!d.create, postChat: !!d.postChat });
+      autopilot.set(keyFor(req, d.session), { create: !!d.create, postChat: !!d.postChat });
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(autopilot.get(safeSession(d.session))));
+      res.end(JSON.stringify(autopilot.get(keyFor(req, d.session))));
     });
     return;
   }
   if (req.method === 'GET' && req.url.startsWith('/autopilot')) {
     const u = new URL(req.url, 'http://127.0.0.1');
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(autopilot.get(safeSession(u.searchParams.get('session'))) || { create: false, postChat: false }));
+    res.end(JSON.stringify(autopilot.get(keyFor(req, u.searchParams.get('session'))) || { create: false, postChat: false }));
     return;
   }
 
@@ -1191,16 +1193,16 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/drive') {
     readBody(req, 1e4, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
-      drive.set(safeSession(d.session), !!d.on);
+      drive.set(keyFor(req, d.session), !!d.on);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ on: drive.get(safeSession(d.session)) }));
+      res.end(JSON.stringify({ on: drive.get(keyFor(req, d.session)) }));
     });
     return;
   }
   if (req.method === 'GET' && req.url.startsWith('/drive')) {
     const u = new URL(req.url, 'http://127.0.0.1');
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ on: !!drive.get(safeSession(u.searchParams.get('session'))) }));
+    res.end(JSON.stringify({ on: !!drive.get(keyFor(req, u.searchParams.get('session'))) }));
     return;
   }
 
@@ -1208,7 +1210,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/act') {
     readBody(req, 1e5, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
-      const session = safeSession(d.session);
+      const session = keyFor(req, d.session);
       if (!ACT_OPS.has(d.op)) { res.writeHead(400); return res.end('bad op'); }
       let a = acts.get(session);
       if (!a) { a = { seq: 0, items: [] }; acts.set(session, a); }
@@ -1223,7 +1225,7 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && req.url.startsWith('/act-result')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const session = safeSession(u.searchParams.get('session'));
+    const session = keyFor(req, u.searchParams.get('session'));
     const since = parseInt(u.searchParams.get('since') || '0', 10) || 0;
     const r = actResults.get(session) || { seq: 0, items: [] };
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1232,7 +1234,7 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && req.url.startsWith('/act')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const session = safeSession(u.searchParams.get('session'));
+    const session = keyFor(req, u.searchParams.get('session'));
     const since = parseInt(u.searchParams.get('since') || '0', 10) || 0;
     const a = acts.get(session) || { seq: 0, items: [] };
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1243,7 +1245,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/act-result') {
     readBody(req, 2e6, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
-      const session = safeSession(d.session);
+      const session = keyFor(req, d.session);
       let r = actResults.get(session);
       if (!r) { r = { seq: 0, items: [] }; actResults.set(session, r); }
       r.seq = Math.max(r.seq, d.seq || 0);
@@ -1259,7 +1261,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/context') {
     readBody(req, 1e6, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
-      const session = safeSession(d.session);
+      const session = keyFor(req, d.session);
       const text = typeof d.text === 'string' ? d.text.trim() : '';
       if (!text) { res.writeHead(400); return res.end('empty'); }
       const dt = new Date();
@@ -1282,7 +1284,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/callchat') {
     readBody(req, 1e5, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
-      const session = safeSession(d.session);
+      const session = keyFor(req, d.session);
       const text = typeof d.text === 'string' ? d.text.trim() : '';
       if (!text) { res.writeHead(400); return res.end('empty'); }
       let cc = callChat.get(session);
@@ -1299,7 +1301,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/callchat-result') {
     readBody(req, 1e5, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
-      const session = safeSession(d.session);
+      const session = keyFor(req, d.session);
       let cr = callChatResult.get(session);
       if (!cr) { cr = { seq: 0, items: [] }; callChatResult.set(session, cr); }
       cr.seq++;
@@ -1312,7 +1314,7 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && req.url.startsWith('/callchat-result')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const session = safeSession(u.searchParams.get('session'));
+    const session = keyFor(req, u.searchParams.get('session'));
     const since = parseInt(u.searchParams.get('since') || '0', 10) || 0;
     const cr = callChatResult.get(session) || { seq: 0, items: [] };
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1321,7 +1323,7 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && req.url.startsWith('/callchat')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const session = safeSession(u.searchParams.get('session'));
+    const session = keyFor(req, u.searchParams.get('session'));
     const since = parseInt(u.searchParams.get('since') || '0', 10) || 0;
     const cc = callChat.get(session) || { seq: 0, items: [] };
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1333,7 +1335,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/suppress') {
     readBody(req, 1e5, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
-      const session = safeSession(d.session);
+      const session = keyFor(req, d.session);
       const text = typeof d.text === 'string' ? d.text.trim().slice(0, 500) : '';
       if (!text) { res.writeHead(400); return res.end('empty'); }
       const list = suppress.get(session) || [];
@@ -1348,7 +1350,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/suppress')) {
     const u = new URL(req.url, 'http://127.0.0.1');
     // TTL so stale dismissals never bleed into a later meeting (defensive; entries are already per-session).
-    const list = (suppress.get(safeSession(u.searchParams.get('session'))) || []).filter((e) => !e.ts || Date.now() - e.ts < SUPPRESS_TTL_MS);
+    const list = (suppress.get(keyFor(req, u.searchParams.get('session'))) || []).filter((e) => !e.ts || Date.now() - e.ts < SUPPRESS_TTL_MS);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ items: list.map(({ text, kind }) => ({ text, kind })) }));
     return;
@@ -1358,7 +1360,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/items') {
     readBody(req, 1e5, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
-      const session = safeSession(d.session);
+      const session = keyFor(req, d.session);
       const text = typeof d.text === 'string' ? d.text.trim() : '';
       if (!text) { res.writeHead(400); return res.end('empty'); }
       const kind = ITEM_KINDS.has(d.kind) ? d.kind : 'action';
@@ -1376,7 +1378,7 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && req.url.startsWith('/items')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const session = safeSession(u.searchParams.get('session'));
+    const session = keyFor(req, u.searchParams.get('session'));
     const since = parseInt(u.searchParams.get('since') || '0', 10) || 0;
     const it = items.get(session) || { seq: 0, list: [] };
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1389,7 +1391,7 @@ const server = http.createServer((req, res) => {
     readBody(req, 1e4, (body) => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
-      const session = safeSession(data.session);
+      const session = keyFor(req, data.session);
       const mode = MODES.has(data.mode) ? data.mode : 'auto';
       modes.set(session, mode);
       try { fs.writeFileSync(modeFileFor(session), mode); } catch (_) {}
@@ -1400,7 +1402,7 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && req.url.startsWith('/mode')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const session = safeSession(u.searchParams.get('session'));
+    const session = keyFor(req, u.searchParams.get('session'));
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ mode: modes.get(session) || 'auto' }));
     return;
@@ -1411,7 +1413,7 @@ const server = http.createServer((req, res) => {
     readBody(req, 2e6, (body) => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
-      const session = safeSession(data.session);
+      const session = keyFor(req, data.session);
       const role = data.role === 'agent' ? 'agent' : 'user';
       const text = typeof data.text === 'string' ? data.text.trim() : '';
       const image = typeof data.image === 'string' && /^(https?:|data:image\/)/.test(data.image) ? data.image : null;
@@ -1435,7 +1437,7 @@ const server = http.createServer((req, res) => {
   // Chat read (panel polls).
   if (req.method === 'GET' && req.url.startsWith('/chat')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const session = safeSession(u.searchParams.get('session'));
+    const session = keyFor(req, u.searchParams.get('session'));
     const since = parseInt(u.searchParams.get('since') || '0', 10) || 0;
     const c = chat.get(session) || { seq: 0, items: [] };
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1462,7 +1464,7 @@ const server = http.createServer((req, res) => {
   // Side panel <- server: poll advice newer than `since`.
   if (req.method === 'GET' && req.url.startsWith('/advice')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const session = safeSession(u.searchParams.get('session'));
+    const session = keyFor(req, u.searchParams.get('session'));
     const since = parseInt(u.searchParams.get('since') || '0', 10) || 0;
     const a = advice.get(session) || { seq: 0, items: [] };
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1484,7 +1486,7 @@ const server = http.createServer((req, res) => {
     const want = u.searchParams.get('session');
     let session = '';
     if (want) {
-      const s = safeSession(want);
+      const s = keyFor(req, want);
       // Any file of the session counts, not just the transcript. The documented recovery from the
       // `undefined` incident is "ask the user to type in the panel chat, then attach to whatever session
       // that arrived under" - and in exactly that scenario the panel's session has only a `.chat.txt`,
@@ -1493,15 +1495,15 @@ const server = http.createServer((req, res) => {
     } else {
       let newest = 0;
       try {
-        for (const f of fs.readdirSync(TRANSCRIPTS_DIR)) {
+        for (const f of fs.readdirSync(dirForUser(userOf(req)))) {
           if (!f.endsWith('.txt') || f.endsWith('.chat.txt') || f.endsWith('.mode.txt')) continue;
           // `undefined.txt` and friends are what a caller writes after interpolating a variable that was
           // never set. One such file exists in real data from the day an interview landed in it. Auto-
           // resolving to it would attach an assistant to a session the panel is not holding, which is
           // precisely the failure that cost an hour of advice nobody saw.
           if (/^(undefined|null|NaN)\.txt$/.test(f)) continue;
-          const m = fs.statSync(path.join(TRANSCRIPTS_DIR, f)).mtimeMs;
-          if (m > newest) { newest = m; session = f.slice(0, -4); }
+          const m = fs.statSync(path.join(dirForUser(userOf(req)), f)).mtimeMs;
+          if (m > newest) { newest = m; session = keyFor(req, f.slice(0, -4)); }
         }
       } catch (_) {}
     }
@@ -1515,7 +1517,7 @@ const server = http.createServer((req, res) => {
         // copy or restore, so on restored data it claims a meeting from July started today - and an ISO
         // instant derived from a date-only name reads as the previous day in any zone east of UTC. The
         // name's date is unambiguous and is what the caller actually wants to reason about.
-        const named = /^(\d{4}-\d{2}-\d{2})/.exec(session);
+        const named = /^(\d{4}-\d{2}-\d{2})/.exec(nameOf(session));
         if (named) date = named[1];
         lines = fs.readFileSync(fileFor(session), 'utf8').split('\n').filter((l) => l !== '').length;
       } catch (_) {}
@@ -1525,7 +1527,7 @@ const server = http.createServer((req, res) => {
     const claimAge = claim ? Date.now() - claim.ts : null;
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      session: session || null, lines, date, startedAt,
+      session: session ? nameOf(session) : null, lines, date, startedAt,
       // Who holds it, and how long ago each signal was. Without the name, an assistant reconnecting to its
       // OWN meeting cannot tell its own liveness from a rival's and talks itself out of a call it is already
       // assisting. Both ages are reported because the heartbeat is only bumped by the `working` tool: an
@@ -1542,7 +1544,7 @@ const server = http.createServer((req, res) => {
   // other's batches; `statusOnly` reads without consuming, for a first attach.
   if (req.method === 'GET' && req.url.startsWith('/poll')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const s = safeSession(u.searchParams.get('session'));
+    const s = keyFor(req, u.searchParams.get('session'));
     // A consumer's own cursors are stored beside it as `<consumer>:chat`, `:callchat` and `:sig`. That is
     // collision-free only because `:` cannot survive this sanitiser - do not widen it to allow one. The
     // value is used as an object key and never as a path component, so `..` here is harmless.
@@ -1565,7 +1567,7 @@ const server = http.createServer((req, res) => {
     };
     if (statusOnly) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ session: s, batch: '', status }));
+      res.end(JSON.stringify({ session: nameOf(s), batch: '', status }));
       return;
     }
 
@@ -1625,7 +1627,7 @@ const server = http.createServer((req, res) => {
       offsets[consumer] = cur;
       pollOffsets.set(s, offsets);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ session: s, seeded: true }));
+      res.end(JSON.stringify({ session: nameOf(s), seeded: true }));
       return;
     }
 
@@ -1719,7 +1721,7 @@ const server = http.createServer((req, res) => {
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      session: s,
+      session: nameOf(s),
       batch,
       truncated: size > from,
       status,
@@ -1736,7 +1738,7 @@ const server = http.createServer((req, res) => {
   // The complete record, as opposed to the batches the wake gate let through.
   if (req.method === 'GET' && req.url.startsWith('/transcript')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const s = safeSession(u.searchParams.get('session'));
+    const s = keyFor(req, u.searchParams.get('session'));
     const tail = Math.min(Math.max(parseInt(u.searchParams.get('tail') || '200', 10) || 200, 1), 2000);
     let all = '';
     try { all = fs.readFileSync(fileFor(s), 'utf8'); } catch (_) {}
@@ -1771,14 +1773,14 @@ const server = http.createServer((req, res) => {
       }
     }
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ session: s, text: slice.join('\n'), lines: slice.length, totalLines: lines.length, truncated }));
+    res.end(JSON.stringify({ session: nameOf(s), text: slice.join('\n'), lines: slice.length, totalLines: lines.length, truncated }));
     return;
   }
 
   // Captured screen snapshots, newest first. Paths, not bytes: the caller reads the image itself.
   if (req.method === 'GET' && req.url.startsWith('/snapshots')) {
     const u = new URL(req.url, 'http://127.0.0.1');
-    const s = safeSession(u.searchParams.get('session'));
+    const s = keyFor(req, u.searchParams.get('session'));
     const limit = Math.min(Math.max(parseInt(u.searchParams.get('limit') || '5', 10) || 5, 1), SNAP_MAX);
     const dir = path.join(SNAP_DIR, s);
     let snapshots = [];
@@ -1794,7 +1796,7 @@ const server = http.createServer((req, res) => {
         .slice(0, limit);
     } catch (_) { /* no snapshot dir: none captured */ }
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ session: s, snapshots }));
+    res.end(JSON.stringify({ session: nameOf(s), snapshots }));
     return;
   }
 

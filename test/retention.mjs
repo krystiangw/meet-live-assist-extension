@@ -3,7 +3,7 @@
 //
 //   node test/retention.mjs
 import { spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -265,6 +265,40 @@ try {
     check('and after a wipe restarts the file, reads it from the beginning rather than skipping it',
       /second thing/.test(after.batch), JSON.stringify(after.batch));
     s3.proc.kill('SIGKILL');
+  }
+  // --- 7: the single-user profile must not move a single file ----------------------------------------
+  // Everything is keyed by (user, session) now. The whole point of the local profile is that this is
+  // invisible: same file names, same directory, no extra path segment - so an existing install needs no
+  // migration and a running server can be swapped underneath it. If this fails, someone's meetings moved.
+  {
+    const dir = tmpDir();
+    const port = await freePort();
+    const s4 = await boot(port, dir);
+    procs.push(s4.proc);
+    const token = readFileSync(path.join(dir, '.mla-token'), 'utf8').trim();
+    const auth = { 'Content-Type': 'application/json', 'X-MLA-Token': token };
+    const session = '2026-09-09_layout';
+
+    await fetch(`${s4.base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session, line: 'Ann: we decided on the layout.\n' }) });
+    await fetch(`${s4.base}/chat`, { method: 'POST', headers: auth, body: JSON.stringify({ session, role: 'user', text: 'hello' }) });
+    await fetch(`${s4.base}/mode`, { method: 'POST', headers: auth, body: JSON.stringify({ session, mode: 'lead' }) });
+    await fetch(`${s4.base}/summary`, { method: 'POST', headers: auth, body: JSON.stringify({ session, text: '# done\n' }) });
+    await fetch(`${s4.base}/wake-mode`, { method: 'POST', headers: auth, body: JSON.stringify({ session, all: true }) });
+    await sleep(900);
+
+    const listing = readdirSync(dir).filter((f) => !f.startsWith('.')).sort();
+    const expected = [`${session}.chat.txt`, `${session}.mode.txt`, `${session}.summary.md`, `${session}.txt`, `${session}.wake`, `${session}.wakeall`].sort();
+    check('every file sits directly in the data dir, under its plain session name',
+      JSON.stringify(listing) === JSON.stringify(expected), `${JSON.stringify(listing)}`);
+    check('no per-user subdirectory was created', !listing.some((f) => !f.includes('.')), listing.join(','));
+
+    // And the name a client sees is the plain one, never the internal key - a client hands it straight
+    // back on the next request, where a key would be scoped a second time into a different meeting.
+    const seen = await (await fetch(`${s4.base}/sessions`, { headers: auth })).json();
+    check('the API reports the plain session name, not an internal key', seen.session === session, JSON.stringify(seen.session));
+    const polled = await (await fetch(`${s4.base}/poll?session=${encodeURIComponent(seen.session)}&consumer=x`, { headers: auth })).json();
+    check('and handing that name back resolves to the same meeting', polled.session === session, JSON.stringify(polled.session));
+    s4.proc.kill('SIGKILL');
   }
 } catch (e) {
   check('the suite ran to completion', false, String((e && e.stack) || e));

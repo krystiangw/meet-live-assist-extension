@@ -21,6 +21,7 @@
     "mcp-server.js",
     "state-store.js",
     "wake-cut.js",
+    "scope.js",
     "README.md"
   ],
   "engines": {

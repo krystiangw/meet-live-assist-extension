@@ -10,12 +10,13 @@
   "scripts": {
     "build": "./build.sh",
     "build:public": "./build.sh --public",
-    "test": "node test/smoke.mjs && node test/panel.mjs && node test/mcp.mjs && node test/limits.mjs && node test/retention.mjs",
+    "test": "node test/scope.mjs && node test/smoke.mjs && node test/panel.mjs && node test/mcp.mjs && node test/limits.mjs && node test/retention.mjs",
     "test:server": "node test/smoke.mjs",
     "test:mcp": "node test/mcp.mjs",
     "test:retention": "node test/retention.mjs",
     "test:panel": "node test/panel.mjs",
     "lint": "for f in src/*.js server/*.js; do node --check \"$f\" || exit 1; done",
-    "test:limits": "node test/limits.mjs"
+    "test:limits": "node test/limits.mjs",
+    "test:scope": "node test/scope.mjs"
   }
 }

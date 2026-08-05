@@ -301,7 +301,7 @@ try {
   }
   await sleep(400);
   const protoState = JSON.parse(readFileSync(path.join(dir, '.state', 'pollOffsets.json'), 'utf8'));
-  const protoKeys = Object.keys((protoState.find(([k]) => k === session) || [null, {}])[1]);
+  const protoKeys = Object.keys((protoState.find(([k]) => k.endsWith(session)) || [null, {}])[1]);
   check('a prototype-named reader is a real stored key, not a lost write',
     protoKeys.includes('__proto__') && protoKeys.includes('constructor'), protoKeys.join(','));
   check('and nothing leaked onto Object.prototype in this process either', !('wake' in Object.prototype));
@@ -313,8 +313,10 @@ try {
   await loop(); // leave the loop's position exactly at the end, so a replay would be obvious
   for (let i = 0; i < 40; i++) await fetch(`${base}/poll?session=${encodeURIComponent(session)}&consumer=throwaway-${i}`, { headers: auth });
   await sleep(400);
+  // Stores are keyed by (user, session) internally, so match on the session part rather than assuming the
+  // key format - the layout of that key is the server's business, not this test's.
   const stateFile = JSON.parse(readFileSync(path.join(dir, '.state', 'pollOffsets.json'), 'utf8'));
-  const kept = Object.keys((stateFile.find(([k]) => k === session) || [null, {}])[1]);
+  const kept = Object.keys((stateFile.find(([k]) => k.endsWith(session)) || [null, {}])[1]);
   check('the number of remembered readers is bounded', kept.length <= 8, `${kept.length}: ${kept.join(',')}`);
   check('and the wake loop is not among the evicted', kept.includes('test-agent'), kept.join(','));
 
