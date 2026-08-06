@@ -1286,6 +1286,20 @@ async function announceToMeeting(session) {
     if (seen[mark]) return;
     await chrome.storage.session.set({ [mark]: true });
 
+    // Zoom's web client has no chat automation here - `content-zoom.js` never handled `callchat`, only
+    // `content.js` does. Posting anyway queued a message nothing would ever type, and the delivery check
+    // below cannot tell "nobody answered" from "not yet", so it stayed quiet. The result was the exact
+    // failure this feature exists to prevent: disclosure switched on, nothing said, nobody told.
+    if (/_zoom-/.test(session)) {
+      appendChat({
+        role: 'agent',
+        text: '⚠ Zoom: I cannot type the disclosure into the meeting chat - only Google Meet supports that.'
+          + ' **The room has not been told.** Say it out loud, or paste it into the chat yourself:\n\n'
+          + `> ${text}`,
+      });
+      return;
+    }
+
     const r = await fetch(`${serverUrl}/callchat`, {
       method: 'POST', headers: hdrs(true), body: JSON.stringify({ session, text }),
     });
