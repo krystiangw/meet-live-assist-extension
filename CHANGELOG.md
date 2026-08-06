@@ -22,6 +22,15 @@ the point of the work below is that a stranger can actually get to the end of it
   left the skill's first step - the `attach` tool - with nothing to call, and the failure read as a broken
   skill rather than a step nobody ran.
 
+### A licence
+
+- **[PolyForm Internal Use 1.0.0](LICENSE.md)**: free to use, including at your company; no redistribution,
+  no resale, no hosting it as a service. Source-available rather than open source, deliberately - the point
+  is that it stays owned while being free to use.
+- The first choice was PolyForm *Noncommercial*, and it was wrong: its permitted purposes are personal,
+  hobby, academic and non-profit only, so it would have forbidden the one thing this tool exists for - a
+  meeting at a company. Caught by reading the licence text against the use case before committing it.
+
 ### It stops being the author's tool
 
 - Mention alerts defaulted to three of the author's names, ticket keys linked to their employer's Jira, the

@@ -2,6 +2,7 @@
   "name": "meet-live-assist-server",
   "version": "0.4.0",
   "description": "Local bridge server for the Meet Live Assist browser extension: transcript sink, advice channel, action-item board, snapshots, local STT and TTS. Zero dependencies, binds to 127.0.0.1 only.",
+  "license": "PolyForm-Internal-Use-1.0.0",
   "keywords": [
     "meet",
     "zoom",
@@ -22,7 +23,8 @@
     "state-store.js",
     "wake-cut.js",
     "scope.js",
-    "README.md"
+    "README.md",
+    "LICENSE.md"
   ],
   "engines": {
     "node": ">=20"

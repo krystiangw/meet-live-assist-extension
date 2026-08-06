@@ -80,6 +80,18 @@ remove the extension from Chrome.
 **Landing page:** [`docs/index.html`](docs/index.html), also hosted at
 **https://krystiangw.github.io/meet-live-assist/**.
 
+## Licence, in plain words
+
+[PolyForm Internal Use 1.0.0](LICENSE.md). Free, and **yes, you may use it at work** - "internal business
+operations of you and your company" is a permitted purpose, whether or not your company is for-profit. You
+may modify it for your own use.
+
+What you may not do is redistribute it, fork it publicly, or sell it - as a product, a hosted service, or a
+part of either. This is source-available, not open source, and the difference is deliberate: it is free to
+use and stays owned.
+
+If you want to do something the licence does not allow, ask. That is a conversation, not a refusal.
+
 ## Architecture (why it's shaped this way)
 
 - **Streaming + state live in the side panel, not the service worker.** The SW is event-driven and
