@@ -110,7 +110,7 @@ presentation edits (`/edit`, `/dom*`), debug (`/debug*`), brain heartbeat (`/bra
 (`/summary`), per-meeting wipe (`/clear`), and health (`/health`).
 
 **The assistant reaches it through MCP, not HTTP.** `server/mcp-server.js` is a zero-dependency stdio MCP
-adapter over the same API, ~12 tools. Register it once:
+adapter over the same API, 13 tools. Register it once:
 
 ```bash
 claude mcp add meet-live-assist -- node <repo>/server/mcp-server.js

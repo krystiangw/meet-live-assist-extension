@@ -325,6 +325,21 @@ const TOOLS = [
     },
   },
   {
+    name: 'wake_mode',
+    description: "Switch how much of the meeting reaches you. 'all' delivers every line with no gating - use it "
+      + 'when the user says the call is dense and they want nothing filtered (an interview, a negotiation). '
+      + "'gated' is the default and holds back small talk. The transcript file always has everything either "
+      + 'way; this only changes what wakes you, and \'all\' costs roughly four times the turns.',
+    inputSchema: {
+      type: 'object',
+      properties: { mode: { type: 'string', enum: ['all', 'gated'] }, session: { type: 'string' } },
+      required: ['mode'],
+    },
+    run(args) {
+      return api('POST', '/wake-mode', { session: sessionOf(args), mode: args.mode === 'all' ? 'all' : 'gated' });
+    },
+  },
+  {
     name: 'working',
     description: 'Heartbeat, so the panel shows you are alive. Pass status to show what you are doing ("checking Jira"); pass an empty status when done. Call every turn.',
     inputSchema: { type: 'object', properties: { status: { type: 'string' }, session: { type: 'string' } } },

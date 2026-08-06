@@ -22,6 +22,19 @@ the point of the work below is that a stranger can actually get to the end of it
   left the skill's first step - the `attach` tool - with nothing to call, and the failure read as a broken
   skill rather than a step nobody ran.
 
+### Two fixes that mattered the same evening
+
+- **The owner-only fix from 0.4.0 never applied to a single transcript.** `OWNER_ONLY` was handed to
+  `nameOf()` and to `Array.join()` rather than to `appendFileSync`, in four places; both swallow an extra
+  argument without complaint, so the code read as though every file were `0600` while every transcript,
+  wake channel and chat log was created world-readable. 257 such files were on the author's machine. The
+  mode option only applies at creation, which is why appending with it later repaired nothing. A `statSync`
+  assertion now pins it.
+- **`wake_mode` is an MCP tool**, so the assistant can be told "this call is dense, do not filter" and act
+  on it. The gate has always had an `all` setting; nothing the assistant could reach exposed it. Worth
+  saying plainly because it is the most misread part of this server: the gate never removed a line from the
+  transcript, it only decided when to wake the assistant. `all` costs roughly four times the turns.
+
 ### A licence
 
 - **[PolyForm Internal Use 1.0.0](LICENSE.md)**: free to use, including at your company; no redistribution,
