@@ -4,6 +4,38 @@ Notable changes only. Earlier history is in `git log` (91 commits from 2026-07-1
 point the project was prepared for a public release, because that is where a version number began to mean
 something to anyone other than the author.
 
+## Unreleased - preparing a free, self-hosted release
+
+The decision behind this section: no hosting. Anyone can install this on their own machine, for free, and
+the point of the work below is that a stranger can actually get to the end of it.
+
+### The install lost a step, and it was the worst one
+
+- **The extension pairs with the server instead of being handed a token.** `GET /pair` returns the token
+  exactly once, and only while a window is open - the server's first ever boot, or a run with `--pair`,
+  which against an already-running server just re-opens the window on it. A claim must carry `X-MLA-Pair: 1`
+  (a web page cannot send it without a preflight that betrays its origin) and any `Origin` present must be
+  `chrome-extension://`. The first claim closes the window and the extension id that took it is logged.
+  This does not stop another extension of yours that already holds a `127.0.0.1` permission from racing you
+  inside those two minutes, which is why the window is not simply left open. Pasting by hand still works.
+- **`install.sh` registers the MCP adapter** at user scope instead of printing it as homework. Skipping it
+  left the skill's first step - the `attach` tool - with nothing to call, and the failure read as a broken
+  skill rather than a step nobody ran.
+
+### It stops being the author's tool
+
+- Mention alerts defaulted to three of the author's names, ticket keys linked to their employer's Jira, the
+  Options hint carried an absolute `/Users/...` path, and a quick-ask chip named the author in the prompt it
+  sent. All of it fired on a stranger's meeting. Both defaults are now empty, which the code already handled
+  correctly: no names means no mention alerts, no Jira base means ticket keys stay plain text.
+- The checked-in launchd plist is gone. It carried the author's absolute paths and, in the installed copy, a
+  stray second path as an argument; `install-server.sh` generates the real one from the machine it runs on.
+- The README says what this is, that **Claude Code is required**, and that the meeting is other people's
+  conversation too - before the install, not after it. It also documents what is stored, where, and how to
+  delete all of it. One claim in it was simply false and is corrected: the npm package is **not** published,
+  so `npx meet-live-assist-server` 404s until the licence question is settled.
+- After your first call ends, the panel asks once whether it was any use. Once, ever.
+
 ## 0.4.0 - 2026-08-05
 
 A restart no longer costs you a meeting, and the assistant reaches the server through MCP tools instead of

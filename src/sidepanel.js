@@ -745,6 +745,23 @@ function appendChat({ role, text, image }) {
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
+// Ask once, ever, after the first call ends - the only moment someone has actually formed an opinion and
+// is not busy. Silence is the default outcome of a free tool, and silence is indistinguishable from nobody
+// having tried it, which is the one thing worth knowing early.
+const FEEDBACK_URL = 'https://github.com/krystiangw/meet-live-assist-extension/discussions';
+async function maybeAskForFeedback() {
+  try {
+    const { mla_feedback_asked } = await chrome.storage.local.get('mla_feedback_asked');
+    if (mla_feedback_asked) return;
+    await chrome.storage.local.set({ mla_feedback_asked: Date.now() });
+    appendChat({
+      role: 'agent',
+      text: `That was your first call with me. Was it any use? Even "I gave up during the install" is worth`
+        + ` saying - it is the most useful thing you can tell me: ${FEEDBACK_URL}`,
+    });
+  } catch (_) {}
+}
+
 async function pollChat() {
   if (!currentSession) return;
   try {
@@ -1007,6 +1024,7 @@ function onMessage(msg) {
       copilotOn = false; copilotBtn.classList.remove('on');
       resetPro();
       setPausedUI(false);
+      maybeAskForFeedback();
       break;
     case 'paused':
       setPausedUI(!!msg.on);
