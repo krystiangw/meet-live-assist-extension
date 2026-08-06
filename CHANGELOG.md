@@ -42,7 +42,8 @@ the point of the work below is that a stranger can actually get to the end of it
 - The README says what this is, that **Claude Code is required**, and that the meeting is other people's
   conversation too - before the install, not after it. It also documents what is stored, where, and how to
   delete all of it. One claim in it was simply false and is corrected: the npm package is **not** published,
-  so `npx meet-live-assist-server` 404s until the licence question is settled.
+  so `npx meet-live-assist-server` 404s. Publishing it is now unblocked by the licence but is a separate,
+  deliberate act - it is not something to do as a side effect of a docs edit.
 - After your first call ends, the panel asks once whether it was any use. Once, ever.
 
 ## 0.4.0 - 2026-08-05
