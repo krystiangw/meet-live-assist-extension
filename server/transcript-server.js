@@ -22,7 +22,7 @@ const crypto = require('crypto');
 const { execFile, spawn } = require('child_process');
 const { createStore } = require('./state-store');
 const { utf8SafeCut, utf8SafeStart } = require('./wake-cut');
-const { LOCAL_USER, SEP, safeSession, safeUser, keyOf, partsOf, nameOf, createScope } = require('./scope');
+const { LOCAL_USER, SEP, safeSession, safeUser, keyOf, partsOf, nameOf, isNoSession, createScope } = require('./scope');
 
 const IS_MAC = process.platform === 'darwin';
 
@@ -161,7 +161,7 @@ function confidentSegments(json) {
       ? words.reduce((a, w) => a + w.probability, 0) / words.length
       : (typeof seg.avg_logprob === 'number' ? (seg.avg_logprob > -0.6 ? 1 : 0) : 1);
     if (conf < STT_MIN_CONFIDENCE) {
-      console.log(`[stt] dropped low-confidence segment (${conf.toFixed(2)}): ${String(seg.text || '').trim()}`);
+      console.log(`[stt] dropped low-confidence segment (${conf.toFixed(2)}, ${String(seg.text || '').trim().length} chars)`);
       continue;
     }
     kept.push(seg.text || '');
@@ -225,11 +225,13 @@ function transcribe(inputFile, lang, done) {
         // on the whole line.
         text = text.replace(/^[-–—>\s]+/, '');
         if (!text) return done(null, '');
-        if (STT_HALLUCINATION_RE.test(text)) { console.log(`[stt] dropped boilerplate (${peak}dB): ${text}`); return done(null, ''); }
-        if (isWrongScript(text, lang)) { console.log(`[stt] dropped wrong-script output (lang=${lang}, ${peak}dB): ${text}`); return done(null, ''); }
-        if (STT_FILLER_ALWAYS_RE.test(text)) { console.log(`[stt] dropped hesitation (${peak}dB): ${text}`); return done(null, ''); }
+        // Never log the text itself: the log is a second copy of the meeting, and it sits outside the
+        // retention sweep and outside /clear, so it is the one copy the user cannot get rid of.
+        if (STT_HALLUCINATION_RE.test(text)) { console.log(`[stt] dropped boilerplate (${peak}dB, ${text.length} chars)`); return done(null, ''); }
+        if (isWrongScript(text, lang)) { console.log(`[stt] dropped wrong-script output (lang=${lang}, ${peak}dB, ${text.length} chars)`); return done(null, ''); }
+        if (STT_FILLER_ALWAYS_RE.test(text)) { console.log(`[stt] dropped hesitation (${peak}dB, ${text.length} chars)`); return done(null, ''); }
         if (STT_FILLER_QUIET_RE.test(text) && peak !== null && peak < STT_QUIET_PEAK_DB) {
-          console.log(`[stt] dropped filler on quiet audio (${peak}dB): ${text}`);
+          console.log(`[stt] dropped filler on quiet audio (${peak}dB, ${text.length} chars)`);
           return done(null, '');
         }
         done(null, text);
@@ -318,7 +320,11 @@ const TRANSCRIPTS_DIR = process.env.TRANSCRIPTS_DIR
   ? path.resolve(process.env.TRANSCRIPTS_DIR)
   : defaultTranscriptsDir();
 
-fs.mkdirSync(TRANSCRIPTS_DIR, { recursive: true });
+fs.mkdirSync(TRANSCRIPTS_DIR, { recursive: true, mode: 0o700 });
+// Meeting text and screenshots are the most sensitive thing here, and were the only thing left
+// world-readable: PRIVACY.md promises 0600/0700 and a reader takes that to mean the recordings.
+try { fs.chmodSync(TRANSCRIPTS_DIR, 0o700); } catch (_) {}
+const OWNER_ONLY = { mode: 0o600 };
 
 // Live session state (advice, board, chat, wake buffer, ...) lived in plain Maps, so restarting the
 // server mid-call dropped the meeting's history. These are still Maps to every call site below; they
@@ -649,7 +655,7 @@ function flushWake(session) {
   if (b.timer) { clearTimeout(b.timer); b.timer = null; }
   if (!b.lines.length) return;
   try {
-    fs.appendFileSync(wakeFileFor(session), b.lines.join(''));
+    fs.appendFileSync(wakeFileFor(session), b.lines.join('', OWNER_ONLY));
     // One line per brain turn - this is the log to read when tuning the WAKE_* thresholds for a real call.
     console.log(`[wake] ${nameOf(session)} +${b.lines.length} lines (window ${b.window}ms)`);
   } catch (e) { console.error('[transcript] wake write failed', e); }
@@ -687,6 +693,16 @@ function readBody(req, limit, done) {
     chunks.push(c);
   });
   req.on('end', () => { if (!ended) done(Buffer.concat(chunks).toString('utf8')); });
+}
+
+// Routes that act on a meeting refuse a request that names none. Answering 200 to a session-less write is
+// how an hour of a real interview was advised into one namespace while the panel watched another, with
+// nothing anywhere reporting an error. Say no, out loud, at the point of the mistake.
+function needSession(res, key) {
+  if (!isNoSession(key)) return true;
+  res.writeHead(400, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'no session - name the meeting you mean' }));
+  return false;
 }
 
 function cors(req, res) {
@@ -749,11 +765,11 @@ const server = http.createServer((req, res) => {
       try {
         if (!seenSessions.has(session)) {
           seenSessions.add(session);
-          fs.appendFileSync(file, `==== ${nameOf(session)} - started ${new Date().toISOString()} ====\n`);
+          fs.appendFileSync(file, `==== ${nameOf(session, OWNER_ONLY)} - started ${new Date().toISOString()} ====\n`);
           console.log(`[transcript] new session → ${file}`);
         }
         if (line) {
-          fs.appendFileSync(file, line); // the .txt is the complete record - nothing is ever dropped here
+          fs.appendFileSync(file, line, OWNER_ONLY); // the .txt is the complete record - nothing is ever dropped here
           queueForWake(session, line);   // whether it's worth a turn is decided on the .wake channel
           if (isWakeAll(session)) flushWake(session); // "collect everything" mode: no gate, no coalescing
         } else {
@@ -774,6 +790,7 @@ const server = http.createServer((req, res) => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       const session = keyFor(req, data.session);
+      if (!needSession(res, session)) return;
       const marker = String(data.marker || 'INFO').toUpperCase();
       const text = typeof data.text === 'string' ? data.text.trim() : '';
       const image = typeof data.image === 'string' && /^(https?:|data:image\/)/.test(data.image) ? data.image : null;
@@ -860,7 +877,7 @@ const server = http.createServer((req, res) => {
       transcribe(tmp, lang, (err, text) => {
         if (err) { res.writeHead(500); return res.end('stt failed'); }
         if (text && isSttEcho(session, src, text)) {
-          console.log(`[stt] dropped echo on ${src}: ${text.slice(0, 60)}`);
+          console.log(`[stt] dropped echo on ${src} (${text.length} chars)`);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ text: '' }));
         }
@@ -871,7 +888,7 @@ const server = http.createServer((req, res) => {
             const file = fileFor(session);
             if (!seenSessions.has(session)) {
               seenSessions.add(session);
-              fs.appendFileSync(file, `==== ${nameOf(session)} - started ${new Date().toISOString()} ====\n`);
+              fs.appendFileSync(file, `==== ${nameOf(session, OWNER_ONLY)} - started ${new Date().toISOString()} ====\n`);
             }
             // Mic STT is the user (co-pilot) → 'You' (authorizes actions). tabCapture STT is remote
             // participants; whisper does no diarization, so there is no name to attach - unless the user
@@ -879,7 +896,7 @@ const server = http.createServer((req, res) => {
             // the moment a third person joins. Either way it is NOT the user, so it still authorizes nothing.
             const who = src === 'mic' ? 'You' : (remoteNames.get(session) || '(unattributed)');
             const sttLine = `[${hms}] ${who}: ${text}\n`;
-            fs.appendFileSync(file, sttLine);
+            fs.appendFileSync(file, sttLine, OWNER_ONLY);
             queueForWake(session, sttLine);
           } catch (_) {}
         }
@@ -1165,7 +1182,7 @@ const server = http.createServer((req, res) => {
       const text = typeof d.text === 'string' ? d.text : '';
       if (!text.trim()) { res.writeHead(400); return res.end('empty'); }
       summaries.set(s, text);
-      try { fs.writeFileSync(summaryFileFor(s), text); } catch (_) {}
+      try { fs.writeFileSync(summaryFileFor(s), text, OWNER_ONLY); } catch (_) {}
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     });
@@ -1271,15 +1288,16 @@ const server = http.createServer((req, res) => {
     readBody(req, 1e6, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       const session = keyFor(req, d.session);
+      if (!needSession(res, session)) return;
       const text = typeof d.text === 'string' ? d.text.trim() : '';
       if (!text) { res.writeHead(400); return res.end('empty'); }
       const dt = new Date();
       const hms = [dt.getHours(), dt.getMinutes(), dt.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
       try {
         const file = fileFor(session);
-        if (!seenSessions.has(session)) { seenSessions.add(session); fs.appendFileSync(file, `==== ${nameOf(session)} - started ${new Date().toISOString()} ====\n`); }
+        if (!seenSessions.has(session)) { seenSessions.add(session); fs.appendFileSync(file, `==== ${nameOf(session, OWNER_ONLY)} - started ${new Date().toISOString()} ====\n`); }
         const block = `\n[${hms}] ===== PRE-JOIN CONTEXT (imported) =====\n${text}\n=================================================\n`;
-        fs.appendFileSync(file, block);
+        fs.appendFileSync(file, block, OWNER_ONLY);
         queueForWake(session, block); // imported background is worth a turn
         flushWake(session);
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1294,6 +1312,7 @@ const server = http.createServer((req, res) => {
     readBody(req, 1e5, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad'); }
       const session = keyFor(req, d.session);
+      if (!needSession(res, session)) return;
       const text = typeof d.text === 'string' ? d.text.trim() : '';
       if (!text) { res.writeHead(400); return res.end('empty'); }
       let cc = callChat.get(session);
@@ -1370,6 +1389,7 @@ const server = http.createServer((req, res) => {
     readBody(req, 1e5, (body) => {
       let d; try { d = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       const session = keyFor(req, d.session);
+      if (!needSession(res, session)) return;
       const text = typeof d.text === 'string' ? d.text.trim() : '';
       if (!text) { res.writeHead(400); return res.end('empty'); }
       const kind = ITEM_KINDS.has(d.kind) ? d.kind : 'action';
@@ -1423,6 +1443,7 @@ const server = http.createServer((req, res) => {
       let data;
       try { data = JSON.parse(body); } catch (_) { res.writeHead(400); return res.end('bad json'); }
       const session = keyFor(req, data.session);
+      if (!needSession(res, session)) return;
       const role = data.role === 'agent' ? 'agent' : 'user';
       const text = typeof data.text === 'string' ? data.text.trim() : '';
       const image = typeof data.image === 'string' && /^(https?:|data:image\/)/.test(data.image) ? data.image : null;
@@ -1435,7 +1456,7 @@ const server = http.createServer((req, res) => {
       if (c.items.length > CHAT_MAX) c.items.splice(0, c.items.length - CHAT_MAX);
       // Only user messages go to the tailable file (the brain reads those and replies).
       if (role === 'user' && text) {
-        try { fs.appendFileSync(chatFileFor(session), `[${item.ts}] ${text}\n`); } catch (_) {}
+        try { fs.appendFileSync(chatFileFor(session), `[${item.ts}] ${text}\n`, OWNER_ONLY); } catch (_) {}
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(item));
@@ -1557,6 +1578,7 @@ const server = http.createServer((req, res) => {
     // A consumer's own cursors are stored beside it as `<consumer>:chat`, `:callchat` and `:sig`. That is
     // collision-free only because `:` cannot survive this sanitiser - do not widen it to allow one. The
     // value is used as an object key and never as a path component, so `..` here is harmless.
+    if (!needSession(res, s)) return;
     const consumer = String(u.searchParams.get('consumer') || 'default').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 60);
     const statusOnly = u.searchParams.get('statusOnly') === '1';
     const asText = u.searchParams.get('format') === 'text';

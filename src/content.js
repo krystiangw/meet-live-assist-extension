@@ -289,14 +289,12 @@
     }
     if (attempt < 25) setTimeout(() => ensureCaptionsOn(attempt + 1), 2000);
   }
-  // Watchdog: Meet captions sometimes switch off mid-call - re-enable them if the region disappears
-  // (only click the CC button when it's actually OFF, so we never toggle captions off ourselves).
-  function keepCaptionsOn() {
-    if (!AUTO_CAPTIONS || !started || sttPaused) return;
-    if (firstRegion()) return; // captions visible → nothing to do
-    const btn = findCaptionButton();
-    if (btn && btn.off) { try { btn.el.click(); } catch (_) {} }
-  }
+  // Captions that were on and went off are NOT re-enabled. This used to click the CC button back on every
+  // five seconds, which was written as a watchdog for Meet dropping captions by itself - but the code
+  // cannot tell that apart from a person deliberately switching them off, so in practice it overrode a
+  // human's choice about being transcribed, silently, every five seconds. There is no version of that
+  // which is defensible in a room where not everyone installed this. The panel already warns when
+  // captions stop, so the user is told rather than obeyed-over.
 
   // ---- SESSION NAME (date_time_meeting) ------------------------------------
   function meetingCode() {
@@ -514,6 +512,5 @@
     setInterval(tick, 1500); // handle SPA navigation (lobby -> call -> leave)
     setInterval(checkSharing, 3000);
     setInterval(checkLang, 3000);
-    setInterval(keepCaptionsOn, 5000); // re-enable captions if they turn off mid-call
   }, 800);
 })();

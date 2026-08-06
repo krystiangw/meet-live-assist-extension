@@ -33,9 +33,18 @@ function safeSession(name) {
   const cleaned = String(name || '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120);
   // Reject pure-dot names ('.', '..'): joined with a dir they would escape it - `/clear` on '..' would
   // recursively delete the whole data dir.
-  if (!cleaned || /^\.+$/.test(cleaned)) return `meeting_${Date.now()}`;
+  if (!cleaned || /^\.+$/.test(cleaned)) return NO_SESSION;
   return cleaned;
 }
+
+// A caller that sends no session at all is always a bug, and it used to be an expensive one: every such
+// request minted `meeting_<Date.now()>`, so three polls produced three different meetings, each returning
+// a healthy-looking 200. That is the shape of the incident this repo keeps referring to - an hour of a
+// real interview transcribed into one session while the assistant advised into another, with nothing
+// anywhere reporting an error. One stable name instead, so the mistake is a single visible place rather
+// than unbounded ghost meetings, and `isNoSession` lets a route answer 400 instead of pretending.
+const NO_SESSION = '_nosession';
+function isNoSession(key) { return partsOf(key).session === NO_SESSION; }
 function safeUser(name) {
   const cleaned = String(name || '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64);
   if (!cleaned || /^\.+$/.test(cleaned)) return LOCAL_USER;
@@ -80,4 +89,4 @@ function createScope({ dataDir, snapDir }) {
   return { dirForUser, pathFor, snapDirFor };
 }
 
-module.exports = { LOCAL_USER, SEP, safeSession, safeUser, keyOf, partsOf, nameOf, createScope };
+module.exports = { LOCAL_USER, SEP, NO_SESSION, safeSession, safeUser, keyOf, partsOf, nameOf, isNoSession, createScope };

@@ -98,6 +98,19 @@ try {
   });
   check('a session-less append is rejected', noSession.status === 400, `status ${noSession.status}`);
 
+  // The same guard, on the routes that did NOT have it. A session-less write used to answer 200 with a
+  // plausible seq, and a session-less poll minted a fresh meeting on every call - so a misconfigured
+  // assistant looked healthy while advising into a namespace nobody was reading.
+  for (const [route, body] of [['/advice', { marker: 'INFO', text: 'x' }], ['/items', { text: 'x' }], ['/chat', { role: 'agent', text: 'x' }]]) {
+    const r = await fetch(`${base}${route}`, { method: 'POST', headers: auth, body: JSON.stringify(body) });
+    check(`a session-less ${route} is refused`, r.status === 400, `status ${r.status}`);
+  }
+  const ghost = await fetch(`${base}/poll?consumer=x`, { headers: auth });
+  check('a session-less poll is refused rather than minting a meeting', ghost.status === 400, `status ${ghost.status}`);
+
+  // Meeting text is the most sensitive thing here and was the only thing left world-readable.
+  check('the data dir is owner-only', (statSync(dir).mode & 0o777) === 0o700, (statSync(dir).mode & 0o777).toString(8));
+
   // "decided" is one of the words the wake gate treats as urgent, so this line reaches the .wake
   // channel promptly and the poll check further down has something to read.
   const line = 'Speaker: we decided this line must reach the transcript.\n';
