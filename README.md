@@ -1,21 +1,73 @@
-# Meet Live Assist - Chrome extension
+# Meet Live Assist
 
-Live Google Meet assistant. During a call it captures the transcript, shows it in a side panel,
-and (Path A) feeds the local transcript server so a Claude Code session with your context can
-advise you in real time.
+**Your own AI assistant sits in your meeting, and nothing leaves your machine.**
 
-**Integration guide / landing page:** [`docs/index.html`](docs/index.html) - a self-contained page.
-Hosted (public docs-only repo, so this code stays private): **https://krystiangw.github.io/meet-live-assist/**
-(source: `github.com/krystiangw/meet-live-assist`). It also opens fine locally (`open docs/index.html`).
+During a Google Meet or Zoom call this captures the transcript, shows it in a side panel, and hands it to
+an assistant running on your own computer. The assistant answers back in the panel while the call is still
+going: what to say, what was decided, who owns what, what you just agreed to that you should not have.
 
-**This is a personal / dogfood tool**, distributed unpacked - not a public Chrome Web Store product.
-See `../agent/.../meet-live-assist-BUILD-PLAN.md` for the full plan and why.
+Transcripts, screenshots and chat are written to a folder on your disk and served by a server on
+`127.0.0.1` that only you can reach. There is no account, no telemetry, and no server of ours anywhere.
 
-## Status (v0.2)
+## Read this before you install
 
-Working, dogfood. What it does now:
+**You need [Claude Code](https://claude.com/claude-code).** This ships the eyes, ears and hands - the
+capture, the panel, the local bridge - but not the brain. The brain is a Claude Code session on your
+machine, running a skill this installs for you. Without it you get a working transcript recorder and an
+empty advice pane, which is not what the screenshots promise.
 
-- **Live transcript** - Meet captions scraped, streamed to the panel instantly, de-duplicated + monologue
+**Your meeting is other people's conversation too.** Turning on captions is invisible to everyone else,
+unlike recording, which Meet badges. So by default this posts one line into the meeting chat when capture
+starts, saying an assistant is transcribing locally. You can edit that line or turn it off in Options.
+Some jurisdictions require everyone's consent before a conversation may be recorded or transcribed; that
+is your call to make, and `PRIVACY.md` says so plainly.
+
+Requirements: Node 20+, Chrome 116+, Claude Code. Speaking *into* the call is macOS-only (it uses `say`
+and `afplay`); elsewhere advice still appears in the panel and the server says why it cannot speak. Local
+speech-to-text works anywhere `ffmpeg` and `whisper.cpp` do, and the panel's setup row shows which of the
+two are actually present rather than failing quietly.
+
+## Install (three steps)
+
+```sh
+git clone https://github.com/krystiangw/meet-live-assist-extension.git
+cd meet-live-assist-extension
+./install.sh          # installs the skill, registers the MCP tools, prepares the data dir
+```
+
+Then:
+
+1. **Start the bridge server**, leave it running:
+   `node server/transcript-server.js --pair`
+2. **Load the extension**: `chrome://extensions` → Developer mode → *Load unpacked* → pick this folder.
+   Pin it, click the icon. The panel collects its token from the pairing window on its own; there is
+   nothing to copy. (Window expired? Run step 1's command again - it works against a running server too.)
+3. **Open Claude Code** and ask it to assist your meeting.
+
+`./install.sh` takes `MLA_USER`, `MLA_LANGUAGE`, `MLA_DOMAIN` and `MLA_TRANSCRIPTS_DIR` so the assistant
+addresses you by name, in your language, and knows roughly what your meetings are about.
+
+## What it stores, and how to get rid of it
+
+Everything lives in one folder - `./transcripts` unless you set `MLA_TRANSCRIPTS_DIR`:
+
+| File | What it is |
+| --- | --- |
+| `<date>_<meeting-code>.txt` | the transcript |
+| `<...>.chat.txt`, `<...>.summary.md` | your chat with the assistant, and the post-call summary |
+| `snapshots/<session>/*.jpg` | screenshots taken during screen-share |
+| `.state/` | live meeting state, so restarting the server mid-call loses nothing |
+| `.mla-token` | the shared secret the extension and the assistant authenticate with |
+
+Files are owner-only (`0600`), the directory is `0700`, and anything older than 14 days is purged
+automatically (`RETENTION_DAYS`, `0` keeps everything forever). The 🗑 button in the panel wipes a single
+meeting - transcript, chat, summary, snapshots and state - immediately. To remove the whole thing: delete
+that folder, delete `~/.claude/skills/meet-live-assist`, run `claude mcp remove meet-live-assist`, and
+remove the extension from Chrome.
+
+## What it does during a call
+
+- **Live transcript** - captions scraped, streamed to the panel instantly, de-duplicated + monologue
   forced-flush before hitting the file/brain, with a conservative ASR glossary.
 - **Colour-coded advice** from the brain (🟢SAY/🔵INFO/🟡SUMMARY/🟣EXPLAIN/🔴RISK/🟠ACTION), rich
   (links/images/diagrams/lists), each **copyable**; RISK fires an audible + notification cue.
@@ -24,7 +76,9 @@ Working, dogfood. What it does now:
 - **Snapshots** (auto on screen-share + on demand), **TTS into the call**, **local STT** (whisper),
   **meeting modes** + type-awareness, **live presentation edits** + **debug** of the shared tab.
 - **Talk-time**, **muted-mic** + **personal-mention** alerts; **post-call summary** export.
-- **Privacy:** token-authed local server, per-meeting **clear**, time-based **retention**, consent nudge.
+
+**Landing page:** [`docs/index.html`](docs/index.html), also hosted at
+**https://krystiangw.github.io/meet-live-assist/**.
 
 ## Architecture (why it's shaped this way)
 
@@ -75,8 +129,17 @@ hosted profile can namespace users without a second code path, and so the guaran
 reach another's meeting is stated in one place and tested directly.
 
 **Auth:** every route except `/health` requires an `X-MLA-Token` header. The server generates the token
-into `<transcripts>/.mla-token` on first start; **paste it into the extension Options once** (and the brain
-reads the same file). Without it any website you visit could reach the localhost server.
+into `<transcripts>/.mla-token` on first start; the brain reads that file, and the extension **pairs** for
+it rather than being handed a copy by a human. Without the token any website you visit could reach the
+localhost server.
+
+**Pairing.** `GET /pair` returns the token exactly once, and only while a window is open - the server's
+first ever boot, or a run with `--pair`, which against an already-running server just re-opens the window
+on it. A claim must carry `X-MLA-Pair: 1`, which a web page cannot send without a preflight that betrays
+its origin, and any `Origin` present must be `chrome-extension://`. The first claim closes the window and
+the extension id that took it is logged. This does not stop another extension of yours that already holds
+a `127.0.0.1` permission from racing you inside those two minutes, which is exactly why the window is not
+left open. Manual paste still works and is still there in Options.
 
 **Two files per meeting.** `/append` writes every caption to `<session>.txt` - the complete record, nothing
 dropped - and only appends a batch to `<session>.wake` when the batch is worth waking the brain for
@@ -88,14 +151,16 @@ turns. A held-back batch is never lost - it rides along with the next wake, and 
 
 ### Stand up the server
 
-The server is published on its own as `meet-live-assist-server` (zero dependencies, `server/package.json`),
-so a user who only wants to run it needs neither this repo nor a clone:
+The server is packaged to stand alone as `meet-live-assist-server` (zero dependencies,
+`server/package.json`), so a user who only wants to run it needs neither this repo nor a clone. **It is not
+on npm yet** - that waits on the licence decision, so `npx meet-live-assist-server` will 404 until then.
+From a clone it is just:
 
 ```bash
-npx meet-live-assist-server
+node server/transcript-server.js --pair
 ```
 
-It prints the auth token to paste into the extension Options, and writes to
+It writes to
 `~/meet-live-assist/transcripts` unless `TRANSCRIPTS_DIR` says otherwise. **Node 20+ is the only hard
 requirement**; `ffmpeg` and `whisper-cli` are optional and only local STT depends on them. Binary paths
 resolve from Homebrew, `/usr/local`, `/usr/bin` and then `PATH`, so Linux works as well as either Mac
@@ -119,7 +184,8 @@ MLA_DRY_RUN=1 ./server/install-server.sh   # optional: see the plan + generated 
 It resolves the machine-specific bits itself (node binary via `process.execPath` - a bare `which node` under
 fnm/nvm points at a per-shell shim that dies with the shell; Homebrew prefix for `ffmpeg`/`whisper-cli`, so
 Intel and Apple Silicon both work), writes `~/Library/LaunchAgents/com.mla.meet-transcript-server.plist`,
-waits for `/health`, then prints the auth token to paste into the extension Options.
+waits for `/health`, then tells you where the token lives. To pair an extension against the job it just
+installed: `node server/transcript-server.js --pair`.
 
 - **Only Node 20+ is required.** `ffmpeg` and `whisper-cli` are optional (`brew install ffmpeg whisper-cpp`);
   without them the server still runs - TTS-into-the-call and local STT are the parts that go dark.
@@ -173,11 +239,8 @@ but does not persist (it logs why), so a sandbox run beside the launchd job cann
 | `WAKE_MIN_GAP_MS` | `8000` | floor between two wakes |
 | `FFMPEG` / `WHISPER_CLI` / `WHISPER_MODEL` / `TTS_VOICE` | Homebrew paths / `Zosia` | TTS + STT plumbing |
 
-**Two copies of the server exist on the author's machine.** `server/transcript-server.js` here is the
-version-controlled one; the live launchd service historically ran
-`~/projects/meet-live-assist/meet-transcript/transcript-server.js`, which is **not** in any repo. They are
-byte-identical as of 2026-08-04, but nothing enforces that - re-run `install-server.sh` to repoint launchd at
-this repo copy and make it the only source.
+The launchd plist is generated by `install-server.sh` from your machine's actual paths - there is no
+template to edit, because a checked-in one would carry someone else's absolute paths and fail on yours.
 
 ## Two builds, and the skill that matches each
 
@@ -226,31 +289,35 @@ file timestamps and restarts with a gap, so it does not belong in the fast path.
    On a fresh Mac install it first: `./server/install-server.sh` (see *Stand up the server on a Mac* above).
 2. `chrome://extensions` → enable **Developer mode** → **Load unpacked** → pick this folder.
 3. Pin the extension; click its toolbar icon to open the side panel.
-4. Right-click the icon → **Options** → paste the **server token** (`cat <TRANSCRIPTS_DIR>/.mla-token`; the
-   installer prints it, and it is per-machine - a token from another Mac will be rejected).
+4. The panel pairs itself with the server if a pairing window is open (`--pair`). If it is not, the pill
+   says so and you can still paste the token by hand: right-click the icon → **Options** →
+   `cat <TRANSCRIPTS_DIR>/.mla-token`. The token is per-machine; one from another Mac will be rejected.
    Optionally set TTS voices and your name(s) (for mention alerts). The panel's ⚙ shows a setup checklist.
-5. Disable the old Tampermonkey userscript to avoid double-capture.
+5. If you ever ran the predecessor Tampermonkey userscript
+   (`server/legacy-userscript.meet-captions-to-file.user.js`), disable it - both capturing at once
+   duplicates every line.
 
-## Phase 0 acceptance test
+## Does it actually work? Check these on a real call
 
-- [ ] Join a real Meet call → within a few seconds the side panel shows `capturing` and live lines.
-- [ ] `server ✓` shows green; the transcript file under `meet-live-assist/transcripts/` grows.
-- [ ] **SW-death resilience:** open `chrome://serviceworker-internals` (or just wait), let the SW go
-      idle / click "Stop" on the extension's SW, keep talking - capture resumes and the panel
-      re-hydrates without a reload. Verify a **10-minute** call captures end-to-end with no gaps.
-- [ ] Leave the call → panel shows `call ended`.
+Automated tests cover the server; these cover the half that only a live meeting exercises.
 
-## Phase 1 (in progress) - advice + visual context
+- [ ] Join a call → within a few seconds the panel shows `capturing` and live lines, and
+      `<TRANSCRIPTS_DIR>/<date>_<code>.txt` starts growing.
+- [ ] `server ✓` is green and the 🧠 pill names your attached assistant. A pill that says nobody is
+      attached while a session is running means the skill never armed - that is the failure mode worth
+      catching, because everything else looks fine while no advice will ever arrive.
+- [ ] Ask the assistant something in the panel chat and get an answer back **in the panel**.
+- [ ] **Service-worker death:** let the SW go idle (or Stop it in `chrome://serviceworker-internals`) and
+      keep talking. Capture resumes and the panel re-hydrates without a reload. A 10-minute call should
+      have no gaps.
+- [ ] Share your screen → snapshots start on their own; the 📷 pill shows how stale the assistant's view is.
+- [ ] Leave the call → the panel shows `call ended`.
 
-Brain = a Claude Code session (subscription, no API key) via the `meet-live-assist` skill.
-
-- **Advice channel:** the brain POSTs advice to the server (`POST /advice {session, marker, text}`); the
-  side panel polls `GET /advice?session=&since=` and renders each with its colour marker
-  (🟢SAY / 🔵INFO / 🟡SUMMARY / 🟣EXPLAIN / 🔴RISK / 🟠ACTION).
-- **Visual context:** the extension captures the Meet tab (periodic, default 60s, + the panel's 📷 button)
-  and POSTs it (`POST /snapshot`); frames are saved to `meet-live-assist/transcripts/snapshots/<session>/` (~40 kept)
-  for the brain to Read on demand.
-- Agentic actions (Tier1/Tier2, drafts-only) stay in the session/call per the skill - the panel is display-only.
+**How the halves talk.** The brain POSTs advice (`POST /advice {session, marker, text}`) and the panel
+polls `GET /advice?session=&since=`, rendering each with its colour marker. Snapshots go to
+`<TRANSCRIPTS_DIR>/snapshots/<session>/` (~40 kept) for the assistant to read on demand. Anything the
+assistant does outside the panel - a ticket, a message - follows the tiers in the skill, and the panel
+itself is display-only.
 
 ### Permissions
 The `<all_urls>` host is **optional**, requested at runtime on a user gesture (starting co-pilot, turning on
