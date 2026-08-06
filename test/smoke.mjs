@@ -79,6 +79,29 @@ try {
   const authBad = await fetch(`${base}/auth-check`, { headers: { 'X-MLA-Token': 'wrong' } });
   check('/auth-check reports authed:false for a wrong token', authBad.ok && (await authBad.json()).authed === false);
 
+  // Pairing hands the token to the extension so nobody has to copy it by hand. It is the one route that
+  // gives the secret away, so what it refuses matters more than what it returns. The window is open here
+  // because this is the server's first boot on a fresh data dir.
+  const pairNoHeader = await fetch(`${base}/pair`);
+  check('a pairing claim without the extension header is refused', pairNoHeader.status === 403, `status ${pairNoHeader.status}`);
+  const pairWebOrigin = await fetch(`${base}/pair`, { headers: { 'X-MLA-Pair': '1', Origin: 'https://evil.example' } });
+  check("a pairing claim carrying a web page's origin is refused", pairWebOrigin.status === 403, `status ${pairWebOrigin.status}`);
+
+  const paired = await fetch(`${base}/pair`, { headers: { 'X-MLA-Pair': '1', Origin: 'chrome-extension://smoketest' } });
+  check('the extension can claim the token on a first boot', paired.status === 200, `status ${paired.status}`);
+  check('and it is the same token the server actually enforces', paired.ok && (await paired.json()).token === token);
+  // Single use, or a second extension - or a second anything - collects the same secret from the window
+  // the first one left open.
+  const pairAgain = await fetch(`${base}/pair`, { headers: { 'X-MLA-Pair': '1', Origin: 'chrome-extension://smoketest' } });
+  check('the claim closes the window behind it', pairAgain.status === 409, `status ${pairAgain.status}`);
+
+  const reopenNoToken = await fetch(`${base}/pair-open`, { method: 'POST' });
+  check('re-opening the window needs the token', reopenNoToken.status === 403, `status ${reopenNoToken.status}`);
+  const reopen = await fetch(`${base}/pair-open`, { method: 'POST', headers: { 'X-MLA-Token': token } });
+  check('and works with it', reopen.status === 200, `status ${reopen.status}`);
+  const pairAfterReopen = await fetch(`${base}/pair`, { headers: { 'X-MLA-Pair': '1', Origin: 'chrome-extension://smoketest' } });
+  check('so a re-installed extension can pair again', pairAfterReopen.status === 200, `status ${pairAfterReopen.status}`);
+
   const noToken = await fetch(`${base}/append`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ session, line: 'should never be written\n' }),

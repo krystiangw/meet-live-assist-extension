@@ -68,32 +68,45 @@ command -v node >/dev/null 2>&1 && echo "  node: $(node --version)" || echo "  �
 command -v ffmpeg >/dev/null 2>&1 && echo "  ffmpeg: ok (TTS into call available)" || echo "  · ffmpeg not found - optional (only for TTS routing)."
 command -v whisper-cli >/dev/null 2>&1 && echo "  whisper-cli: ok (local STT available)" || echo "  · whisper-cli not found - optional (only for local STT)."
 
+# Register the MCP adapter here rather than printing it as homework. The skill's very first step is the
+# `attach` tool, so an install that stops short of this leaves an assistant with nothing to call - and the
+# failure looks like the skill being broken, not like a step nobody ran.
+echo "→ registering the MCP adapter with Claude Code"
+if command -v claude >/dev/null 2>&1; then
+  if claude mcp list 2>/dev/null | grep -q '^meet-live-assist:'; then
+    echo "  already registered - leaving it alone"
+  elif claude mcp add meet-live-assist --scope user -- node "$REPO_DIR/server/mcp-server.js" >/dev/null 2>&1; then
+    # User scope, not project: the brain runs from whatever directory you happen to be in when a meeting
+    # starts, and a project-scoped server is invisible from everywhere else.
+    echo "  registered at user scope (restart your Claude session to pick the tools up)"
+  else
+    echo "  ⚠ could not register automatically. Run:"
+    echo "      claude mcp add meet-live-assist --scope user -- node \"$REPO_DIR/server/mcp-server.js\""
+  fi
+else
+  echo "  · claude CLI not found - this extension is only useful with Claude Code. Once it is installed:"
+  echo "      claude mcp add meet-live-assist --scope user -- node \"$REPO_DIR/server/mcp-server.js\""
+fi
+
 cat <<EOF
 
-✓ Install wired. Remaining steps:
+✓ Skill installed, MCP registered, data dir ready. Three steps left, and only the first needs a terminal:
 
-1) Start the bridge server (creates the auth token on first run):
-     node "$REPO_DIR/server/transcript-server.js"
-   Verify:  curl -s http://127.0.0.1:8848/health   # -> {"ok":true,...}
+1) Start the bridge server, with a pairing window open:
+     node "$REPO_DIR/server/transcript-server.js" --pair
+   Leave it running. Verify in another shell:
+     curl -s http://127.0.0.1:8848/health   # -> {"ok":true,...}
    (Data dir is $TRANSCRIPTS_DIR - set MLA_TRANSCRIPTS_DIR and re-run this script to change it.)
 
-2) Load the extension (manual, Chrome UI):
+2) Load the extension in Chrome:
      chrome://extensions → enable Developer mode → Load unpacked → pick:
        $REPO_DIR
-   Pin it; click the icon to open the side panel.
+   Pin it and click the icon. The side panel collects the token from the pairing window by itself -
+   nothing to copy. If the window has expired, run the command in step 1 again with --pair.
 
-3) Paste the server token into the extension Options (once):
-     cat "$TRANSCRIPTS_DIR/.mla-token"
-   Right-click the icon → Options → paste it.
+3) Open Claude Code and ask it to assist your meeting. It loads the meet-live-assist skill and attaches.
 
-4) Register the MCP adapter, so the assistant talks to the server through tools instead of curl:
-     claude mcp add meet-live-assist -- node "$REPO_DIR/server/mcp-server.js"
-   Then restart your Claude session so it picks the tools up. It finds the data dir and the token by
-   asking the running server, so no environment is needed. Not printed as a step you can skip: the
-   skill's step 1 is the \`attach\` tool, and without this it has nothing to call.
-
-5) Run your Claude Code session and invoke the meet-live-assist skill to act as the "brain".
-
-Note: launchd autostart (server/com.mla.meet-transcript-server.plist) is machine-specific - edit its
-absolute paths (node binary, this repo, $TRANSCRIPTS_DIR) before using it, or just run node manually.
+Autostart (optional, macOS): server/install-server.sh installs a launchd job so step 1 stops being a
+step. Pair a new extension against a server that is already running with:
+     node "$REPO_DIR/server/transcript-server.js" --pair
 EOF

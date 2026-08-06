@@ -345,10 +345,38 @@ const store = createStore({
 // adapter finds this file by asking /health where the data dir is.
 const TOKEN_FILE = path.join(TRANSCRIPTS_DIR, '.mla-token');
 let TOKEN = '';
+let TOKEN_IS_NEW = false;
 try {
   if (fs.existsSync(TOKEN_FILE)) TOKEN = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
-  if (!TOKEN) { TOKEN = crypto.randomBytes(24).toString('hex'); fs.writeFileSync(TOKEN_FILE, TOKEN, { mode: 0o600 }); }
+  if (!TOKEN) {
+    TOKEN = crypto.randomBytes(24).toString('hex');
+    fs.writeFileSync(TOKEN_FILE, TOKEN, { mode: 0o600 });
+    TOKEN_IS_NEW = true;
+  }
 } catch (_) { if (!TOKEN) TOKEN = crypto.randomBytes(24).toString('hex'); }
+
+// Pairing: hand the token to the extension once, instead of asking a human to copy 48 hex characters out
+// of a dotfile and into a settings page. That step is where a five-step install loses people, and a
+// mistyped token fails as a silent 403 rather than as an error anyone can read.
+//
+// The window is the whole security argument, so it is deliberately narrow: it opens only when someone with
+// the token asks (or on the very first boot, when nothing can have been paired yet), it lasts two minutes,
+// and the first claim closes it. A claim must carry a `chrome-extension://` Origin, which a web page cannot
+// forge and curl does not send by accident. Whoever claims it is logged by extension id, so a wrong pairing
+// is visible rather than silent.
+//
+// What this does NOT defend against: another extension of yours, already installed and holding a
+// 127.0.0.1 host permission, racing for the window while it is open. That is a real gap and the reason the
+// window is not simply left open - two minutes on demand, not always.
+const PAIR_WINDOW_MS = Math.max(0, parseInt(process.env.MLA_PAIR_WINDOW_MS || '120000', 10));
+let pairUntil = 0;
+function pairOpen() { return PAIR_WINDOW_MS > 0 && Date.now() < pairUntil; }
+function openPairWindow(why) {
+  if (PAIR_WINDOW_MS <= 0) return 0;
+  pairUntil = Date.now() + PAIR_WINDOW_MS;
+  console.log(`[pair] window open for ${Math.round(PAIR_WINDOW_MS / 1000)}s (${why}) - open the extension side panel to pair it`);
+  return pairUntil;
+}
 
 // Meet tab snapshots (Phase 1 visual context): <TRANSCRIPTS_DIR>/snapshots/<session>/<ts>.jpg
 const SNAP_DIR = path.join(TRANSCRIPTS_DIR, 'snapshots');
@@ -712,7 +740,7 @@ function cors(req, res) {
   if (origin.startsWith('chrome-extension://')) res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-MLA-Token');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-MLA-Token, X-MLA-Pair');
   // Chrome Private Network Access: extension -> 127.0.0.1 preflight is blocked without this.
   res.setHeader('Access-Control-Allow-Private-Network', 'true');
 }
@@ -743,8 +771,40 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ authed: (req.headers['x-mla-token'] || '') === TOKEN }));
   }
 
+  // Claim the token, once, while the window is open. Sits before the gate by necessity: the whole point is
+  // that the caller does not have the token yet.
+  if (req.method === 'GET' && (req.url === '/pair' || req.url.startsWith('/pair?'))) {
+    // Two conditions, and the second is the one that matters. An Origin, if the caller sends one at all,
+    // must be the extension's - Chrome does not always attach one to a privileged extension-page fetch, so
+    // its absence cannot be treated as failure. `X-MLA-Pair` closes that hole: a web page cannot set a
+    // custom header without a preflight, and the preflight carries the page's origin straight into the
+    // check above. A local process can of course send both - but a local process can read the token file.
+    const origin = req.headers.origin || '';
+    const claimsExtension = req.headers['x-mla-pair'] === '1';
+    if ((origin && !origin.startsWith('chrome-extension://')) || !claimsExtension) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'pairing is for the extension - run with --pair and open the side panel' }));
+    }
+    if (!pairOpen()) {
+      res.writeHead(409, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'no pairing window open', how: 'meet-live-assist-server --pair' }));
+    }
+    pairUntil = 0; // single use: a second claim in the same window would be someone else's
+    console.log(`[pair] token handed to ${origin} - window closed`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ token: TOKEN, dir: TRANSCRIPTS_DIR }));
+  }
+
   // Everything past here requires the shared token (see TOKEN_FILE above).
   if ((req.headers['x-mla-token'] || '') !== TOKEN) { res.writeHead(403); return res.end('forbidden'); }
+
+  // Re-open the window on a server that is already running - the `--pair` CLI path. Behind the gate, so
+  // only something that can already read the token file can offer it to anyone.
+  if (req.method === 'POST' && req.url === '/pair-open') {
+    const until = openPairWindow('requested');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ ok: until > 0, until, windowMs: PAIR_WINDOW_MS }));
+  }
 
   if (req.method === 'POST' && req.url === '/append') {
     readBody(req, 1e6, (body) => {
@@ -1852,11 +1912,16 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
   });
 }
 
+const WANT_PAIR = process.argv.includes('--pair');
+
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[transcript] listening on http://127.0.0.1:${PORT}`);
   console.log(`[transcript] writing to ${TRANSCRIPTS_DIR}`);
-  console.log(`[transcript] auth token in ${TOKEN_FILE} - paste it into the extension options (cat the file).`);
   console.log(`[transcript] retention: ${RETENTION_DAYS > 0 ? RETENTION_DAYS + ' days' : 'forever'}`);
+  // A brand-new token cannot have been paired with anything yet, so the first boot is the one moment the
+  // window costs nothing to open.
+  if (WANT_PAIR || TOKEN_IS_NEW) openPairWindow(TOKEN_IS_NEW ? 'first run' : '--pair');
+  else console.log(`[transcript] auth token in ${TOKEN_FILE} - or run with --pair to hand it to the extension`);
   purgeOld();
   setInterval(purgeOld, 6 * 3600 * 1000); // re-check a few times a day
 });
@@ -1864,6 +1929,20 @@ server.listen(PORT, '127.0.0.1', () => {
 // Without this a busy port ends in an unhandled 'error' event and eighteen lines of stack trace, which
 // says "the server is broken" when it means "one is already running".
 server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE' && WANT_PAIR) {
+    // `--pair` against an already-running server is the common case, not an error: the launchd job owns the
+    // port and the user just wants to pair a newly installed extension. Ask the running one to open its
+    // window instead of telling them to stop it.
+    const req = http.request({ host: '127.0.0.1', port: PORT, path: '/pair-open', method: 'POST', headers: { 'X-MLA-Token': TOKEN } }, (r) => {
+      if (r.statusCode === 200) console.log(`[pair] the running server has opened a ${Math.round(PAIR_WINDOW_MS / 1000)}s window - open the extension side panel now`);
+      else console.error(`[pair] the running server refused (HTTP ${r.statusCode}) - is ${TOKEN_FILE} the token it uses?`);
+      r.resume();
+      r.on('end', () => process.exit(r.statusCode === 200 ? 0 : 1));
+    });
+    req.on('error', (err) => { console.error(`[pair] cannot reach the running server: ${err.message}`); process.exit(1); });
+    req.end();
+    return;
+  }
   if (e.code === 'EADDRINUSE') {
     console.error(`[transcript] port ${PORT} is already in use - a meet-live-assist server is probably `
       + 'already running (launchctl list | grep meet-transcript). Set PORT= to use another one.');

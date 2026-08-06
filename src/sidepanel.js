@@ -70,6 +70,22 @@ let shareTimer = null;
 let lastAuthWarnAt = 0;
 
 function setStatus(el, text, cls) { el.textContent = text; el.className = 'status ' + cls; }
+
+// Collect the token from the server rather than asking someone to copy 48 hex characters out of a dotfile.
+// Only succeeds while the server has a pairing window open (`meet-live-assist-server --pair`, or its first
+// ever boot), and the first claim closes it. Every other outcome is a normal, quiet no.
+async function tryPair() {
+  try {
+    const r = await fetch(`${serverUrl}/pair`, { headers: { 'X-MLA-Pair': '1' } });
+    if (!r.ok) return false;
+    const { token } = await r.json();
+    if (!token) return false;
+    serverToken = token;
+    await chrome.storage.local.set({ mla_token: token });
+    return true;
+  } catch (_) { return false; }
+}
+
 async function pollServerHealth() {
   if (Date.now() - lastAuthWarnAt < 20000) return;
   try {
@@ -82,7 +98,14 @@ async function pollServerHealth() {
     if (r.status === 404) { setStatus(srvEl, 'server ✓ (restart to update)', 'ok'); return; }
     if (!r.ok) { setStatus(srvEl, 'server ✗ (start it)', 'bad'); return; }
     const { authed } = await r.json();
-    if (!authed) { lastAuthWarnAt = Date.now(); setStatus(srvEl, 'server ✗ (set token in options)', 'bad'); return; }
+    if (!authed) {
+      // Try to pair before nagging. A user who has just run `--pair` sees this resolve itself within one
+      // poll, which is the whole point; if no window is open, nothing happens and the advice below stands.
+      if (await tryPair()) { setStatus(srvEl, 'server ✓ (paired)', 'ok'); fetchHealth(); return; }
+      lastAuthWarnAt = Date.now();
+      setStatus(srvEl, 'server ✗ (run the server with --pair, or set the token in options)', 'bad');
+      return;
+    }
     setStatus(srvEl, 'server ✓', 'ok');
   } catch (_) {
     setStatus(srvEl, 'server ✗ (start it)', 'bad');
