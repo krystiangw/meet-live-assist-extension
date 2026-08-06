@@ -4,7 +4,7 @@ Notable changes only. Earlier history is in `git log` (91 commits from 2026-07-1
 point the project was prepared for a public release, because that is where a version number began to mean
 something to anyone other than the author.
 
-## Unreleased - preparing a free, self-hosted release
+## 0.5.0 - 2026-08-06
 
 The decision behind this section: no hosting. Anyone can install this on their own machine, for free, and
 the point of the work below is that a stranger can actually get to the end of it.

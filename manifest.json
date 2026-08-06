@@ -1,31 +1,56 @@
 {
   "manifest_version": 3,
   "name": "Meet Live Assist",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Live meeting co-pilot for Google Meet & Zoom - transcript, colour-coded advice, action items, snapshots, chat and TTS, all via your own local assistant.",
   "minimum_chrome_version": "116",
   "homepage_url": "https://krystiangw.github.io/meet-live-assist/",
-  "icons": { "16": "src/icons/icon16.png", "32": "src/icons/icon32.png", "48": "src/icons/icon48.png", "128": "src/icons/icon128.png" },
-  "permissions": ["sidePanel", "storage", "alarms", "tabCapture", "offscreen", "scripting", "clipboardWrite", "notifications", "debugger"],
+  "icons": {
+    "16": "src/icons/icon16.png",
+    "32": "src/icons/icon32.png",
+    "48": "src/icons/icon48.png",
+    "128": "src/icons/icon128.png"
+  },
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "alarms",
+    "tabCapture",
+    "offscreen",
+    "scripting",
+    "clipboardWrite",
+    "notifications",
+    "debugger"
+  ],
   "host_permissions": [
     "https://meet.google.com/*",
     "https://*.zoom.us/*",
     "http://127.0.0.1:8848/*"
   ],
-  "optional_host_permissions": ["<all_urls>"],
+  "optional_host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "service_worker": "src/background.js",
     "type": "module"
   },
   "content_scripts": [
     {
-      "matches": ["https://meet.google.com/*"],
-      "js": ["src/content.js"],
+      "matches": [
+        "https://meet.google.com/*"
+      ],
+      "js": [
+        "src/content.js"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://*.zoom.us/wc/*"],
-      "js": ["src/content-zoom.js"],
+      "matches": [
+        "https://*.zoom.us/wc/*"
+      ],
+      "js": [
+        "src/content-zoom.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true
     }
@@ -36,14 +61,22 @@
   "options_page": "src/options.html",
   "action": {
     "default_title": "Meet Live Assist",
-    "default_icon": { "16": "src/icons/icon16.png", "32": "src/icons/icon32.png", "48": "src/icons/icon48.png", "128": "src/icons/icon128.png" }
+    "default_icon": {
+      "16": "src/icons/icon16.png",
+      "32": "src/icons/icon32.png",
+      "48": "src/icons/icon48.png",
+      "128": "src/icons/icon128.png"
+    }
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: https: http://127.0.0.1:8848"
   },
   "commands": {
     "toggle-stt": {
-      "suggested_key": { "default": "Ctrl+Shift+U", "mac": "Command+Shift+U" },
+      "suggested_key": {
+        "default": "Ctrl+Shift+U",
+        "mac": "Command+Shift+U"
+      },
       "description": "Toggle local speech-to-text capture of the meeting tab"
     }
   }
