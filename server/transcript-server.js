@@ -683,7 +683,7 @@ function flushWake(session) {
   if (b.timer) { clearTimeout(b.timer); b.timer = null; }
   if (!b.lines.length) return;
   try {
-    fs.appendFileSync(wakeFileFor(session), b.lines.join('', OWNER_ONLY));
+    fs.appendFileSync(wakeFileFor(session), b.lines.join(''), OWNER_ONLY);
     // One line per brain turn - this is the log to read when tuning the WAKE_* thresholds for a real call.
     console.log(`[wake] ${nameOf(session)} +${b.lines.length} lines (window ${b.window}ms)`);
   } catch (e) { console.error('[transcript] wake write failed', e); }
@@ -831,7 +831,7 @@ const server = http.createServer((req, res) => {
       try {
         if (!seenSessions.has(session)) {
           seenSessions.add(session);
-          fs.appendFileSync(file, `==== ${nameOf(session, OWNER_ONLY)} - started ${new Date().toISOString()} ====\n`);
+          fs.appendFileSync(file, `==== ${nameOf(session)} - started ${new Date().toISOString()} ====\n`, OWNER_ONLY);
           console.log(`[transcript] new session → ${file}`);
         }
         if (line) {
@@ -954,7 +954,7 @@ const server = http.createServer((req, res) => {
             const file = fileFor(session);
             if (!seenSessions.has(session)) {
               seenSessions.add(session);
-              fs.appendFileSync(file, `==== ${nameOf(session, OWNER_ONLY)} - started ${new Date().toISOString()} ====\n`);
+              fs.appendFileSync(file, `==== ${nameOf(session)} - started ${new Date().toISOString()} ====\n`, OWNER_ONLY);
             }
             // Mic STT is the user (co-pilot) → 'You' (authorizes actions). tabCapture STT is remote
             // participants; whisper does no diarization, so there is no name to attach - unless the user
@@ -1361,7 +1361,7 @@ const server = http.createServer((req, res) => {
       const hms = [dt.getHours(), dt.getMinutes(), dt.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
       try {
         const file = fileFor(session);
-        if (!seenSessions.has(session)) { seenSessions.add(session); fs.appendFileSync(file, `==== ${nameOf(session, OWNER_ONLY)} - started ${new Date().toISOString()} ====\n`); }
+        if (!seenSessions.has(session)) { seenSessions.add(session); fs.appendFileSync(file, `==== ${nameOf(session)} - started ${new Date().toISOString()} ====\n`, OWNER_ONLY); }
         const block = `\n[${hms}] ===== PRE-JOIN CONTEXT (imported) =====\n${text}\n=================================================\n`;
         fs.appendFileSync(file, block, OWNER_ONLY);
         queueForWake(session, block); // imported background is worth a turn

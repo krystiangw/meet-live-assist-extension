@@ -143,6 +143,14 @@ try {
   const appended = await fetch(`${base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session, line }) });
   check('an authenticated append is accepted', appended.status === 204, `status ${appended.status}`);
 
+  // Owner-only at CREATION, which is the only moment the mode option does anything. The privacy fix that
+  // introduced OWNER_ONLY put it inside `nameOf(...)` and `join(...)` instead of passing it to
+  // appendFileSync, in four places - so every transcript, wake channel and chat log this server had ever
+  // created was still world-readable while the code read as though it were not. 257 such files were on the
+  // author's disk. A statSync here is the only thing that can tell the difference.
+  const txtMode = existsSync(path.join(dir, `${session}.txt`)) ? (statSync(path.join(dir, `${session}.txt`)).mode & 0o777) : null;
+  check('the transcript file is created owner-only', txtMode === 0o600, txtMode === null ? 'missing' : txtMode.toString(8));
+
   const transcript = path.join(dir, `${session}.txt`);
   check('the transcript file is created', existsSync(transcript));
   check('the appended line is in the transcript', existsSync(transcript) && readFileSync(transcript, 'utf8').includes(line));
@@ -189,6 +197,11 @@ try {
   await sleep(600); // let the wake gate release the urgent line
   const firstPoll = await (await fetch(pollUrl, { headers: auth })).json();
   check('poll returns the batch the wake gate released', firstPoll.batch.includes('must reach the transcript'), JSON.stringify(firstPoll.batch));
+  // The wake channel carries the same words as the transcript, so it needs the same mode. It could only be
+  // checked once the gate had actually released a batch and created the file.
+  const wakePath = path.join(dir, `${session}.wake`);
+  const wakeMode = existsSync(wakePath) ? (statSync(wakePath).mode & 0o777) : null;
+  check('and the wake channel it wrote is owner-only too', wakeMode === 0o600, wakeMode === null ? 'missing' : wakeMode.toString(8));
 
   // Consent and lifecycle must NOT be durable, which is the opposite requirement to everything else
   // here. `drive` is the user allowing an agent to click inside their logged-in tab and `postChat` is it
