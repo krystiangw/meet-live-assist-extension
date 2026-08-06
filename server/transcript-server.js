@@ -1561,6 +1561,14 @@ const server = http.createServer((req, res) => {
     const statusOnly = u.searchParams.get('statusOnly') === '1';
     const asText = u.searchParams.get('format') === 'text';
 
+    // A poll IS proof of life, and it is the only reliable one. The panel's liveness pill reads the
+    // heartbeat that the `working` tool writes, but an assistant only gets a turn when the wake loop hands
+    // it something - so a quiet stretch of meeting left a perfectly healthy assistant looking dead after
+    // 45 seconds. Perverse, because the whole job of the wake gate is to make quiet stretches common: the
+    // better it worked, the more often the pill lied. The loop polls every two seconds regardless, so take
+    // the heartbeat from here and let `working` keep doing what only it can - the activity text.
+    brainPing.set(s, Date.now());
+
     const ap = autopilot.get(s) || { create: false, postChat: false };
     const status = {
       state: control.get(s) || 'running',

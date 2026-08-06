@@ -119,6 +119,18 @@ try {
   check('and the heartbeat age still tells the truth', bp3.ageMs >= 700, JSON.stringify(bp3));
   await post('/brain-ping', { session, status: 'reading the shared slide' }); // back to live for the rest
 
+  // Liveness must not depend on the assistant having something to say. It used to: the pill read only the
+  // heartbeat that `working` writes, and `working` is called once per turn - but a turn only happens when
+  // the wake gate releases a batch. A quiet meeting made a live assistant look dead within 45 seconds,
+  // which is the case the gate is designed to produce.
+  await post('/brain-ping', { session, status: '' });
+  const beforeQuiet = await (await get(`/brain-ping?session=${q}`)).json();
+  check('the heartbeat starts fresh', beforeQuiet.ageMs < 3000, JSON.stringify(beforeQuiet.ageMs));
+  await sleep(1200);
+  await get(`/poll?session=${q}&consumer=the-assistant`); // the wake loop, saying nothing, as in a quiet call
+  const afterQuiet = await (await get(`/brain-ping?session=${q}`)).json();
+  check('a poll alone keeps the assistant looking alive', afterQuiet.ageMs < 500, JSON.stringify(afterQuiet.ageMs));
+
   const snapSeq = await (await get(`/snapshot-request?session=${q}`)).json();
   check('the panel polls the snapshot request counter', typeof snapSeq.seq === 'number', JSON.stringify(snapSeq));
   await post('/snapshot-request', { session });
