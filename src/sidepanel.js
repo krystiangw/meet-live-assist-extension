@@ -228,7 +228,9 @@ function nowMs() { return performance.now(); }
 let nameRe = null;
 let mentionAt = 0;
 function buildNameRe(names) {
-  const parts = (names || 'Krystian, Chris, Christian').split(',').map((s) => s.trim()).filter(Boolean)
+  // No default: a shipped name list would fire someone else's mention alerts on a stranger's meeting,
+  // and a missed alert is a smaller failure than an alert about a person who is not in the room.
+  const parts = String(names || '').split(',').map((s) => s.trim()).filter(Boolean)
     .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   nameRe = parts.length ? new RegExp(`\\b(${parts.join('|')})\\b`, 'i') : null;
 }
@@ -258,7 +260,7 @@ function appendLine({ ts, speaker, text }) {
 // **bold**, and `code`. Everything else stays literal text.
 // Jira ticket keys (e.g. PROJ-529) become links to the configured Jira. Deny common non-Jira tokens
 // that look like keys (UTF-8, GPT-4, SHA-256, …) so they aren't wrongly linked.
-let jiraBase = 'https://your-team.atlassian.net';
+let jiraBase = ''; // set it in Options; empty means ticket keys stay plain text rather than linking somewhere wrong
 const JIRA_DENY = /^(UTF|GPT|SHA|ISO|RFC|CVE|AES|IPV|MP|ID|PR|CI|HTTP|HTTPS|COVID|IE|MS|H)$/;
 function jiraLink(key) {
   if (!jiraBase || JIRA_DENY.test(key.split('-')[0])) return null;

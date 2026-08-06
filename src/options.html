@@ -23,12 +23,14 @@
   <div class="hint">Local transcript-server.js endpoint. Lines are POSTed to <code>/append</code>; the Claude Code session tails the file and advises.</div>
 
   <label for="serverToken">Server token</label>
-  <input id="serverToken" type="text" placeholder="paste the token from the server" autocomplete="off" />
-  <div class="hint">Required. Protects the local server so no website can reach it. Get it with
-    <code>cat ~/projects/meet-live-assist/transcripts/.mla-token</code> (printed on server start too).</div>
+  <input id="serverToken" type="text" placeholder="filled in automatically when you pair" autocomplete="off" />
+  <div class="hint">Required. Protects the local server so no website can reach it. Normally you never touch
+    this: start the server with <code>--pair</code> and the side panel collects the token by itself. To fill
+    it by hand instead, read <code>.mla-token</code> in the server's data folder (the server prints the path
+    on startup).</div>
 
   <label for="selfNames">Your name(s)</label>
-  <input id="selfNames" type="text" placeholder="Krystian, Chris, Christian" autocomplete="off" />
+  <input id="selfNames" type="text" placeholder="e.g. Ada, Addy" autocomplete="off" />
   <div class="hint">Comma-separated. The panel alerts you when one of these is mentioned in the call.</div>
 
   <label for="announce">
@@ -42,7 +44,7 @@
   <div class="hint">Sent as you, once per meeting. Say it in whatever language the room speaks.</div>
 
   <label for="jiraBase">Jira base URL</label>
-  <input id="jiraBase" type="text" placeholder="https://your-team.atlassian.net" autocomplete="off" />
+  <input id="jiraBase" type="text" placeholder="https://yourteam.atlassian.net" autocomplete="off" />
   <div class="hint">Ticket keys like <code>PROJ-529</code> in advice / chat / transcript become links to
     <code>&lt;base&gt;/browse/…</code>. Leave blank to disable Jira linking.</div>
 

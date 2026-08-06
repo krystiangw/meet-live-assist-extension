@@ -49,7 +49,7 @@ chrome.storage.local.get(['serverUrl', 'ttsVoiceEn', 'ttsVoicePl', 'mla_token', 
   input.value = c.serverUrl || DEFAULT_SERVER;
   tokenInput.value = c.mla_token || '';
   namesInput.value = c.mla_names || '';
-  jiraInput.value = c.mla_jira_base !== undefined ? c.mla_jira_base : 'https://your-team.atlassian.net';
+  jiraInput.value = c.mla_jira_base || '';
   loadVoices(c.ttsVoiceEn || DEFAULT_EN, c.ttsVoicePl || DEFAULT_PL);
 });
 

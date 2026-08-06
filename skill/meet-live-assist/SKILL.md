@@ -304,7 +304,7 @@ separate request needed.
   unless it's on** (it's an outbound message to all participants; the toggle is the user's explicit opt-in).
 
 ### Visual context (snapshots)
-Frames land in `<meet-live-assist>/transcripts/snapshots/<session>/<ts>.jpg` (newest = latest; ~40 kept, rolling).
+Frames land in `__MLA_TRANSCRIPTS__/snapshots/<session>/<ts>.jpg` (newest = latest; ~40 kept, rolling).
 Capture policy: **while someone shares their screen** the panel samples the tab and forwards a frame **only
 when it changed materially** (perceptual-hash diff, ~5s floor, ~60s heartbeat) - so a static slide is ~1
 frame/min, not a flood; **with no sharing there is no automatic capture** - only on demand (📷 or *you*).
@@ -481,8 +481,9 @@ Either path counts as confirmation:
   **explicit typed confirmation** in the session, and restate the action first. This covers anything that
   leaves the building or can't be undone: sending Slack/email, merging PRs, prod releases, approving CI
   jobs, deleting data, transitioning tickets others depend on.
-  - **Outbound messages stay drafts only** (Slack/DM/email) - draft in `krystian-voice`, never auto-send.
-    The sole standing exception (PR review replies) does not apply to live-meeting actions.
+  - **Outbound messages stay drafts only** (Slack/DM/email) - write the draft, hand it over, never send it
+    yourself. A message that goes out mid-call cannot be recalled, and __MLA_USER__ is in a meeting and
+    cannot review it properly.
 
 ### Flow
 1. Hear an action → post `🟠 ACTION` with exactly what you'd do (and whose request it was).

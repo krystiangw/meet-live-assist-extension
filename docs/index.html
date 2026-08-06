@@ -23,6 +23,8 @@
   .logo { width: 76px; height: 76px; border-radius: 18px; box-shadow: 0 8px 30px color-mix(in srgb, var(--brand2) 40%, transparent); }
   h1 { font-size: 2.2rem; margin: 18px 0 6px; letter-spacing: -0.02em; }
   .tag { color: var(--muted); font-size: 1.15rem; margin: 0 auto; max-width: 560px; }
+  .tag.claim { color: var(--fg); font-size: 1.35rem; font-weight: 600; max-width: 620px; }
+  .tag + .tag { margin-top: 14px; font-size: 1rem; }
   .pill { display: inline-block; margin-top: 18px; padding: 5px 14px; border-radius: 20px; font-size: .85rem;
     background: color-mix(in srgb, var(--brand1) 15%, transparent); color: var(--brand1); font-weight: 600; }
   section { padding: 36px 0; border-top: 1px solid var(--line); }
@@ -61,11 +63,28 @@
     <g fill="#5a6bff"><rect x="40" y="51" width="7" height="16" rx="3.5"/><rect x="52" y="45" width="7" height="28" rx="3.5"/><rect x="64" y="40" width="7" height="38" rx="3.5"/><rect x="76" y="46" width="7" height="26" rx="3.5"/><rect x="88" y="52" width="7" height="14" rx="3.5"/></g>
   </svg>
   <h1>Meet Live Assist</h1>
-  <p class="tag">A live AI assistant for Google Meet. It reads the call in real time and - using <em>your</em> context - feeds you advice, visual context, chat, and can even speak into the call on your behalf.</p>
-  <span class="pill">Local-first · your machine, your keys, your context</span>
+  <p class="tag claim">Your own assistant sees and hears your meeting - and nothing leaves your disk.</p>
+  <p class="tag">It reads a Google Meet or Zoom call as it happens and answers you in a side panel while the
+  call is still going: what to say, what was just decided, who owns what, what you agreed to that you
+  should not have. The transcript is a file on your computer. There is no account and no server of ours.</p>
+  <span class="pill">Free · run it yourself · needs Claude Code</span>
 </header>
 
 <div class="wrap">
+
+<section>
+  <h2>Before you get excited: two things this asks of you</h2>
+  <p><strong>You need <a href="https://claude.com/claude-code">Claude Code</a>.</strong> This ships the eyes,
+  ears and hands - the capture, the panel, the local bridge - but not the brain. The brain is a Claude Code
+  session on your own machine, running a skill the installer sets up for you. Without it you get a working
+  transcript recorder and an empty advice pane, which is not what the rest of this page shows.</p>
+  <p><strong>The meeting is other people's conversation too.</strong> Turning on captions is invisible to
+  everyone else, unlike recording, which Meet badges. So by default this posts one line into the meeting
+  chat when capture starts, saying an assistant is transcribing locally. You can edit that line or switch it
+  off. Some places require everyone's agreement before a conversation may be recorded or transcribed - that
+  is a call only you can make, and the <a href="https://github.com/krystiangw/meet-live-assist-extension/blob/main/PRIVACY.md">privacy
+  policy</a> says so rather than burying it.</p>
+</section>
 
 <section>
   <h2>What it does</h2>
@@ -105,30 +124,39 @@ Chrome extension  ──HTTP──►  Local bridge server (127.0.0.1:8848)
 </section>
 
 <section>
-  <h2>Integrate it</h2>
+  <h2>Install it</h2>
+  <p>Three steps, and only the first two need a terminal. Requires Node 20+ and Chrome 116+.</p>
   <ol class="steps">
     <li>
-      <h3>Run the bridge server</h3>
-      <p>A tiny zero-dependency Node server sinks the transcript and carries advice/chat/TTS. Autostart it with launchd:</p>
-      <pre><code>cp server/com.mla.meet-transcript-server.plist ~/Library/LaunchAgents/
-launchctl load -w ~/Library/LaunchAgents/com.mla.meet-transcript-server.plist
+      <h3>Clone and run the installer</h3>
+      <p>It installs the skill, registers the tools your assistant will call, and prepares the folder your
+      meetings are written to. It changes nothing outside your home directory.</p>
+      <pre><code>git clone https://github.com/krystiangw/meet-live-assist-extension.git
+cd meet-live-assist-extension
+./install.sh</code></pre>
+    </li>
+    <li>
+      <h3>Start the bridge server and leave it running</h3>
+      <p>A zero-dependency Node server, bound to <code>127.0.0.1</code>. <code>--pair</code> opens a
+      two-minute window for the extension to collect its access token by itself - there is nothing to copy
+      and paste.</p>
+      <pre><code>node server/transcript-server.js --pair
 curl -s http://127.0.0.1:8848/health   # → {"ok":true,...}</code></pre>
     </li>
     <li>
-      <h3>Load the extension</h3>
-      <p><code>chrome://extensions</code> → enable <strong>Developer mode</strong> → <strong>Load unpacked</strong> → pick this folder. Pin it and click the icon to open the side panel.</p>
+      <h3>Load the extension, then ask your assistant</h3>
+      <p><code>chrome://extensions</code> → enable <strong>Developer mode</strong> →
+      <strong>Load unpacked</strong> → pick the folder you just cloned. Pin it and click the icon; the panel
+      pairs itself with the server. Then open Claude Code and ask it to assist your meeting - it loads the
+      <code>meet-live-assist</code> skill, attaches to the live call, and starts answering in the panel.</p>
+      <p class="note">Pairing window expired? Run the same <code>--pair</code> command again; against an
+      already-running server it just re-opens the window. Or paste the token by hand from
+      <code>&lt;data dir&gt;/.mla-token</code> into the extension's Options - that path still works.</p>
     </li>
     <li>
-      <h3>Paste the server token</h3>
-      <p>The server generates an auth token on first start so no other website can reach it. Copy it into the
-      extension <strong>Options</strong> (the panel's ⚙ shows a setup checklist):</p>
-      <pre><code>cat ~/meet-live-assist/transcripts/.mla-token</code></pre>
-    </li>
-    <li>
-      <h3>Give the brain the tools</h3>
-      <p>Register the MCP adapter once, then restart your session:</p>
-      <pre><code>claude mcp add meet-live-assist -- npx -y -p meet-live-assist-server meet-live-assist-mcp</code></pre>
-      <p>Now load the <code>meet-live-assist</code> skill and ask it to watch your meeting. It <code>attach</code>es to the live call, <code>poll</code>s for what is worth a turn, and posts advice, board items and chat replies back to the panel. No file paths to configure - the adapter asks the server where its data is.</p>
+      <h3>(Optional) Autostart the server</h3>
+      <p>On macOS, <code>./server/install-server.sh</code> installs a launchd job so step 2 stops being a
+      step. It works out your node binary and paths itself.</p>
     </li>
     <li>
       <h3>(Optional) Enable "speak into the call"</h3>
@@ -183,14 +211,43 @@ curl -L -o ~/.local/share/whisper/ggml-base.bin \
 </section>
 
 <section>
-  <h2>Privacy</h2>
-  <p class="note">Everything runs locally: the transcript, snapshots and advice never leave your machine except through the LLM your own brain session uses. The local server is token-authenticated, stored data is auto-purged after a retention window, and any meeting can be wiped from the panel. Capturing a meeting is recording - get participants' consent (the panel shows a one-time reminder), especially on external calls.</p>
+  <h2>Is it safe to install?</h2>
+  <p>You are about to let something listen to your meetings, so here is what it actually does, stated
+  plainly enough that you can check every line against the source.</p>
+  <table>
+    <tr><th>Question</th><th>Answer</th></tr>
+    <tr><td>Where does my transcript go?</td><td>A folder on your disk. Files are owner-only
+      (<code>0600</code>), the folder is <code>0700</code>.</td></tr>
+    <tr><td>Does anything phone home?</td><td>No. No accounts, no analytics, no first-party server. The
+      extension talks only to <code>127.0.0.1</code>.</td></tr>
+    <tr><td>What about the AI?</td><td>The assistant is <em>your</em> Claude Code session. Whatever you route
+      to it is subject to your own provider's terms - that choice and that configuration are yours.</td></tr>
+    <tr><td>Can a website reach the server?</td><td>No. Every route but <code>/health</code> needs a token,
+      and the server accepts cross-origin requests only from the extension.</td></tr>
+    <tr><td>How long is it kept?</td><td>14 days by default, then purged automatically. 🗑 in the panel wipes
+      one meeting - transcript, chat, summary, snapshots, state - immediately.</td></tr>
+    <tr><td>How do I remove all of it?</td><td>Delete the data folder, delete
+      <code>~/.claude/skills/meet-live-assist</code>, run <code>claude mcp remove meet-live-assist</code>,
+      remove the extension.</td></tr>
+    <tr><td>Do the others in the call know?</td><td>Only if you tell them. By default it posts one line in
+      the meeting chat saying so, and tells you in the panel when that line could not be delivered.</td></tr>
+  </table>
+  <p class="note">Capturing a meeting is recording. Disclosure is not consent - where consent is required,
+  getting it is on you.</p>
+</section>
+
+<section>
+  <h2>Tell us if it is any good</h2>
+  <p>This is early and free, and the only thing that decides whether it grows is whether anyone finds it
+  useful. If you try it - especially if it fails, or you gave up halfway through the install - say so in
+  <a href="https://github.com/krystiangw/meet-live-assist-extension/discussions">GitHub Discussions</a>.
+  A sentence about what you expected and what happened is worth more than a bug report template.</p>
 </section>
 
 </div>
 
 <footer>
-  Meet Live Assist · local-first live meeting assistant · internal / private preview
+  Meet Live Assist · a local-first live meeting assistant · runs entirely on your own machine
 </footer>
 </body>
 </html>
