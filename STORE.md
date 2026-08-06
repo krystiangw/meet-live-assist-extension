@@ -71,3 +71,11 @@ Privacy policy: `PRIVACY.md`.
       so an unexpected prompt reads as a failure. Same for starting co-pilot.
 - [ ] Pick a licence and decide whether the source repo goes public alongside the listing.
 - [ ] Submit unlisted first; go public once the review comes back clean.
+
+## Disclosure to other participants
+
+Capture posts a single line into the meeting chat when it starts ("I'm using an AI assistant that
+transcribes this meeting locally on my machine"), sent as the user, once per meeting. It is **on by
+default**; the wording is editable and it can be turned off in Options. Turning captions on is invisible to
+the rest of the room, so this is what makes the transcript visible to them. Delivery is verified and a
+failure is surfaced in the panel rather than assumed.

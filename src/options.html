@@ -31,6 +31,16 @@
   <input id="selfNames" type="text" placeholder="Krystian, Chris, Christian" autocomplete="off" />
   <div class="hint">Comma-separated. The panel alerts you when one of these is mentioned in the call.</div>
 
+  <label for="announce">
+    <input id="announce" type="checkbox" style="width:auto; margin-right:8px;" />
+    Tell the meeting an AI assistant is listening
+  </label>
+  <div class="hint">Posts one line into the meeting chat when capture starts, so the other participants know. Turning captions on is invisible to them, unlike recording - this is what makes it visible. On by default.</div>
+
+  <label for="announceText">What it says</label>
+  <input id="announceText" type="text" autocomplete="off" />
+  <div class="hint">Sent as you, once per meeting. Say it in whatever language the room speaks.</div>
+
   <label for="jiraBase">Jira base URL</label>
   <input id="jiraBase" type="text" placeholder="https://your-team.atlassian.net" autocomplete="off" />
   <div class="hint">Ticket keys like <code>PROJ-529</code> in advice / chat / transcript become links to

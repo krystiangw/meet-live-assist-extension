@@ -1223,6 +1223,47 @@ async function postMode(mode) {
 }
 modeSel.addEventListener('change', () => { chrome.storage.local.set({ mla_mode: modeSel.value }); postMode(modeSel.value); });
 
+// Tell the room. Enabling captions is invisible to the other participants - unlike recording, which Meet
+// badges - so without this nobody in the meeting has any way to know a transcript is being taken. Posted
+// once per meeting, as the user, with text they control. Off is a deliberate choice, not the default.
+//
+// It goes through /callchat rather than straight to the content script so it reuses the delivery path that
+// already works: open the chat panel if closed, type through the real input pipeline, verify the composer
+// cleared. And so a failure is reported rather than assumed.
+const ANNOUNCE_DEFAULT = "I'm using an AI assistant that transcribes this meeting locally on my machine. Say the word if you'd rather I turned it off.";
+async function announceToMeeting(session) {
+  try {
+    const c = await chrome.storage.local.get(['mla_announce', 'mla_announce_text']);
+    if (c.mla_announce === false) return;
+    const text = (c.mla_announce_text || '').trim() || ANNOUNCE_DEFAULT;
+    // Once per meeting, even across a panel reload or a service-worker recycle. Session storage, so a new
+    // browser session announces again - which is right, because that is a new call.
+    const mark = `mla_announced_${session}`;
+    const seen = await chrome.storage.session.get([mark]);
+    if (seen[mark]) return;
+    await chrome.storage.session.set({ [mark]: true });
+
+    const r = await fetch(`${serverUrl}/callchat`, {
+      method: 'POST', headers: hdrs(true), body: JSON.stringify({ session, text }),
+    });
+    if (!r.ok) return;
+    const { seq } = await r.json();
+    // The content script reports whether the composer actually cleared. Silence here would mean the user
+    // believes the room was told when it was not, which is worse than not offering the feature.
+    setTimeout(async () => {
+      try {
+        const res = await fetch(`${serverUrl}/callchat-result?session=${encodeURIComponent(session)}&since=${seq - 1}`, { headers: hdrs() });
+        if (!res.ok) return;
+        const { items } = await res.json();
+        const mine = (items || []).find((i) => i.seq === seq);
+        if (mine && !mine.ok) {
+          appendChat({ role: 'agent', text: `⚠ Could not post the disclosure to the meeting chat (${mine.reason || 'unknown'}). The room has not been told.` });
+        }
+      } catch (_) {}
+    }, 6000);
+  } catch (_) {}
+}
+
 function setSession(session) {
   if (session && session !== currentSession) {
     currentSession = session; lastAdviceSeq = 0; lastItemsSeq = 0; lastReqSeq = -1; lastChatSeq = 0; lastEditSeq = -1; lastDomReqSeq = -1; lastDbgReqSeq = -1; lastCallChatSeq = -1; lastActSeq = -1;
@@ -1230,6 +1271,7 @@ function setSession(session) {
     setStatus(brainEl, '🧠 ?', 'idle');
     cueArmed = false; setTimeout(() => { cueArmed = true; }, 2500); // don't cue on initial backfill
     postMode(modeSel.value); // register the current mode for the new session
+    announceToMeeting(session);
     loadAutopilot(); loadPro(); // sync toggles to this session's stored state
     pollAdvice(); pollItems(); pollCallChat(); pollSnapRequest(); pollChat(); pollPro(); pollBrain();
   }

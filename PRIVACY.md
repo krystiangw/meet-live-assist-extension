@@ -38,6 +38,21 @@ not transmit data off your device on its own.
 - You can **wipe a single meeting's data** at any time from the panel (🗑), which deletes its transcript,
   chat, summary, snapshots **and stored state** immediately.
 
+## Telling the room
+
+Enabling captions is **invisible to the other participants** - unlike recording, which Meet badges. So by
+default this extension posts one line into the meeting chat when capture starts:
+
+> I'm using an AI assistant that transcribes this meeting locally on my machine. Say the word if you'd
+> rather I turned it off.
+
+It is sent as you, once per meeting, and you can edit the wording or turn it off in Options. If it cannot be
+delivered (the chat is closed by the organiser, for instance) the panel tells you, so you never believe the
+room was informed when it was not.
+
+This is disclosure, not consent. Some jurisdictions require every participant to agree before a
+conversation may be recorded or transcribed; see below.
+
 ## Recording & consent
 Capturing a meeting transcript and screenshots is a form of recording. You are responsible for obtaining
 participants' consent where required (e.g. two-party-consent jurisdictions), especially on external calls.

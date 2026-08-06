@@ -1,3 +1,9 @@
+// The disclosure the extension posts into the meeting chat. Default ON: enabling captions is invisible to
+// the other participants, unlike recording, so without this nobody in the room has any way to know. Making
+// it a setting they must actively turn OFF is the difference between a product that informs by default and
+// one that hides by default.
+const ANNOUNCE_DEFAULT = "I'm using an AI assistant that transcribes this meeting locally on my machine. Say the word if you'd rather I turned it off.";
+
 const input = document.getElementById('serverUrl');
 const tokenInput = document.getElementById('serverToken');
 const namesInput = document.getElementById('selfNames');
@@ -34,7 +40,12 @@ async function loadVoices(selEn, selPl) {
   }
 }
 
-chrome.storage.local.get(['serverUrl', 'ttsVoiceEn', 'ttsVoicePl', 'mla_token', 'mla_names', 'mla_jira_base']).then((c) => {
+const announceBox = document.getElementById('announce');
+const announceTextInput = document.getElementById('announceText');
+
+chrome.storage.local.get(['serverUrl', 'ttsVoiceEn', 'ttsVoicePl', 'mla_token', 'mla_names', 'mla_jira_base', 'mla_announce', 'mla_announce_text']).then((c) => {
+  announceBox.checked = c.mla_announce !== false; // absent means never configured, and the default is on
+  announceTextInput.value = c.mla_announce_text || ANNOUNCE_DEFAULT;
   input.value = c.serverUrl || DEFAULT_SERVER;
   tokenInput.value = c.mla_token || '';
   namesInput.value = c.mla_names || '';
@@ -59,7 +70,7 @@ document.getElementById('enableMic').addEventListener('click', async () => {
 });
 
 document.getElementById('save').addEventListener('click', async () => {
-  await chrome.storage.local.set({ serverUrl: serverUrl(), ttsVoiceEn: enSel.value, ttsVoicePl: plSel.value, mla_token: (tokenInput.value || '').trim(), mla_names: (namesInput.value || '').trim(), mla_jira_base: (jiraInput.value || '').trim() });
+  await chrome.storage.local.set({ serverUrl: serverUrl(), ttsVoiceEn: enSel.value, ttsVoicePl: plSel.value, mla_token: (tokenInput.value || '').trim(), mla_names: (namesInput.value || '').trim(), mla_jira_base: (jiraInput.value || '').trim(), mla_announce: announceBox.checked, mla_announce_text: (announceTextInput.value || '').trim() || ANNOUNCE_DEFAULT });
   saved.style.opacity = '1';
   setTimeout(() => { saved.style.opacity = '0'; }, 1500);
 });
