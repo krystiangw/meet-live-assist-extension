@@ -785,14 +785,20 @@ const server = http.createServer((req, res) => {
       res.writeHead(403, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ error: 'pairing is for the extension - run with --pair and open the side panel' }));
     }
+    // 200, not 4xx, and this is not politeness. The panel retries this on a timer while it has no token, and
+    // Chrome writes a console line for every failed request - a fresh install would open to a console full
+    // of red having done nothing wrong. `/auth-check` above exists for exactly this reason. A refusal above
+    // stays a 403 because only a caller doing something odd can trigger it, and there the noise is the point.
     if (!pairOpen()) {
-      res.writeHead(409, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ error: 'no pairing window open', how: 'meet-live-assist-server --pair' }));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, reason: 'no pairing window open', how: 'meet-live-assist-server --pair' }));
     }
     pairUntil = 0; // single use: a second claim in the same window would be someone else's
-    console.log(`[pair] token handed to ${origin} - window closed`);
+    // Naming the claimant is the only way a wrong pairing is ever noticed. An absent Origin is worth saying
+    // out loud rather than logging a blank, because it means the claim did not come from a browser.
+    console.log(`[pair] token handed to ${origin || 'a caller that sent no Origin (not a browser)'} - window closed`);
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ token: TOKEN, dir: TRANSCRIPTS_DIR }));
+    return res.end(JSON.stringify({ ok: true, token: TOKEN, dir: TRANSCRIPTS_DIR }));
   }
 
   // Everything past here requires the shared token (see TOKEN_FILE above).

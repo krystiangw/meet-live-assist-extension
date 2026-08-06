@@ -91,9 +91,12 @@ try {
   check('the extension can claim the token on a first boot', paired.status === 200, `status ${paired.status}`);
   check('and it is the same token the server actually enforces', paired.ok && (await paired.json()).token === token);
   // Single use, or a second extension - or a second anything - collects the same secret from the window
-  // the first one left open.
+  // the first one left open. Answered 200-with-ok:false rather than a 4xx: the panel polls this while it has
+  // no token, and Chrome writes a console line per failed request, so a fresh install would look broken.
   const pairAgain = await fetch(`${base}/pair`, { headers: { 'X-MLA-Pair': '1', Origin: 'chrome-extension://smoketest' } });
-  check('the claim closes the window behind it', pairAgain.status === 409, `status ${pairAgain.status}`);
+  const againBody = pairAgain.ok ? await pairAgain.json() : {};
+  check('the claim closes the window behind it', againBody.token === undefined, JSON.stringify(againBody));
+  check('and the closed window is not an error the console will shout about', pairAgain.status === 200, `status ${pairAgain.status}`);
 
   const reopenNoToken = await fetch(`${base}/pair-open`, { method: 'POST' });
   check('re-opening the window needs the token', reopenNoToken.status === 403, `status ${reopenNoToken.status}`);
