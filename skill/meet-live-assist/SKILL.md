@@ -323,6 +323,17 @@ Call **`snapshot_request`**, wait a couple of seconds for the panel to capture a
 Requires the extension panel open on the Meet tab (it does the actual capture). If nothing new appears, the
 Meet tab probably isn't the active tab - fall back to advising from the transcript.
 
+### When the room is dense - `wake_mode`
+
+The wake gate holds back small talk so a 40-minute call does not cost hundreds of turns. Some calls have no
+small talk: an interview, a negotiation, a design review where every line matters. When the user says the
+call is dense, or asks not to be filtered, call **`wake_mode` with `mode: "all"`** and say you have done it.
+Switch back with `"gated"` if they say it is too much.
+
+Two things to be straight about, because this is the most misread part of the server: the transcript file
+always had **every** line either way - the gate only ever decided **when to wake you** - and `all` costs
+roughly **four times the turns**, so it is a deliberate choice for one call, not a default.
+
 ## Meeting modes - calibrate how much you push
 
 The panel sets a **mode** per meeting; read `mode=` from `/status` (step 2, default `auto`) and calibrate:
