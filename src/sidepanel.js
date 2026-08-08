@@ -95,9 +95,11 @@ async function pollServerHealth() {
     const r = await fetch(`${serverUrl}/auth-check`, { headers: hdrs() });
     // A server older than this route is running fine, it just cannot answer. Saying "start it" there would
     // send the user chasing a process that is already up.
-    if (r.status === 404) { setStatus(srvEl, 'server ✓ (restart to update)', 'ok'); return; }
-    if (!r.ok) { setStatus(srvEl, 'server ✗ (start it)', 'bad'); return; }
+    if (r.status === 404) { setStatus(srvEl, 'server ✓ (restart to update)', 'ok'); setSetupStep('server', true); return; }
+    if (!r.ok) { setStatus(srvEl, 'server ✗ (start it)', 'bad'); setSetupStep('server', false); return; }
+    setSetupStep('server', true);
     const { authed } = await r.json();
+    setSetupStep('paired', !!authed);
     if (!authed) {
       // Try to pair before nagging. A user who has just run `--pair` sees this resolve itself within one
       // poll, which is the whole point; if no window is open, nothing happens and the advice below stands.
@@ -109,6 +111,8 @@ async function pollServerHealth() {
     setStatus(srvEl, 'server ✓', 'ok');
   } catch (_) {
     setStatus(srvEl, 'server ✗ (start it)', 'bad');
+    setSetupStep('server', false);
+    setSetupStep('paired', false);
   }
 }
 
@@ -515,7 +519,14 @@ async function speak(text, btn) {
   }
 }
 
-function resetAdvice() { adviceEl.innerHTML = '<div class="empty small">Suggestions will appear here live…</div>'; hasAdvice = false; lastAdviceSeq = 0; syncSearchVisibility(); }
+function resetAdvice() {
+  adviceEl.innerHTML = '<div class="empty small">Suggestions will appear here live…</div>';
+  hasAdvice = false; lastAdviceSeq = 0;
+  syncSearchVisibility();
+  // Redraw the checklist immediately. Without this the box sat on its placeholder until some step happened to
+  // change, so clearing a meeting or starting a new one lost the one piece of guidance on the screen.
+  if (typeof renderSetupSteps === 'function') renderSetupSteps();
+}
 
 // Server seq only grows within one server lifetime; if `last` comes back BELOW our cursor the transcript
 // server restarted (its in-memory queue reset to 0). Resync from 0 so we don't miss the fresh queue -
@@ -525,13 +536,68 @@ function nextSeq(cur, last) {
   return last < cur ? 0 : Math.max(cur, last);
 }
 
-// Reflect brain liveness in the advice empty-state so "nothing happening" is explained, not silent.
-function setBrainEmpty(live) {
-  if (hasAdvice) return;
-  const e = adviceEl.querySelector('.empty');
-  if (e) e.textContent = live ? 'Advice will appear here live…'
-    : 'No assistant attached - run your Claude session with the meet-live-assist skill.';
+// A first-run panel used to show: an idle pill, a red "no capture - reload the Meet tab" even with no meeting
+// tab open at all, three pills reading `?`, an empty chat, and a setup checklist that opened itself with red
+// crosses. The install had worked. It read as broken, at the exact moment someone decides whether to keep it.
+//
+// So the empty state is the onboarding: the four things that have to be true, each showing whether it is,
+// each naming the one action that makes it true. It replaces itself with advice the moment advice arrives.
+const SETUP_STEPS = [
+  { key: 'server',    label: 'Bridge server running',
+    todo: 'start it: node server/transcript-server.js --pair' },
+  { key: 'paired',    label: 'Extension paired with the server',
+    todo: 'run the server with --pair, or paste the token in Options' },
+  { key: 'capture',   label: 'In a Google Meet or Zoom call',
+    todo: 'open a call - if one is already open, reload that tab' },
+  { key: 'assistant', label: 'Assistant attached',
+    todo: 'open Claude Code and ask it to assist your meeting' },
+];
+const setupState = { server: null, paired: null, capture: null, assistant: null };
+
+function renderSetupSteps() {
+  if (hasAdvice) return; // real advice outranks onboarding, and never gets replaced by it
+  const box = adviceEl.querySelector('.empty');
+  if (!box) return;
+  box.textContent = '';
+  const done = SETUP_STEPS.filter((s) => setupState[s.key] === true).length;
+  const head = document.createElement('div');
+  head.style.marginBottom = '6px';
+  head.textContent = done === SETUP_STEPS.length
+    ? 'Ready. Advice will appear here as the call goes on.'
+    : `Setup ${done}/${SETUP_STEPS.length} - advice appears here once these are true:`;
+  box.appendChild(head);
+  for (const step of SETUP_STEPS) {
+    const st = setupState[step.key];
+    const row = document.createElement('div');
+    row.style.margin = '3px 0';
+    const mark = document.createElement('span');
+    mark.textContent = st === true ? '✓ ' : st === false ? '· ' : '  ';
+    mark.style.opacity = st === true ? '1' : '.6';
+    row.appendChild(mark);
+    const name = document.createElement('span');
+    name.textContent = step.label;
+    if (st === true) name.style.opacity = '.55';
+    row.appendChild(name);
+    // The action only helps where it is needed, and only for the first thing that is missing - a wall of
+    // four instructions is the same as none.
+    if (st === false && SETUP_STEPS.find((x) => setupState[x.key] !== true) === step) {
+      const todo = document.createElement('div');
+      todo.style.cssText = 'margin:2px 0 6px 14px;opacity:.75;';
+      todo.textContent = `→ ${step.todo}`;
+      row.appendChild(todo);
+    }
+    box.appendChild(row);
+  }
 }
+
+function setSetupStep(key, ok) {
+  if (setupState[key] === ok) return;
+  setupState[key] = ok;
+  renderSetupSteps();
+}
+
+// Kept for the call sites that already tracked liveness; it just feeds the checklist now.
+function setBrainEmpty(live) { setSetupStep('assistant', !!live); }
 
 // Two failures that leave everything else looking green: the wake channel cannot be written (so the
 // assistant receives nothing) or local speech-to-text is erroring (so nothing is transcribed). Both used to
@@ -1352,6 +1418,7 @@ async function announceToMeeting(session) {
 
 function setSession(session) {
   if (session && session !== currentSession) {
+    setSetupStep('capture', true);
     currentSession = session; lastAdviceSeq = 0; lastItemsSeq = 0; lastReqSeq = -1; lastChatSeq = 0; lastEditSeq = -1; lastDomReqSeq = -1; lastDbgReqSeq = -1; lastCallChatSeq = -1; lastActSeq = -1;
     chatEl.innerHTML = ''; brainWorkEl = null; resetItems(); resetTalk(); resetSnap(); resetPro();
     setStatus(brainEl, '🧠 ?', 'idle');
@@ -1383,23 +1450,48 @@ chrome.storage.local.get(['serverUrl', 'ttsVoicePl', 'ttsVoiceEn', 'mla_mode', '
   if (c.mla_jira_base !== undefined) jiraBase = (c.mla_jira_base || '').trim();
   buildNameRe(c.mla_names);
   if (c.mla_mode) modeSel.value = c.mla_mode;
+  renderSetupSteps();  // something useful on screen before the first poll answers
   fetchHealth(); // first-run checklist (auto-opens once if something's missing)
   pollServerHealth();
   setInterval(pollServerHealth, 5000);
 
-// Capture watchdog: if no session appears shortly after the panel opens, the content script is missing or
-// orphaned (a reloaded extension is never re-injected into open tabs). Ask the SW to re-probe, then say
-// plainly what to do - a silent "idle" pill cost us a whole meeting's transcript.
+// Capture watchdog: a session that never appears means the content script is missing or orphaned - a
+// reloaded extension is never re-injected into tabs that were already open, and that cost a whole meeting's
+// transcript once. Worth shouting about.
+//
+// But only if there IS a meeting tab. It used to fire unconditionally, so someone who had just installed the
+// extension and clicked the icon on a random tab was told to reload a Meet tab that did not exist. The first
+// thing the product ever said to them was a red warning about their own correct behaviour.
+const MEETING_URLS = ['https://meet.google.com/*', 'https://*.zoom.us/*'];
+async function meetingTab() {
+  try {
+    const tabs = await chrome.tabs.query({ url: MEETING_URLS });
+    return tabs && tabs.length ? tabs[0] : null;
+  } catch (_) { return null; }
+}
+
 let captureRetried = false;
-setTimeout(function checkCapture() {
+setTimeout(async function checkCapture() {
   if (currentSession) return;
+  const tab = await meetingTab();
+  if (!tab) {
+    // No call open: not a fault, just the first step of the checklist not done yet.
+    setSetupStep('capture', false);
+    setStatus(capEl, 'no call open', 'idle');
+    setTimeout(checkCapture, 8000);
+    return;
+  }
   if (!captureRetried) {
     captureRetried = true;
     try { port.postMessage({ type: 'ensure-capture' }); } catch (_) {}
     setTimeout(checkCapture, 6000);
     return;
   }
-  if (!currentSession) setStatus(capEl, '⚠ no capture - reload the Meet tab (⌘R)', 'bad');
+  if (!currentSession) {
+    setSetupStep('capture', false);
+    const where = /zoom\.us/.test(tab.url || '') ? 'Zoom' : 'Meet';
+    setStatus(capEl, `⚠ not capturing - reload the ${where} tab`, 'bad');
+  }
 }, 8000);
 });
 // Pick up token / names edited in options without reopening the panel.
