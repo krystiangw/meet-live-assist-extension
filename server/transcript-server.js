@@ -704,6 +704,13 @@ function evaluateWake(session) {
 // the .txt is written separately and keeps everything - but it does make the assistant blind to that stretch
 // of the meeting, and blind-but-looking-healthy is the failure mode this project keeps paying for.
 const wakeErrors = new Map(); // session -> { at, message }
+const sttErrors = new Map();  // session -> { at, message } - the local speech-to-text chain, same reasoning
+function sttErrorFor(session) {
+  const e = sttErrors.get(session);
+  // Stale after a few minutes: a chunk that failed once during a network hiccup should not haunt the panel
+  // for the rest of the call, but a chain that is genuinely broken fails again within seconds.
+  return e && Date.now() - e.at < 180000 ? e : null;
+}
 function wakeErrorFor(session) { return wakeErrors.get(session) || null; }
 
 // A buffer this size means the disk has been refusing us for a long time. Keep the newest, because in a live
@@ -835,7 +842,17 @@ const server = http.createServer((req, res) => {
     // Report WHICH model, not just that one exists: `launchctl kickstart` restarts the job from its cached
     // plist, so an edited WHISPER_MODEL silently does nothing until the job is booted out and back in -
     // and transcription quality then differs from what you measured on the command line.
-    const tools = { ffmpeg: fs.existsSync(FFMPEG), whisper: fs.existsSync(WHISPER_CLI), whisperModel: path.basename(WHISPER_MODEL) };
+    // `whisperModel` used to be the basename of whatever path was configured, present or not - so a typo in
+    // WHISPER_MODEL, or a model that was never downloaded, reported a healthy-looking filename and the setup
+    // checklist showed a tick. The first sign of trouble was then a meeting that transcribed nothing.
+    const modelThere = fs.existsSync(WHISPER_MODEL);
+    const tools = {
+      ffmpeg: fs.existsSync(FFMPEG),
+      whisper: fs.existsSync(WHISPER_CLI),
+      whisperModel: modelThere ? path.basename(WHISPER_MODEL) : null,
+      whisperModelPath: WHISPER_MODEL,
+      whisperModelMissing: !modelThere,
+    };
     checkBlackhole((blackhole) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, dir: TRANSCRIPTS_DIR, tools: { ...tools, blackhole } }));
@@ -1024,7 +1041,17 @@ const server = http.createServer((req, res) => {
       const tmp = path.join(os.tmpdir(), `mla-stt-${Date.now()}.webm`);
       try { fs.writeFileSync(tmp, Buffer.concat(chunks)); } catch (_) { res.writeHead(500); return res.end('write'); }
       transcribe(tmp, lang, (err, text) => {
-        if (err) { res.writeHead(500); return res.end('stt failed'); }
+        if (err) {
+          // The reason mattered and was thrown away. A stranger's first install fails here more often than
+          // anywhere else - no ffmpeg, no whisper binary, no model - and the symptom was a meeting that
+          // simply produced no lines. Never the transcript text, but always the reason.
+          const why = String((err && err.message) || err).split('\n')[0].slice(0, 300);
+          sttErrors.set(session, { at: Date.now(), message: why });
+          console.error(`[stt] failed for ${nameOf(session)} (${size} bytes, lang=${lang}): ${why}`);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'stt failed', reason: why }));
+        }
+        sttErrors.delete(session);
         if (text && isSttEcho(session, src, text)) {
           console.log(`[stt] dropped echo on ${src} (${text.length} chars)`);
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1189,6 +1216,11 @@ const server = http.createServer((req, res) => {
       ts, ageMs: ts ? Date.now() - ts : null,
       status: st ? st.text : '', statusAgeMs: st ? Date.now() - st.ts : null,
       estTokens: estTokensFor(keyFor(req, u.searchParams.get('session'))),
+      // The panel already polls this every few seconds, so a pipeline failure rides along rather than
+      // needing a request of its own. Both are the same shape of problem: the product looks alive and is
+      // delivering nothing.
+      wakeError: wakeErrorFor(keyFor(req, u.searchParams.get('session'))),
+      sttError: sttErrorFor(keyFor(req, u.searchParams.get('session'))),
       // A claim is only worth showing while the claimant is still heartbeating. Reporting the name of an
       // assistant that died an hour ago puts a 🧠 pill on a panel nobody is behind.
       agent: (tk && ts && Date.now() - ts < BRAIN_STALE_MS) ? tk.agent : null,
@@ -1760,6 +1792,7 @@ const server = http.createServer((req, res) => {
       // Present only when the wake channel is failing to write. A console line in a log file nobody tails is
       // not a report; the panel polls this every two seconds and can say so where the user is already looking.
       wakeError: wakeErrorFor(s),
+      sttError: sttErrorFor(s),
       autopilot: { create: !!ap.create, postChat: !!ap.postChat },
       remoteName: remoteNames.get(s) || null,
       sttLang: sttLangs.get(s) || null,

@@ -533,12 +533,30 @@ function setBrainEmpty(live) {
     : 'No assistant attached - run your Claude session with the meet-live-assist skill.';
 }
 
+// Two failures that leave everything else looking green: the wake channel cannot be written (so the
+// assistant receives nothing) or local speech-to-text is erroring (so nothing is transcribed). Both used to
+// be a line in a log file nobody tails. Said once per distinct problem, in the panel, in plain words.
+let lastPipelineProblem = '';
+function showPipelineProblem(wakeError, sttError) {
+  const problem = wakeError ? `wake:${wakeError.message}` : (sttError ? `stt:${sttError.message}` : '');
+  if (problem === lastPipelineProblem) return;
+  lastPipelineProblem = problem;
+  if (!problem) return;
+  const text = wakeError
+    ? `⚠ **Your assistant is not receiving this meeting.** The server cannot write the channel it reads: ${wakeError.message}. The transcript file is still complete - this is about delivery, not the recording.`
+    : `⚠ **Speech-to-text is failing**, so nothing is being transcribed from audio: ${sttError.message}. Captions, if the meeting has them, are unaffected.`;
+  appendChat({ role: 'agent', text });
+}
+
 async function pollBrain() {
   if (!currentSession) return;
   try {
     const r = await fetch(`${serverUrl}/brain-ping?session=${encodeURIComponent(currentSession)}`, { headers: hdrs() });
     if (!r.ok) { setBrainWork(''); return; } // can't confirm activity → don't leave a stale bubble pinned
-    const { ageMs, status, statusAgeMs, estTokens, agent } = await r.json();
+    const { ageMs, status, statusAgeMs, estTokens, agent, wakeError, sttError } = await r.json();
+    // A pipeline that is failing has to say so here, because every other signal looks healthy: capture is
+    // green, the server is green, the assistant is heartbeating - and nothing is reaching it.
+    showPipelineProblem(wakeError, sttError);
     const live = ageMs != null && ageMs < 45000; // heartbeat within 45s = attached
     // Name the attached agent so it's obvious WHICH one is on (multiple agents share the machine).
     setStatus(brainEl, live ? `🧠 ${agent || 'assistant'} on` : '🧠 no assistant', live ? 'ok' : 'bad');

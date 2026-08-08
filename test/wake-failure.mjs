@@ -91,6 +91,13 @@ try {
   check('and the assistant is told, not just left receiving nothing', text.includes('WAKE-WRITE-FAILING'),
     JSON.stringify(text.slice(0, 200)));
 
+  // brain-ping is what the PANEL polls, so the failure has to be visible there too - it is the only surface
+  // the user is looking at during a call. Asserted while the failure is still live: checking it after the
+  // obstruction is cleared would pass whether or not the field was ever populated.
+  const ping = await (await fetch(`${base}/brain-ping?session=${SESSION}`, { headers: auth })).json();
+  check("the panel's own poll carries the failure", !!(ping.wakeError && ping.wakeError.message),
+    JSON.stringify(ping.wakeError));
+
   // Now clear the obstruction. The held lines must arrive - that is the whole point of not discarding them.
   rmSync(path.join(dir, `${SESSION}.wake`), { recursive: true, force: true });
   await say('and here is the third line');
