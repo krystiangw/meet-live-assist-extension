@@ -37,6 +37,29 @@ the instant consent is given. Pinned both ways - refused while off, accepted onc
 
 (Full build only; the public build strips this surface entirely, verified in the built zip.)
 
+### Positioning, decided on evidence rather than taste
+
+A research pass settled whether to lead broad or commit the headline to one segment. Verdict: broad hero,
+scenario cards below, second-language card first. The reasoning worth keeping:
+
+- Every Show HN above 100 points in this ecosystem names the tool, what it does and its prerequisite. None
+  says "for X". Launches that lead with an audience identity cluster an order of magnitude lower.
+- "Narrow" wins when the narrow thing is the *problem* ("self-hosted Google Analytics alternative"), not the
+  *audience*. A second-language headline is narrow by identity, so it does not buy the effect.
+- Reversibility is asymmetric. Broad to narrow is one edit and a relaunch; narrow to broad took PostHog a
+  deliberate, expensive repositioning because customers still read them as "analytics++". And the
+  Cluely-adjacent reading, once invited, does not reverse at all.
+- The "traffic will reveal the segment" argument was **not** accepted: there is no analytics on the page and
+  there never will be, and Show HN variance is dominated by timing - the same product posted eight times
+  scored 1, 1, 1, 2, 4, 29, 90. So the second-language card gets its own anchor to link into communities
+  directly, and the feedback section asks which profile you installed, because that answer only exists if
+  someone types it.
+
+**A factual correction on the page.** It claimed our no-interviews line was "the same line Anthropic draws".
+It is not: the usage policy's clauses on hiring and testing are aimed at employers and testing companies, not
+candidates. The applicable clause is about submitting AI-assisted work without permission or attribution. The
+boundary is stated as ours now, which is what it always was.
+
 ### Profiles: one product, several kinds of meeting
 
 The meeting-type list was the real hardcode - daily syncs, Sentry incidents, story-point refinement - while

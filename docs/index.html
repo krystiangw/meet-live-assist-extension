@@ -74,46 +74,66 @@
 <div class="wrap">
 
 <section>
-  <h2>Before you get excited: two things this asks of you</h2>
+  <h2>What a call looks like with it</h2>
+  <p>Four moments from a real call, in the order they happen. Note that the "say this" line is one of six
+  markers, not the product - it sits next to the decision you need to remember and the risk you just agreed to.</p>
+  <table>
+    <tr><th>In the room</th><th>In your panel, a second later</th></tr>
+    <tr><td>Someone asks you a direct question and you need a beat to assemble the answer.</td>
+        <td><span class="marker" style="color:#1a7f37">🟢 SAY</span> a complete sentence, in the meeting's
+        language, that you can read out without rehearsing.</td></tr>
+    <tr><td>A number gets disputed and nobody has it to hand.</td>
+        <td><span class="marker" style="color:#2f6feb">🔵 INFO</span> the figure, from your own notes, repo or
+        tickets, with where it came from.</td></tr>
+    <tr><td>The group agrees to something in passing.</td>
+        <td><span class="marker" style="color:#b8860b">🟡 SUMMARY</span> the decision, on a board you can read
+        after the call instead of reconstructing it from memory.</td></tr>
+    <tr><td>You are about to commit to a date that contradicts a decision from two weeks ago.</td>
+        <td><span class="marker" style="color:#d1242f">🔴 RISK</span> the contradiction, while you can still
+        say "actually, let me check something".</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>What this asks of you</h2>
   <p><strong>You need <a href="https://claude.com/claude-code">Claude Code</a>.</strong> This ships the eyes,
   ears and hands - the capture, the panel, the local bridge - but not the brain. The brain is a Claude Code
   session on your own machine, running a skill the installer sets up for you. Without it you get a working
   transcript recorder and an empty advice pane, which is not what the rest of this page shows.</p>
   <p><strong>The meeting is other people's conversation too.</strong> Turning on captions is invisible to
-  everyone else, unlike recording, which Meet badges. So by default this posts one line into the meeting
-  chat when capture starts, saying an assistant is transcribing locally. You can edit that line or switch it
-  off. Some places require everyone's agreement before a conversation may be recorded or transcribed - that
-  is a call only you can make, and the <a href="https://github.com/krystiangw/meet-live-assist-extension/blob/main/PRIVACY.md">privacy
+  everyone else, unlike recording, which Meet badges. So by default this posts one line into the meeting chat
+  when capture starts, saying an assistant is transcribing locally. You can edit that line or switch it off.
+  Some places require everyone's agreement before a conversation may be recorded or transcribed - that is a
+  call only you can make, and the <a href="https://github.com/krystiangw/meet-live-assist-extension/blob/main/PRIVACY.md">privacy
   policy</a> says so rather than burying it.</p>
+  <p class="note"><strong>Not for a job interview or an exam, where the other side is assessing you.</strong>
+  Preparation, and your own working meetings, yes. This is our line, not a rule we are quoting: Anthropic's
+  <a href="https://www.anthropic.com/legal/aup">usage policy</a> asks you not to "submit AI-assisted work
+  without proper permission or attribution", and its clauses about hiring and testing are aimed at employers
+  and testing companies rather than at candidates. So the boundary here is a choice we are making, and we would
+  rather say it out loud than let you discover where we stand from a news story.</p>
 </section>
 
 <section>
-  <h2>Is this you?</h2>
-  <p>Same product, same install. Which of these you are decides what the assistant leads with - pick a
-  profile at install time and it knows your kind of meeting instead of someone else's.</p>
+  <h2>Which meeting is yours</h2>
+  <p>Same product, same install. This only decides which meetings the assistant knows about and what it leads
+  with - pick one at install time and it stops guessing at someone else's kind of call.</p>
   <div class="grid">
-    <div class="card"><div class="ico">💻</div><h4>You build software</h4>
-      <p>Standups, incident triage, refinement, design review. It knows your tickets and your repo, flags
-      scope creep, and captures decisions you would otherwise reconstruct from memory.
+    <div class="card" id="second-language"><div class="ico">🌍</div><h4>The meeting is not in your first language</h4>
+      <p><em>You already know the answer; it just is not in English yet.</em> By the time the sentence is ready
+      the conversation has moved on. This puts it on your screen while the topic is still open, and explains
+      the idiom nobody defined.<br><code>MLA_PROFILE=second-language</code></p></div>
+    <div class="card"><div class="ico">💻</div><h4>The meeting is about software you are building</h4>
+      <p>Standups, incident triage, refinement, design review. It knows your tickets and your repo, flags scope
+      creep, and captures decisions you would otherwise reconstruct from memory.
       <br><code>MLA_PROFILE=engineering</code></p></div>
-    <div class="card"><div class="ico">🌍</div><h4>The meeting is not in your first language</h4>
-      <p>You already know the answer - it just is not in English yet, and by the time the sentence is ready the
-      conversation has moved on. This puts the sentence on your screen while the topic is still open, and
-      explains the idiom nobody defined.
-      <br><code>MLA_PROFILE=second-language</code></p></div>
-    <div class="card"><div class="ico">🔬</div><h4>You interview people</h4>
+    <div class="card"><div class="ico">🔬</div><h4>The meeting is you interviewing someone</h4>
       <p>Moderate the conversation instead of taking notes. It stays quiet, flags a leading question the moment
-      you ask one, tracks which topics you still have not covered, and writes the debrief afterwards.
+      you ask one, tracks which topics you have not covered, and writes the debrief afterwards.
       <br><code>MLA_PROFILE=research</code></p></div>
-    <div class="card"><div class="ico">💬</div><h4>Something else</h4>
-      <p>Any conversation where you have to respond well in real time and would rather not be the one taking
-      minutes. Add your own profile as a file if the default is not close enough.
-      <br><code>MLA_PROFILE=generic</code></p></div>
   </div>
-  <p class="note">One thing this is deliberately <strong>not</strong> for: live help in a job interview or an
-  exam, where the other side is assessing <em>you</em>. Preparation and your own working meetings, yes. That is
-  the same line <a href="https://www.anthropic.com/legal/aup">Anthropic draws</a>, and we draw it here rather
-  than waiting to be asked.</p>
+  <p>Anything else: <code>generic</code>, or write your own profile as a file - they are about a dozen lines
+  each.</p>
 </section>
 
 <section>
@@ -136,43 +156,6 @@
   <a href="https://www.anthropic.com/news/updates-to-our-consumer-terms">Anthropic's consumer terms</a> spell
   it out, and it explicitly covers Claude Code. Worth two minutes of your attention before you point this at
   a meeting that is not yours to share. Work and API accounts are on different terms.</p>
-</section>
-
-<section>
-  <h2>What it does</h2>
-  <div class="grid">
-    <div class="card"><div class="ico">📝</div><h4>Live transcript</h4><p>Captures the Meet call transcript in real time into a side panel - from captions or local speech-to-text.</p></div>
-    <div class="card"><div class="ico">🎧</div><h4>Local STT</h4><p>Optional caption-free transcription of the call audio via whisper.cpp - fully offline, no cloud, no subscription.</p></div>
-    <div class="card"><div class="ico">🟢</div><h4>Colour-coded advice</h4><p>Your assistant pushes what to say, facts, summaries, risks and actions - links & images included.</p></div>
-    <div class="card"><div class="ico">📷</div><h4>Smart snapshots</h4><p>Auto-captures the tab while someone shares their screen; on-demand otherwise - visual context for the assistant.</p></div>
-    <div class="card"><div class="ico">💬</div><h4>In-panel chat</h4><p>A two-way back-channel to ask the assistant things mid-call without speaking.</p></div>
-    <div class="card"><div class="ico">🔊</div><h4>Speak into the call</h4><p>Text-to-speech in the call's language that can be routed straight into the meeting.</p></div>
-    <div class="card"><div class="ico">✏️</div><h4>Live demo edits</h4><p>Ask the assistant to fix a typo or hide a broken element on your shared screen - presentation-only, revertable, never saved.</p></div>
-    <div class="card"><div class="ico">🎛️</div><h4>Meeting modes</h4><p>Listener, Lead, or Auto - tune how proactively the assistant suggests based on your role in the call.</p></div>
-    <div class="card"><div class="ico">📋</div><h4>Decisions & action items</h4><p>A live board of decisions and owner-tagged action items - one click drafts a Jira ticket.</p></div>
-    <div class="card"><div class="ico">⏮️</div><h4>Recap & alerts</h4><p>Ask "what did I miss?" anytime; get nudged when you're named, look muted, or a risk appears.</p></div>
-    <div class="card"><div class="ico">🎯</div><h4>Meeting-type aware</h4><p>Detects standup / 1:1 / incident / review and adapts what it surfaces; remembers recurring series.</p></div>
-    <div class="card"><div class="ico">🟦</div><h4>Meet & Zoom</h4><p>Works on Google Meet and the Zoom web client - same live transcript, advice and tools.</p></div>
-    <div class="card"><div class="ico">🧑‍💻</div><h4>Co-pilot mode</h4><p>No meeting needed: start a session, and the assistant watches your tab and listens to your mic while you debug or build.</p></div>
-    <div class="card"><div class="ico">🤖</div><h4>Action-item autopilot</h4><p>In grooming / mob sessions it captures action items and - once you opt in - creates the tickets and drops the links in the meeting chat.</p></div>
-    <div class="card"><div class="ico">🔒</div><h4>Your files, your account</h4><p>Transcripts and screenshots stay on your disk - no account, no telemetry, no server of ours. What you send the assistant goes to your own Claude account, on your terms.</p></div>
-  </div>
-</section>
-
-<section>
-  <h2>How it works</h2>
-  <p>Three pieces, all on your machine:</p>
-  <pre><code>Google Meet tab
-   │  (transcript, snapshots, mic control)
-   ▼
-Chrome extension  ──HTTP──►  Local bridge server (127.0.0.1:8848)
-   ▲  (advice, chat, TTS)          │
-   └───────────────────────────────┤  transcript file + advice/chat channels
-                                    ▼
-                          The "brain" - a Claude Code session with YOUR
-                          context (notes, docs, tools) reads the call over MCP
-                          and replies with advice / chat / TTS.</code></pre>
-  <p class="note">The extension only captures and displays. The intelligence is the brain - a local agent session that already knows your work. That is the differentiator: advice grounded in <em>your</em> real context, not a generic model.</p>
 </section>
 
 <section>
@@ -227,6 +210,43 @@ curl -L -o ~/.local/share/whisper/ggml-base.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin</code></pre>
     </li>
   </ol>
+</section>
+
+<section>
+  <h2>What it does</h2>
+  <div class="grid">
+    <div class="card"><div class="ico">📝</div><h4>Live transcript</h4><p>Captures the Meet call transcript in real time into a side panel - from captions or local speech-to-text.</p></div>
+    <div class="card"><div class="ico">🎧</div><h4>Local STT</h4><p>Optional caption-free transcription of the call audio via whisper.cpp - fully offline, no cloud, no subscription.</p></div>
+    <div class="card"><div class="ico">🟢</div><h4>Colour-coded advice</h4><p>Your assistant pushes what to say, facts, summaries, risks and actions - links & images included.</p></div>
+    <div class="card"><div class="ico">📷</div><h4>Smart snapshots</h4><p>Auto-captures the tab while someone shares their screen; on-demand otherwise - visual context for the assistant.</p></div>
+    <div class="card"><div class="ico">💬</div><h4>In-panel chat</h4><p>A two-way back-channel to ask the assistant things mid-call without speaking.</p></div>
+    <div class="card"><div class="ico">🔊</div><h4>Speak into the call</h4><p>Text-to-speech in the call's language that can be routed straight into the meeting.</p></div>
+    <div class="card"><div class="ico">✏️</div><h4>Live demo edits</h4><p>Ask the assistant to fix a typo or hide a broken element on your shared screen - presentation-only, revertable, never saved.</p></div>
+    <div class="card"><div class="ico">🎛️</div><h4>Meeting modes</h4><p>Listener, Lead, or Auto - tune how proactively the assistant suggests based on your role in the call.</p></div>
+    <div class="card"><div class="ico">📋</div><h4>Decisions & action items</h4><p>A live board of decisions and owner-tagged action items - one click drafts a Jira ticket.</p></div>
+    <div class="card"><div class="ico">⏮️</div><h4>Recap & alerts</h4><p>Ask "what did I miss?" anytime; get nudged when you're named, look muted, or a risk appears.</p></div>
+    <div class="card"><div class="ico">🎯</div><h4>Meeting-type aware</h4><p>Detects standup / 1:1 / incident / review and adapts what it surfaces; remembers recurring series.</p></div>
+    <div class="card"><div class="ico">🟦</div><h4>Meet & Zoom</h4><p>Works on Google Meet and the Zoom web client - same live transcript, advice and tools.</p></div>
+    <div class="card"><div class="ico">🧑‍💻</div><h4>Co-pilot mode</h4><p>No meeting needed: start a session, and the assistant watches your tab and listens to your mic while you debug or build.</p></div>
+    <div class="card"><div class="ico">🤖</div><h4>Action-item autopilot</h4><p>In grooming / mob sessions it captures action items and - once you opt in - creates the tickets and drops the links in the meeting chat.</p></div>
+    <div class="card"><div class="ico">🔒</div><h4>Your files, your account</h4><p>Transcripts and screenshots stay on your disk - no account, no telemetry, no server of ours. What you send the assistant goes to your own Claude account, on your terms.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>How it works</h2>
+  <p>Three pieces, all on your machine:</p>
+  <pre><code>Google Meet tab
+   │  (transcript, snapshots, mic control)
+   ▼
+Chrome extension  ──HTTP──►  Local bridge server (127.0.0.1:8848)
+   ▲  (advice, chat, TTS)          │
+   └───────────────────────────────┤  transcript file + advice/chat channels
+                                    ▼
+                          The "brain" - a Claude Code session with YOUR
+                          context (notes, docs, tools) reads the call over MCP
+                          and replies with advice / chat / TTS.</code></pre>
+  <p class="note">The extension only captures and displays. The intelligence is the brain - a local agent session that already knows your work. That is the differentiator: advice grounded in <em>your</em> real context, not a generic model.</p>
 </section>
 
 <section>
@@ -298,6 +318,9 @@ curl -L -o ~/.local/share/whisper/ggml-base.bin \
   useful. If you try it - especially if it fails, or you gave up halfway through the install - say so in
   <a href="https://github.com/krystiangw/meet-live-assist-extension/discussions">GitHub Discussions</a>.
   A sentence about what you expected and what happened is worth more than a bug report template.</p>
+  <p class="note"><strong>One question worth answering even if nothing else:</strong> which profile did you
+  install, and was it the right one? There is no analytics here and there never will be, so that answer only
+  exists if you type it. It is the difference between guessing who this is for and knowing.</p>
 </section>
 
 </div>

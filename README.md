@@ -1,7 +1,8 @@
 # Meet Live Assist
 
-**Your Claude Code session sits in the call with you.** It already knows your work, it tells the room it is
-listening, and your transcript stays on your disk.
+**Your own Claude Code session, in the call with you.** It reads the Meet or Zoom transcript as it happens and
+answers in a side panel while the call is still going: what was decided, who owns what, the risk you just
+agreed to, and the sentence to say next, in the meeting's language.
 
 During a Google Meet or Zoom call this captures the transcript, shows it in a side panel, and hands it to
 an assistant running on your own computer. The assistant answers back in the panel while the call is still
