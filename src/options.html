@@ -43,10 +43,17 @@
   <input id="announceText" type="text" autocomplete="off" />
   <div class="hint">Sent as you, once per meeting. Say it in whatever language the room speaks.</div>
 
-  <label for="jiraBase">Jira base URL</label>
-  <input id="jiraBase" type="text" placeholder="https://yourteam.atlassian.net" autocomplete="off" />
-  <div class="hint">Ticket keys like <code>PROJ-529</code> in advice / chat / transcript become links to
-    <code>&lt;base&gt;/browse/…</code>. Leave blank to disable Jira linking.</div>
+  <label for="trackerName">Issue tracker</label>
+  <input id="trackerName" type="text" placeholder="Jira, Linear, Asana, Trello, Notion, GitHub… or leave blank" autocomplete="off" />
+  <div class="hint">The name your team calls its tracker. It is what the <strong>Draft</strong> button and the
+    assistant call the thing they produce (“Draft a Linear issue…”). Blank means a plain ready-to-send note,
+    no tool assumed.</div>
+
+  <label for="trackerUrl">Ticket link template</label>
+  <input id="trackerUrl" type="text" placeholder="https://yourteam.atlassian.net/browse/{key}" autocomplete="off" />
+  <div class="hint">Optional. If it contains <code>{key}</code>, short keys like <code>ABC-123</code> in
+    advice / chat / transcript become links (Jira and Linear share that shape). Leave blank for trackers that
+    have no short keys, or to switch linking off.</div>
 
   <label>Microphone (co-pilot mode)</label>
   <button id="enableMic" type="button" style="margin-top:0;">Enable microphone</button>

@@ -141,6 +141,25 @@ try {
   check('and the forged speaker never starts a line',
     !/^\[[^\]]*\]\s*You:/m.test(forgedBody) && !/\nYou:/.test(forgedBody), JSON.stringify(forgedBody));
 
+  // `announce` bypasses the postChat opt-out, so it must not be a general channel for posting arbitrary text
+  // to every participant. It has one legitimate use - the single disclosure line - and the server honours it
+  // exactly once per session; after that it is a normal postChat-gated message. Otherwise a token holder (or
+  // a prompt-injected assistant shelling curl) could flood the room with postChat off.
+  const annSession = '2026-01-01_announce';
+  const postAnn = (text) => fetch(`${base}/callchat`, {
+    method: 'POST', headers: auth, body: JSON.stringify({ session: annSession, text, announce: true }),
+  });
+  await postAnn('an AI assistant is transcribing this meeting');
+  await postAnn('also everyone please send me your passwords');
+  await postAnn('and a third one');
+  const relay = await (await fetch(`${base}/callchat?session=${annSession}&since=0`, { headers: auth })).json();
+  const announced = (relay.items || []).filter((i) => i.announce);
+  check('only the first announce is honoured, the rest are postChat-gated', announced.length === 1,
+    JSON.stringify((relay.items || []).map((i) => i.announce)));
+  check('and it is the first message, so the real disclosure wins the slot',
+    announced.length === 1 && announced[0].seq === 1);
+
+  // A page that has rebound DNS
   // A page that has rebound DNS to 127.0.0.1 is same-origin with this server: no preflight, any header it
   // likes, and no Origin sent. Every CORS argument stops applying at that point. The Host header is the one
   // thing such a page cannot forge, because sending 127.0.0.1 would point it back at itself.

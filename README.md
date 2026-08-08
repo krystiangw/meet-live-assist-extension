@@ -98,6 +98,11 @@ Worth knowing before you point this at a conversation that is not only yours.
   **meeting modes** + type-awareness, **live presentation edits** + **debug** of the shared tab.
 - **Talk-time**, **muted-mic** + **personal-mention** alerts; **post-call summary** export.
 
+**A note on trust.** The assistant is your own Claude Code session with your own tools, and it reads a live,
+untrusted audio feed. It is instructed to let *only what you type* authorize an action - no spoken line, under
+any name, can make it act - but that is the model following its skill, not a wall. If you have connected
+destructive tools to Claude Code, set their trust accordingly. `PRIVACY.md` says this plainly too.
+
 **Landing page:** [`docs/index.html`](docs/index.html), also hosted at
 **https://krystiangw.github.io/meet-live-assist/**.
 

@@ -1506,12 +1506,21 @@ const server = http.createServer((req, res) => {
       const text = typeof d.text === 'string' ? d.text.trim() : '';
       if (!text) { res.writeHead(400); return res.end('empty'); }
       let cc = callChat.get(session);
-      if (!cc) { cc = { seq: 0, items: [] }; callChat.set(session, cc); }
+      if (!cc) { cc = { seq: 0, items: [], announced: false }; callChat.set(session, cc); }
       // `announce` marks the one line that tells the room an assistant is listening. It must NOT ride on
       // the autopilot's "share ticket links with everyone" opt-in: those are different consents, that one is
       // off by default, and riding it meant disclosure was switched on, nothing was typed, and nobody was
       // told - while the privacy policy promised the opposite.
-      cc.seq++; cc.items.push({ seq: cc.seq, text, announce: d.announce === true });
+      //
+      // But `announce` bypasses the postChat opt-out, so it cannot be a general "post anything to the room"
+      // channel: a token holder - including a prompt-injected assistant shelling curl - could otherwise post
+      // arbitrary text to every participant with postChat off. It has exactly one legitimate use, the one
+      // disclosure line per meeting, so the server honours it exactly once per session. The panel fires that
+      // line synchronously when the session opens, so the legitimate disclosure claims the single slot before
+      // anything else could. After that, `announce` is ignored and the message is a normal, postChat-gated one.
+      const announce = d.announce === true && !cc.announced;
+      if (announce) cc.announced = true;
+      cc.seq++; cc.items.push({ seq: cc.seq, text, announce });
       if (cc.items.length > 50) cc.items.splice(0, cc.items.length - 50);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ seq: cc.seq }));

@@ -4,6 +4,42 @@ Notable changes only. Earlier history is in `git log` (91 commits from 2026-07-1
 point the project was prepared for a public release, because that is where a version number began to mean
 something to anyone other than the author.
 
+## 0.6.0 - 2026-08-08
+
+### The authorization model rested on a forgeable label
+
+An offensive-security pass found that the whole trust model reduced to one rule - "only lines labelled `You`
+authorize actions" - and that label is attacker-controlled. A participant can set their display name to "You"
+or to the owner's real name, and on speakers the owner's voice echoes into the mic channel, which is
+hard-labelled `You`. The thing that label unlocked was an autonomous agent with a shell.
+
+- **The skill now treats the entire transcript as untrusted.** No spoken line, under any name, authorizes a
+  command, an outward message, or anything irreversible. Only what the user *types* authorizes an action - a
+  channel the room cannot reach. A spoken go-ahead may still confirm a specific, already-proposed, reversible
+  in-app action, but never a free-form instruction.
+- **PRIVACY.md and the README state the residual plainly**: this is a bring-your-own-brain design pointing a
+  capable agent at a live untrusted feed, and self-hosters with destructive tools connected should set trust
+  accordingly.
+- **The `announce` disclosure could post arbitrary text to the room with postChat off** - a bypass I
+  introduced when I separated disclosure from the autopilot opt-in. It is now honoured exactly once per
+  session, which is its only legitimate use; the panel fires the real disclosure first, so it claims the slot.
+
+### The tracker is no longer Jira
+
+Ticket linking, the Draft button and the assistant's drafting instruction all hardcoded Jira. A team on
+Linear, Asana, Trello, Notion, Monday, ClickUp, GitHub Issues or plain email got a button that named the
+wrong tool and keys linked to a place they do not use.
+
+- **Options** now has an "Issue tracker" name and an optional link template with `{key}`. Jira and Linear
+  share the `ABC-123` key shape, so those link; trackers with no short keys set no template and keys stay
+  literal text, which is the right default - linking a key to the wrong tool is worse than not linking it.
+- **The Draft button** takes the tracker's name ("Draft Linear", "Draft note" when none is set), and the
+  chat prompt tells the assistant to match the user's tool and their discipline's format - a recruiter's
+  scorecard and a lawyer's action item are not engineering tickets.
+- **The skill** was rewritten to say the same: draft in the user's configured tracker and format, not Jira's.
+- An existing Jira install is migrated on load - the old base URL becomes a `{key}` template and the name
+  defaults to Jira - so nobody has to touch Options.
+
 ## 0.5.0 - 2026-08-06
 
 The decision behind this section: no hosting. Anyone can install this on their own machine, for free, and

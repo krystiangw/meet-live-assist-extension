@@ -77,6 +77,19 @@ room was informed when it was not.
 This is disclosure, not consent. Some jurisdictions require every participant to agree before a
 conversation may be recorded or transcribed; see below.
 
+## What the assistant can and cannot be made to do
+
+The assistant is your own Claude Code session, which means it has whatever tools you have given Claude Code -
+including a shell. Everything a meeting participant says reaches it as input. It is instructed, in the skill,
+to treat the entire transcript as untrusted: **no spoken line, whatever name it is labelled with, can make the
+assistant run a command, send a message, or do anything irreversible.** Only what *you type* to it authorizes
+an action, on a channel the room cannot reach.
+
+That instruction is a real boundary, but it is enforced by the model following its skill, not by a wall. If
+you have connected powerful or destructive tools to your Claude Code, understand that you are pointing a
+capable agent at a live, untrusted audio feed, and set the trust of your connected tools accordingly. This is
+the honest limit of a bring-your-own-brain design, and it is stated here rather than left for you to discover.
+
 ## Recording & consent
 Capturing a meeting transcript and screenshots is a form of recording. You are responsible for obtaining
 participants' consent where required (e.g. two-party-consent jurisdictions), especially on external calls.

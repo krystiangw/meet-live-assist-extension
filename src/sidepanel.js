@@ -264,15 +264,21 @@ function appendLine({ ts, speaker, text }) {
 // ---- advice --------------------------------------------------------------
 // Safe inline rich rendering - no innerHTML. Supports bare URLs, [text](url), ![alt](url) images,
 // **bold**, and `code`. Everything else stays literal text.
-// Jira ticket keys (e.g. PROJ-529) become links to the configured Jira. Deny common non-Jira tokens
-// that look like keys (UTF-8, GPT-4, SHA-256, …) so they aren't wrongly linked.
-let jiraBase = ''; // set it in Options; empty means ticket keys stay plain text rather than linking somewhere wrong
-const JIRA_DENY = /^(UTF|GPT|SHA|ISO|RFC|CVE|AES|IPV|MP|ID|PR|CI|HTTP|HTTPS|COVID|IE|MS|H)$/;
-function jiraLink(key) {
-  if (!jiraBase || JIRA_DENY.test(key.split('-')[0])) return null;
+// The issue tracker is configurable: Jira and Linear share the `ABC-123` key shape, and other tools have no
+// short keys at all. `trackerName` is what the Draft button and the assistant call the thing they produce;
+// `trackerUrl` is an optional link template with `{key}`. A team on Asana or plain email sets no URL and the
+// keys stay literal text - which is the right default, since linking a key to the wrong tool is worse than
+// not linking it. `mla_jira_base` is migrated to this on load (see setSession's storage read).
+let trackerName = '';   // e.g. "Jira", "Linear"; blank = a plain note, no tool assumed
+let trackerUrl = '';    // e.g. "https://team.atlassian.net/browse/{key}"; needs {key} to link at all
+// Tokens shaped like a key but that never are one, so a stray "GPT-4" in advice is not turned into a link.
+const KEY_DENY = /^(UTF|GPT|SHA|ISO|RFC|CVE|AES|IPV|MP|ID|PR|CI|HTTP|HTTPS|COVID|IE|MS|H)$/;
+function trackerLink(key) {
+  if (!trackerUrl || !trackerUrl.includes('{key}') || KEY_DENY.test(key.split('-')[0])) return null;
   const a = document.createElement('a');
-  a.href = `${jiraBase.replace(/\/+$/, '')}/browse/${key}`;
-  a.textContent = key; a.target = '_blank'; a.rel = 'noreferrer'; a.title = `Open ${key} in Jira`;
+  a.href = trackerUrl.replace('{key}', encodeURIComponent(key));
+  a.textContent = key; a.target = '_blank'; a.rel = 'noreferrer';
+  a.title = trackerName ? `Open ${key} in ${trackerName}` : `Open ${key}`;
   return a;
 }
 // Linkify PLAIN text (transcript, item text): URLs + Jira keys → <a>, everything else stays text.
@@ -282,7 +288,7 @@ function linkify(parent, text) {
   while ((m = LINKIFY_RE.exec(s))) {
     if (m.index > last) parent.appendChild(document.createTextNode(s.slice(last, m.index)));
     if (m[1]) { const a = document.createElement('a'); a.href = m[1]; a.textContent = m[1]; a.target = '_blank'; a.rel = 'noreferrer'; parent.appendChild(a); }
-    else parent.appendChild(jiraLink(m[2]) || document.createTextNode(m[2]));
+    else parent.appendChild(trackerLink(m[2]) || document.createTextNode(m[2]));
     last = m.index + m[0].length;
   }
   if (last < s.length) parent.appendChild(document.createTextNode(s.slice(last)));
@@ -313,7 +319,7 @@ function renderInline(parent, line) {
     if (best.p.kind === 'img') { const i = document.createElement('img'); i.src = g2; i.alt = g1 || ''; i.className = 'rich-img'; parent.appendChild(i); }
     else if (best.p.kind === 'link') { const a = document.createElement('a'); a.href = g2; a.textContent = g1; a.target = '_blank'; a.rel = 'noreferrer'; parent.appendChild(a); }
     else if (best.p.kind === 'url') { const a = document.createElement('a'); a.href = g1; a.textContent = g1; a.target = '_blank'; a.rel = 'noreferrer'; parent.appendChild(a); }
-    else if (best.p.kind === 'jira') { parent.appendChild(jiraLink(full) || document.createTextNode(full)); }
+    else if (best.p.kind === 'jira') { parent.appendChild(trackerLink(full) || document.createTextNode(full)); }
     else if (best.p.kind === 'bold') { const b = document.createElement('strong'); renderInline(b, g1); parent.appendChild(b); } // recurse so a Jira key / URL inside **…** still links
     else if (best.p.kind === 'code') { const c = document.createElement('code'); c.textContent = g1; parent.appendChild(c); }
     else if (best.p.kind === 'num') { const s = document.createElement('span'); s.className = 'kw-num'; s.textContent = full; parent.appendChild(s); }
@@ -719,9 +725,17 @@ function appendItem({ kind, text, owner, blockedBy }) {
   div.append(k, body);
   if (upd) { div.dataset.uc = String(upd); div.append(updatedBadge(upd)); div.classList.add('flash'); }
   if (!decision) {
-    const j = document.createElement('button'); j.className = 'jira'; j.textContent = 'Draft Jira';
-    j.title = 'Ask the assistant to draft a Jira ticket for this (draft only)';
-    j.addEventListener('click', () => sendChat(`Draft a Jira ticket (DRAFT only - do not create) for this action item: "${text}"${owner ? ` - owner ${owner}` : ''}. Use the team's Goal / Summary / Test plan sections.`));
+    // The tracker is whatever the user named in Options. With no name it is a plain note, which is the right
+    // default for a recruiter, a teacher, a lawyer - anyone whose "action item" is not an engineering ticket.
+    const noun = trackerName || 'note';
+    const j = document.createElement('button'); j.className = 'jira'; j.textContent = `Draft ${noun}`;
+    j.title = `Ask the assistant to draft a ${noun} for this (draft only)`;
+    j.addEventListener('click', () => {
+      const what = trackerName
+        ? `Draft a ${trackerName} ticket (DRAFT only - do not create) for this action item`
+        : `Draft a ready-to-send note (DRAFT only) capturing this action item`;
+      sendChat(`${what}: "${text}"${owner ? ` - owner ${owner}` : ''}. Match the format the user's team uses.`);
+    });
     div.append(j);
   }
   div.append(iconBtn('✕', 'Remove this item', () => { div.remove(); syncSearchVisibility(); }));
@@ -1442,12 +1456,24 @@ function connect() {
   });
 }
 
-chrome.storage.local.get(['serverUrl', 'ttsVoicePl', 'ttsVoiceEn', 'mla_mode', 'mla_token', 'mla_names', 'mla_jira_base']).then((c) => {
+// Read the tracker config, migrating the pre-0.6 Jira-only setting so an existing install keeps working
+// without the user touching Options: a bare base URL becomes a `{key}` template and the name defaults to Jira.
+function applyTracker(c) {
+  if (c.mla_tracker_name !== undefined || c.mla_tracker_url !== undefined) {
+    trackerName = (c.mla_tracker_name || '').trim();
+    trackerUrl = (c.mla_tracker_url || '').trim();
+  } else if (c.mla_jira_base) {
+    trackerName = 'Jira';
+    trackerUrl = `${String(c.mla_jira_base).replace(/\/+$/, '')}/browse/{key}`;
+  }
+}
+
+chrome.storage.local.get(['serverUrl', 'ttsVoicePl', 'ttsVoiceEn', 'mla_mode', 'mla_token', 'mla_names', 'mla_jira_base', 'mla_tracker_name', 'mla_tracker_url']).then((c) => {
   if (c.serverUrl) serverUrl = c.serverUrl.replace(/\/+$/, '');
   ttsVoicePl = c.ttsVoicePl || 'Zosia';
   ttsVoiceEn = c.ttsVoiceEn || 'Daniel';
   serverToken = c.mla_token || '';
-  if (c.mla_jira_base !== undefined) jiraBase = (c.mla_jira_base || '').trim();
+  applyTracker(c);
   buildNameRe(c.mla_names);
   if (c.mla_mode) modeSel.value = c.mla_mode;
   renderSetupSteps();  // something useful on screen before the first poll answers
@@ -1504,6 +1530,9 @@ chrome.storage.onChanged.addListener((ch, area) => {
     fetchHealth();
   }
   if (ch.mla_names) buildNameRe(ch.mla_names.newValue);
+  if (ch.mla_tracker_name || ch.mla_tracker_url || ch.mla_jira_base) {
+    chrome.storage.local.get(['mla_tracker_name', 'mla_tracker_url', 'mla_jira_base']).then(applyTracker);
+  }
 });
 connect();
 startPolling();
