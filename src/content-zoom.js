@@ -54,7 +54,29 @@
     [/\bfeature[ -]fl(?:ag|ight)\b|\bfuture[ -]flag\b/gi, 'feature flag'],
     [/\bgen[ -]?(\d)\b/gi, 'gen$1'],
   ];
-  const normalizeGlossary = (s) => { let o = s; for (const [re, to] of GLOSSARY) o = o.replace(re, to); return o; };
+  let userGlossary = [];
+  const normalizeGlossary = (s) => {
+    let o = s;
+    for (const [re, to] of GLOSSARY) o = o.replace(re, to);
+    for (const [re, to] of userGlossary) o = o.replace(re, to);
+    return o;
+  };
+  // Same user glossary as the Meet content script - names/products/jargon as `heard => correct`, one per
+  // line, every entry escaped to a literal before it touches a RegExp (never a user-supplied pattern).
+  function buildUserGlossary(raw) {
+    const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    userGlossary = String(raw || '').split('\n').map((line) => {
+      const i = line.indexOf('=>');
+      if (i < 0) return null;
+      const heard = line.slice(0, i).trim(), correct = line.slice(i + 2).trim();
+      if (!heard || !correct) return null;
+      try { return [new RegExp(`\\b${esc(heard)}\\b`, 'gi'), correct.replace(/\$/g, '$$$$')]; } catch (_) { return null; }
+    }).filter(Boolean);
+  }
+  try {
+    chrome.storage.local.get(['mla_glossary']).then((c) => buildUserGlossary(c && c.mla_glossary));
+    chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && ch.mla_glossary) buildUserGlossary(ch.mla_glossary.newValue); });
+  } catch (_) {}
   // For comparing two ASR revisions of the same utterance: punctuation and case carry no signal there.
   const norm = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 

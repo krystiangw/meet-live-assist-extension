@@ -24,6 +24,22 @@ hard-labelled `You`. The thing that label unlocked was an autonomous agent with 
   introduced when I separated disclosure from the autopilot opt-in. It is now honoured exactly once per
   session, which is its only legitimate use; the panel fires the real disclosure first, so it claims the slot.
 
+### Reaching past engineers, without new features
+
+From a user-segment audit. Two changes that widen the audience and cost almost nothing, plus the honest
+finding that most of what looks engineering-specific (the advice markers, the meeting modes) is actually
+general and was left alone.
+
+- **The Draft action routes through the tools the assistant already has.** It is the user's own session, so
+  it inherits their MCP connectors - Atlassian, Linear, Asana, HubSpot, a Google Doc, whatever they use. The
+  skill now says: produce the artifact in the tool you are connected to, else return markdown. The panel
+  knows about no specific tool. This is where bring-your-own-brain beats a SaaS: you inherit the user's
+  ecosystem instead of rebuilding each integration.
+- **An editable glossary in Options.** `heard => correct`, one per line, for the proper nouns, product names
+  and colleagues' names ASR reliably mangles. Every entry is escaped to a literal before it touches a RegExp,
+  so a user cannot inject a pattern or a catastrophic backtrack into the live caption path. This is the same
+  quality lever for accents, non-native speakers and hard-of-hearing users at once.
+
 ### The tracker is no longer Jira
 
 Ticket linking, the Draft button and the assistant's drafting instruction all hardcoded Jira. A team on

@@ -291,8 +291,15 @@ When the user clicks **Draft <tracker>** on an action item, a chat message arriv
 The tracker is whatever the user configured (Jira, Linear, Asana, a plain note - the message names it), so
 match **their** tool and **their** team's format, not a fixed one. For an engineering ticket that usually
 means a title plus Goal / Summary / Test plan and the ticket id in a footer; for a sales follow-up, a
-recruiter's scorecard or a lawyer's action, it means whatever that discipline actually writes. **Draft only,
-never create** (Tier 2, outward): post it back via chat, and create it only on explicit typed confirmation.
+recruiter's scorecard or a lawyer's action, it means whatever that discipline actually writes.
+
+**Route through the tools YOU already have, not a list this product maintains.** You are the user's own
+session, so you have whatever MCP connectors they use - Atlassian, Linear, Asana, HubSpot, Slack, a Google
+Doc, whatever. Produce the artifact for the tool the tracker name points at *if you are connected to it*; if
+you are not connected to anything that fits, return clean markdown for them to paste. Never assume a tool the
+user has not connected. This is the whole reason a bring-your-own-brain design beats a SaaS here: you inherit
+their ecosystem instead of us rebuilding each integration. **Draft only, never create** (Tier 2, outward):
+post it back via chat, and create it only on explicit typed confirmation.
 
 **Autopilot (grooming / mob-testing).** `create=`/`postChat=` arrive on the state line (step 2) - no
 separate request needed.

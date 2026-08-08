@@ -9,6 +9,7 @@ const tokenInput = document.getElementById('serverToken');
 const namesInput = document.getElementById('selfNames');
 const trackerNameInput = document.getElementById('trackerName');
 const trackerUrlInput = document.getElementById('trackerUrl');
+const glossaryInput = document.getElementById('glossary');
 const enSel = document.getElementById('ttsVoiceEn');
 const plSel = document.getElementById('ttsVoicePl');
 const saved = document.getElementById('saved');
@@ -44,7 +45,7 @@ async function loadVoices(selEn, selPl) {
 const announceBox = document.getElementById('announce');
 const announceTextInput = document.getElementById('announceText');
 
-chrome.storage.local.get(['serverUrl', 'ttsVoiceEn', 'ttsVoicePl', 'mla_token', 'mla_names', 'mla_jira_base', 'mla_tracker_name', 'mla_tracker_url', 'mla_announce', 'mla_announce_text']).then((c) => {
+chrome.storage.local.get(['serverUrl', 'ttsVoiceEn', 'ttsVoicePl', 'mla_token', 'mla_names', 'mla_jira_base', 'mla_tracker_name', 'mla_tracker_url', 'mla_glossary', 'mla_announce', 'mla_announce_text']).then((c) => {
   announceBox.checked = c.mla_announce !== false; // absent means never configured, and the default is on
   announceTextInput.value = c.mla_announce_text || ANNOUNCE_DEFAULT;
   input.value = c.serverUrl || DEFAULT_SERVER;
@@ -52,6 +53,7 @@ chrome.storage.local.get(['serverUrl', 'ttsVoiceEn', 'ttsVoicePl', 'mla_token', 
   namesInput.value = c.mla_names || '';
   // Migrate the old Jira-only setting: a base URL becomes a {key} template, and the name defaults to Jira.
   trackerNameInput.value = c.mla_tracker_name !== undefined ? c.mla_tracker_name : (c.mla_jira_base ? 'Jira' : '');
+  glossaryInput.value = c.mla_glossary || '';
   trackerUrlInput.value = c.mla_tracker_url !== undefined ? c.mla_tracker_url
     : (c.mla_jira_base ? `${c.mla_jira_base.replace(/\/+$/, '')}/browse/{key}` : '');
   loadVoices(c.ttsVoiceEn || DEFAULT_EN, c.ttsVoicePl || DEFAULT_PL);
@@ -74,7 +76,7 @@ document.getElementById('enableMic').addEventListener('click', async () => {
 });
 
 document.getElementById('save').addEventListener('click', async () => {
-  await chrome.storage.local.set({ serverUrl: serverUrl(), ttsVoiceEn: enSel.value, ttsVoicePl: plSel.value, mla_token: (tokenInput.value || '').trim(), mla_names: (namesInput.value || '').trim(), mla_tracker_name: (trackerNameInput.value || '').trim(), mla_tracker_url: (trackerUrlInput.value || '').trim(), mla_announce: announceBox.checked, mla_announce_text: (announceTextInput.value || '').trim() || ANNOUNCE_DEFAULT });
+  await chrome.storage.local.set({ serverUrl: serverUrl(), ttsVoiceEn: enSel.value, ttsVoicePl: plSel.value, mla_token: (tokenInput.value || '').trim(), mla_names: (namesInput.value || '').trim(), mla_tracker_name: (trackerNameInput.value || '').trim(), mla_tracker_url: (trackerUrlInput.value || '').trim(), mla_glossary: (glossaryInput.value || '').trim(), mla_announce: announceBox.checked, mla_announce_text: (announceTextInput.value || '').trim() || ANNOUNCE_DEFAULT });
   saved.style.opacity = '1';
   setTimeout(() => { saved.style.opacity = '0'; }, 1500);
 });

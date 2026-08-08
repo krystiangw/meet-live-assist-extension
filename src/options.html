@@ -55,6 +55,12 @@
     advice / chat / transcript become links (Jira and Linear share that shape). Leave blank for trackers that
     have no short keys, or to switch linking off.</div>
 
+  <label for="glossary">Names &amp; terms the transcriber mishears</label>
+  <textarea id="glossary" rows="4" placeholder="Acme =&gt; Acme&#10;acme =&gt; Ada Lovelace&#10;kubernetes =&gt; Kubernetes" style="width:100%;font-family:inherit;"></textarea>
+  <div class="hint">One per line, <code>heard =&gt; correct</code>. Whenever captions render the left side, the
+    transcript shows the right. Best for proper nouns, product names and colleagues' names - the words ASR
+    reliably mangles. Entries are matched as whole words and treated literally (not patterns).</div>
+
   <label>Microphone (co-pilot mode)</label>
   <button id="enableMic" type="button" style="margin-top:0;">Enable microphone</button>
   <span id="micState" style="margin-left:10px;font-size:13px;opacity:.7;"></span>

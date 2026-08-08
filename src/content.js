@@ -54,8 +54,32 @@
   function normalizeGlossary(s) {
     let out = s;
     for (const [re, to] of GLOSSARY) out = out.replace(re, to);
+    for (const [re, to] of userGlossary) out = out.replace(re, to);
     return out;
   }
+
+  // User terms the transcriber mishears - names, products, jargon. Entered in Options as `heard => correct`,
+  // one per line. EVERYTHING from the user is escaped to a literal before it touches a RegExp: a glossary is
+  // not a place to accept a pattern, and an un-escaped entry would be either an injection or a catastrophic
+  // backtrack on live captions. `$` in the replacement is escaped too, so "correct" is inserted verbatim.
+  let userGlossary = [];
+  function buildUserGlossary(raw) {
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    userGlossary = String(raw || '').split('\n').map((line) => {
+      const i = line.indexOf('=>');
+      if (i < 0) return null;
+      const heard = line.slice(0, i).trim();
+      const correct = line.slice(i + 2).trim();
+      if (!heard || !correct) return null;
+      try { return [new RegExp(`\\b${esc(heard)}\\b`, 'gi'), correct.replace(/\$/g, '$$$$')]; } catch (_) { return null; }
+    }).filter(Boolean);
+  }
+  try {
+    chrome.storage.local.get(['mla_glossary']).then((c) => buildUserGlossary(c && c.mla_glossary));
+    chrome.storage.onChanged.addListener((ch, area) => {
+      if (area === 'local' && ch.mla_glossary) buildUserGlossary(ch.mla_glossary.newValue);
+    });
+  } catch (_) {}
 
   const CC_LABEL_HINTS = ['caption', 'subtitle', 'napis', 'untertitel', 'sous-titre', 'subtítulo', 'subtitulo'];
   const CC_ON_HINTS = ['turn off', 'wyłącz', 'wylacz', 'disable', 'stop'];
