@@ -937,6 +937,7 @@ const server = http.createServer((req, res) => {
     readBody(req, 8e6, (body) => {
       const data = parseObjectBody(body, res); if (!data) return;
       const session = keyFor(req, data.session);
+      if (!needSession(res, session)) return;
       const m = /^data:image\/(jpeg|png);base64,(.+)$/s.exec(String(data.dataUrl || ''));
       if (!m) { res.writeHead(400); return res.end('bad dataUrl'); }
       const dir = snapDirFor(session);
@@ -1198,7 +1199,9 @@ const server = http.createServer((req, res) => {
       const d = parseObjectBody(body, res, 'bad'); if (!d) return;
       const state = ['running', 'paused', 'stopped'].includes(d.state) ? d.state : null;
       if (!state) { res.writeHead(400); return res.end('bad state'); }
-      control.set(keyFor(req, d.session), state);
+      const s = keyFor(req, d.session);
+      if (!needSession(res, s)) return;
+      control.set(s, state);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, state }));
     });
@@ -1217,6 +1220,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/status')) {
     const u = new URL(req.url, 'http://127.0.0.1');
     const s = keyFor(req, u.searchParams.get('session'));
+    if (!needSession(res, s)) return;
     const ap = autopilot.get(s) || { create: false, postChat: false };
     const sup = (suppress.get(s) || []).filter((e) => !e.ts || Date.now() - e.ts < SUPPRESS_TTL_MS);
     const lines = [`state=${control.get(s) || 'running'} mode=${modes.get(s) || 'auto'} create=${ap.create ? 1 : 0} postChat=${ap.postChat ? 1 : 0} wake=${isWakeAll(s) ? 'all' : 'gated'}${remoteNames.get(s) ? ` remote=${remoteNames.get(s)}` : ''}${sttLangs.get(s) ? ` lang=${sttLangs.get(s)}` : ''}`];
@@ -1301,6 +1305,7 @@ const server = http.createServer((req, res) => {
     readBody(req, 2e6, (body) => {
       const d = parseObjectBody(body, res, 'bad json'); if (!d) return;
       const s = keyFor(req, d.session);
+      if (!needSession(res, s)) return;
       const text = typeof d.text === 'string' ? d.text : '';
       if (!text.trim()) { res.writeHead(400); return res.end('empty'); }
       summaries.set(s, text);
@@ -1324,9 +1329,11 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/autopilot') {
     readBody(req, 1e4, (body) => {
       const d = parseObjectBody(body, res, 'bad'); if (!d) return;
-      autopilot.set(keyFor(req, d.session), { create: !!d.create, postChat: !!d.postChat });
+      const s = keyFor(req, d.session);
+      if (!needSession(res, s)) return;
+      autopilot.set(s, { create: !!d.create, postChat: !!d.postChat });
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(autopilot.get(keyFor(req, d.session))));
+      res.end(JSON.stringify(autopilot.get(s)));
     });
     return;
   }
@@ -1359,6 +1366,7 @@ const server = http.createServer((req, res) => {
     readBody(req, 1e5, (body) => {
       const d = parseObjectBody(body, res, 'bad json'); if (!d) return;
       const session = keyFor(req, d.session);
+      if (!needSession(res, session)) return;
       if (!ACT_OPS.has(d.op)) { res.writeHead(400); return res.end('bad op'); }
       let a = acts.get(session);
       if (!a) { a = { seq: 0, items: [] }; acts.set(session, a); }
@@ -1490,6 +1498,7 @@ const server = http.createServer((req, res) => {
     readBody(req, 1e5, (body) => {
       const d = parseObjectBody(body, res, 'bad'); if (!d) return;
       const session = keyFor(req, d.session);
+      if (!needSession(res, session)) return;
       const text = typeof d.text === 'string' ? d.text.trim().slice(0, 500) : '';
       if (!text) { res.writeHead(400); return res.end('empty'); }
       const list = suppress.get(session) || [];
@@ -1546,6 +1555,7 @@ const server = http.createServer((req, res) => {
     readBody(req, 1e4, (body) => {
       const data = parseObjectBody(body, res); if (!data) return;
       const session = keyFor(req, data.session);
+      if (!needSession(res, session)) return;
       const mode = MODES.has(data.mode) ? data.mode : 'auto';
       modes.set(session, mode);
       try { fs.writeFileSync(modeFileFor(session), mode, OWNER_ONLY); } catch (_) {}

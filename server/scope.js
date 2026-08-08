@@ -29,8 +29,18 @@ const LOCAL_USER = 'local';
 const SEP = '~';
 
 // Only allow safe, contained names. Anything else becomes a path component and could escape the data dir.
+// The literal strings a broken caller sends after interpolating a variable that was never set. They are
+// perfectly legal session names, which is the whole problem: the server created `undefined.txt`, that became
+// the newest transcript, the assistant pinned it, and an hour of a real interview was recorded into a
+// namespace the panel was not watching - with every request answering a healthy 200. The guard existed on
+// /append only, so six other routes could still mint the same file; /context could create it outright.
+// Catching them here means every route that already refuses a session-less request refuses these too.
+const POISON_NAMES = /^(undefined|null|nan|none|nil|false|0)$/i;
+
 function safeSession(name) {
-  const cleaned = String(name || '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120);
+  const raw = String(name || '').trim();
+  if (POISON_NAMES.test(raw)) return NO_SESSION;
+  const cleaned = raw.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120);
   // Reject pure-dot names ('.', '..'): joined with a dir they would escape it - `/clear` on '..' would
   // recursively delete the whole data dir.
   if (!cleaned || /^\.+$/.test(cleaned)) return NO_SESSION;
