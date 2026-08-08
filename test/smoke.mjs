@@ -7,7 +7,7 @@
 // standing between a visited web page and /edit, the session guard is what stopped an hour of a real
 // interview landing in `undefined.txt`, and the advice round-trip is the whole point of the server.
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, existsSync, statSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, statSync, readdirSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -57,6 +57,10 @@ async function boot(port) {
 
 try {
   const port = await freePort();
+  // mkdtempSync already creates 0700, so an owner-only assertion on a fresh temp dir passes whether or not
+  // the server does anything. Loosen it first: now the check measures the server's chmod, which is the
+  // thing that was actually regressing.
+  chmodSync(dir, 0o755);
   let base, health;
   ({ proc: server, base, health } = await boot(port));
   check('/health responds without a token', health.ok === true);
@@ -156,6 +160,26 @@ try {
     (await rawGet('/pair', { Host: 'attacker.example', 'X-MLA-Pair': '1' })) === 403);
   check('while loopback keeps working',
     (await rawGet('/health', { Host: `127.0.0.1:${port}` })) === 200);
+
+  // `JSON.parse('null')` succeeds, and the next line reads a property off it inside an http 'end' handler
+  // where nothing catches. One malformed body ended the process on 29 of 30 POST routes - which, mid-call,
+  // means the recording simply stops. Under launchd it restarts fast enough that the only evidence is a gap.
+  const postRoutes = ['append', 'advice', 'items', 'chat', 'summary', 'mode', 'brain-ping', 'brain-takeover',
+    'autopilot', 'callchat', 'suppress', 'context', 'wake-mode', 'control'];
+  let survivedAll = true;
+  let allRejected = true;
+  for (const route of postRoutes) {
+    for (const body of ['null', '"a string"', '[1,2]', '17']) {
+      let status = 0;
+      try {
+        status = (await fetch(`${base}/${route}`, { method: 'POST', headers: auth, body })).status;
+      } catch (_) { survivedAll = false; break; }
+      if (status !== 400) allRejected = false;
+    }
+    if (!survivedAll) { check(`the server survives a malformed body on /${route}`, false, 'process died'); break; }
+  }
+  check('no POST route can be killed by a malformed body', survivedAll);
+  check('and every one of them answers 400 rather than guessing', allRejected);
 
   const noSession = await fetch(`${base}/append`, {
     method: 'POST', headers: auth, body: JSON.stringify({ session: 'undefined', line: 'x\n' }),
