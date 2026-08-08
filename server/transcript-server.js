@@ -293,7 +293,10 @@ function speak(text, device, voice, done) {
   if (!clean.trim()) return done(new Error('empty'));
   const v = (typeof voice === 'string' && voice.trim()) ? voice.trim() : TTS_VOICE;
   const tmp = path.join(os.tmpdir(), `mla-tts-${Date.now()}.aiff`);
-  execFile('say', ['-v', v, '-o', tmp, clean], (err) => {
+  // `--` or the text is read as flags: a caption containing `-o ~/.ssh/id_ed25519` truncates that file, and
+  // `-f /etc/passwd` makes `say` read a file aloud - into the meeting, when the panel routes to the virtual
+  // device. The text here is free-form model output and, through the transcript, ultimately attacker-shaped.
+  execFile('say', ['-v', v, '-o', tmp, '--', clean], (err) => {
     if (err) return done(err);
     if (typeof device === 'number') return playFile(tmp, device, done);
     if (typeof device === 'string' && device.trim()) {
@@ -765,7 +768,25 @@ function cors(req, res) {
   res.setHeader('Access-Control-Allow-Private-Network', 'true');
 }
 
+// A browser reaching us after DNS rebinding sends the ATTACKER's hostname in Host while the connection
+// really is to 127.0.0.1 - and because the page is then same-origin with us, it sends no Origin, faces no
+// preflight, and may set any header it likes. Every argument about CORS and custom headers is an argument
+// about what a browser does BEFORE that point; none of it is a server-side control. Checking Host is, and it
+// is the only check here that a rebound page cannot satisfy: it would have to send `127.0.0.1`, which points
+// it back at itself. Cheap, total, and it makes the /pair reasoning sound rather than merely plausible.
+const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`, `[::1]:${PORT}`, '127.0.0.1', 'localhost', '[::1]']);
+function hostAllowed(req) {
+  const h = String(req.headers.host || '').toLowerCase();
+  return ALLOWED_HOSTS.has(h);
+}
+
 const server = http.createServer((req, res) => {
+  if (!hostAllowed(req)) {
+    // Loud, because the only ways to get here are a misconfiguration and an attack, and both deserve a line.
+    console.warn(`[transcript] refused a request for Host=${JSON.stringify(req.headers.host || '')} - this server answers only on loopback`);
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    return res.end('this server answers only to 127.0.0.1\n');
+  }
   cors(req, res);
 
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
@@ -846,7 +867,12 @@ const server = http.createServer((req, res) => {
         res.writeHead(400); return res.end('missing or invalid session');
       }
       const session = keyFor(req, data.session);
-      const line = typeof data.line === 'string' ? data.line : '';
+      // One line in, one line out. The extension already flattens caption text, but /append is a route rather
+      // than a private function: anything holding the token could otherwise write a second line carrying a
+      // speaker of its choosing - and the assistant decides who may authorize an action by reading exactly
+      // that. Interior newlines become spaces; the single trailing one is the record separator and stays.
+      const rawLine = typeof data.line === 'string' ? data.line : '';
+      const line = rawLine ? rawLine.replace(/\r|\u2028|\u2029/g, ' ').replace(/\n(?=[\s\S])/g, ' ') : '';
       const file = fileFor(session);
       try {
         if (!seenSessions.has(session)) {
@@ -1403,7 +1429,11 @@ const server = http.createServer((req, res) => {
       if (!text) { res.writeHead(400); return res.end('empty'); }
       let cc = callChat.get(session);
       if (!cc) { cc = { seq: 0, items: [] }; callChat.set(session, cc); }
-      cc.seq++; cc.items.push({ seq: cc.seq, text });
+      // `announce` marks the one line that tells the room an assistant is listening. It must NOT ride on
+      // the autopilot's "share ticket links with everyone" opt-in: those are different consents, that one is
+      // off by default, and riding it meant disclosure was switched on, nothing was typed, and nobody was
+      // told - while the privacy policy promised the opposite.
+      cc.seq++; cc.items.push({ seq: cc.seq, text, announce: d.announce === true });
       if (cc.items.length > 50) cc.items.splice(0, cc.items.length - 50);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ seq: cc.seq }));

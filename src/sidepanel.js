@@ -689,7 +689,10 @@ async function pollCallChat() {
     const { items, last } = await r.json();
     if (lastCallChatSeq < 0) { lastCallChatSeq = last || 0; return; } // baseline: don't replay old
     for (const it of items || []) {
-      if (postChatEl.checked) { try { port.postMessage({ type: 'send-call-chat', text: it.text, seq: it.seq }); } catch (_) {} } // double-guard the opt-in
+      // The disclosure is not the autopilot. `postChat` is consent to share ticket links with the room;
+      // `announce` is the line saying you are transcribing. Gating the second on the first meant the room
+      // was never told, silently, on every call.
+      if (it.announce || postChatEl.checked) { try { port.postMessage({ type: 'send-call-chat', text: it.text, seq: it.seq }); } catch (_) {} }
     }
     if (typeof last === 'number') lastCallChatSeq = Math.max(lastCallChatSeq, last);
   } catch (_) {}
@@ -1305,7 +1308,7 @@ async function announceToMeeting(session) {
     }
 
     const r = await fetch(`${serverUrl}/callchat`, {
-      method: 'POST', headers: hdrs(true), body: JSON.stringify({ session, text }),
+      method: 'POST', headers: hdrs(true), body: JSON.stringify({ session, text, announce: true }),
     });
     if (!r.ok) return;
     const { seq } = await r.json();
@@ -1316,9 +1319,13 @@ async function announceToMeeting(session) {
         const res = await fetch(`${serverUrl}/callchat-result?session=${encodeURIComponent(session)}&since=${seq - 1}`, { headers: hdrs() });
         if (!res.ok) return;
         const { items } = await res.json();
+        // No result at all is the FAILURE case, not the pending one: the content script reports every
+        // attempt. Warning only on an explicit `ok:false` meant the most likely breakage - nothing relayed
+        // the message at all - produced no warning, which is the exact belief this check exists to prevent.
         const mine = (items || []).find((i) => i.seq === seq);
-        if (mine && !mine.ok) {
-          appendChat({ role: 'agent', text: `⚠ Could not post the disclosure to the meeting chat (${mine.reason || 'unknown'}). The room has not been told.` });
+        if (!mine || !mine.ok) {
+          const why = mine ? (mine.reason || 'unknown') : 'nothing relayed it to the meeting';
+          appendChat({ role: 'agent', text: `⚠ Could not post the disclosure to the meeting chat (${why}). **The room has not been told.**` });
         }
       } catch (_) {}
     }, 6000);
