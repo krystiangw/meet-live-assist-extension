@@ -55,6 +55,21 @@ Then:
 `./install.sh` takes `MLA_USER`, `MLA_LANGUAGE`, `MLA_DOMAIN` and `MLA_TRANSCRIPTS_DIR` so the assistant
 addresses you by name, in your language, and knows roughly what your meetings are about.
 
+### Pick a profile
+
+`MLA_PROFILE` decides which meeting types the assistant knows about and what it leads with. Everything else -
+the markers, the modes, the board - is the same, because those turned out to be domain-neutral.
+
+| Profile | For | It leads with |
+| --- | --- | --- |
+| `engineering` (default) | standups, incidents, refinement, QA | decisions, scope creep, risk, action items |
+| `second-language` | any meeting not in your first language | 🟢 SAY - the sentence, ready to speak, in the meeting's language |
+| `research` | user interviews, usability sessions | silence, leading-question warnings, guide coverage |
+| `generic` | anything else | responding well in real time |
+
+They are plain files in [`skill/profiles/`](skill/profiles/) - about a dozen lines each. Write your own and
+pass its name; the installer refuses a profile it cannot find rather than silently using the default.
+
 ## What it stores, and how to get rid of it
 
 Everything lives in one folder - `./transcripts` unless you set `MLA_TRANSCRIPTS_DIR`:

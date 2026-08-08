@@ -11,6 +11,11 @@
 #   MLA_USER="Ada"                       who the assistant is helping (default: your login name)
 #   MLA_LANGUAGE="Polish"                language for advice labels and framing (default: English)
 #   MLA_DOMAIN="backend eng, payments"   one line naming the meetings you sit in, used for pre-briefs
+#   MLA_PROFILE=engineering              which meeting types the assistant knows about. One of the files in
+#                                        skill/profiles/ - engineering (default), second-language, research,
+#                                        generic. Nothing else changes: the markers and modes are the same,
+#                                        because they turned out to be domain-neutral. Add your own by
+#                                        dropping a file in that directory.
 #   MLA_TRANSCRIPTS_DIR=/path            where the server writes (default: <repo>/transcripts)
 #   MLA_PRO=1                            keep the page-control / live-debugging sections in the skill;
 #                                        default drops them, matching `build.sh --public`
@@ -26,6 +31,12 @@ USER_NAME="${MLA_USER:-$(id -F 2>/dev/null || id -un)}"
 LANGUAGE="${MLA_LANGUAGE:-English}"
 DOMAIN="${MLA_DOMAIN:-your day-to-day work}"
 PRO="${MLA_PRO:-0}"
+PROFILE="${MLA_PROFILE:-engineering}"
+PROFILE_FILE="$REPO_DIR/skill/profiles/$PROFILE.md"
+if [ ! -f "$PROFILE_FILE" ]; then
+  echo "⚠ unknown MLA_PROFILE=$PROFILE. Available: $(cd "$REPO_DIR/skill/profiles" && ls *.md | sed 's/\.md$//' | tr '\n' ' ')" >&2
+  exit 1
+fi
 
 echo "→ transcripts/data dir: $TRANSCRIPTS_DIR"
 mkdir -p "$TRANSCRIPTS_DIR"
@@ -39,9 +50,15 @@ if [ -e "$REPO_DIR/../meet-live-assist/meet-transcript/transcript-server.js" ] &
 fi
 
 echo "→ installing skill to $SKILL_DEST_DIR"
-echo "  user: $USER_NAME · language: $LANGUAGE · domain: $DOMAIN · pro sections: $([ "$PRO" = 1 ] && echo kept || echo dropped)"
+echo "  user: $USER_NAME · language: $LANGUAGE · domain: $DOMAIN · profile: $PROFILE · pro sections: $([ "$PRO" = 1 ] && echo kept || echo dropped)"
 mkdir -p "$SKILL_DEST_DIR"
 [ -f "$SKILL_DEST_DIR/SKILL.md" ] && { cp "$SKILL_DEST_DIR/SKILL.md" "$SKILL_DEST_DIR/SKILL.md.bak"; echo "  (backed up existing skill → SKILL.md.bak)"; }
+# Splice the profile's meeting-type block in FIRST, so its own placeholders go through the substitution
+# below. A profile is a file that ships with this repo, not user input, so it uses the same placeholders as
+# the skill - and getting the order wrong leaves them raw, which the guard further down catches.
+awk -v f="$PROFILE_FILE" '/__MLA_MEETING_TYPES__/ { while ((getline l < f) > 0) print l; next } { print }' \
+  "$SKILL_SRC" > "$SKILL_DEST_DIR/SKILL.spliced"
+
 # Fill the per-machine values into the skill the brain reads. Escape sed replacement metachars (& # \).
 esc() { printf '%s' "$1" | sed 's/[&#\]/\\&/g'; }
 sed -e "s#__MLA_TRANSCRIPTS__#$(esc "$TRANSCRIPTS_DIR")#g" \
@@ -49,7 +66,8 @@ sed -e "s#__MLA_TRANSCRIPTS__#$(esc "$TRANSCRIPTS_DIR")#g" \
     -e "s#__MLA_USER__#$(esc "$USER_NAME")#g" \
     -e "s#__MLA_LANGUAGE__#$(esc "$LANGUAGE")#g" \
     -e "s#__MLA_DOMAIN__#$(esc "$DOMAIN")#g" \
-    "$SKILL_SRC" > "$SKILL_DEST_DIR/SKILL.md"
+    "$SKILL_DEST_DIR/SKILL.spliced" > "$SKILL_DEST_DIR/SKILL.md"
+rm -f "$SKILL_DEST_DIR/SKILL.spliced"
 
 # Drop the sections describing capabilities the public extension build does not ship. A skill that offers
 # a control the panel lacks sends the brain chasing a feature that will silently never respond.

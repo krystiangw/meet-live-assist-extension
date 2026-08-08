@@ -24,6 +24,21 @@ hard-labelled `You`. The thing that label unlocked was an autonomous agent with 
   introduced when I separated disclosure from the autopilot opt-in. It is now honoured exactly once per
   session, which is its only legitimate use; the panel fires the real disclosure first, so it claims the slot.
 
+### Profiles: one product, several kinds of meeting
+
+The meeting-type list was the real hardcode - daily syncs, Sentry incidents, story-point refinement - while
+the things that *look* engineering-specific (the advice markers, the meeting modes) turned out to be
+domain-neutral and were left alone. `MLA_PROFILE` now selects that list at install time:
+
+- `engineering` (default, unchanged), `second-language`, `research`, `generic`. Plain files of about a dozen
+  lines in `skill/profiles/`; write your own and pass its name. An unknown profile is refused loudly rather
+  than falling back to the default.
+- The landing page leads with one general claim and then names who it is for, so a second audience does not
+  cost the first one its headline.
+- Caught while building it: the profile was spliced in *after* placeholder substitution, so its own
+  `__MLA_USER__` and `__MLA_LANGUAGE__` survived raw. The installer's placeholder guard - the one added
+  precisely for a case like this - failed the install rather than shipping it.
+
 ### Reaching past engineers, without new features
 
 From a user-segment audit. Two changes that widen the audience and cost almost nothing, plus the honest
