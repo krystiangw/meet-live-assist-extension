@@ -24,6 +24,19 @@ hard-labelled `You`. The thing that label unlocked was an autonomous agent with 
   introduced when I separated disclosure from the autopilot opt-in. It is now honoured exactly once per
   session, which is its only legitimate use; the panel fires the real disclosure first, so it claims the slot.
 
+### The consent banner now controls what it claims to
+
+Page control - acting in, editing, reading the DOM of, or debugging the user's real logged-in tab - was gated
+by the panel's 🕹 toggle on **one of its four routes**. The red "the assistant can control this tab" banner
+read as the control for all of it, while `/edit` was assigning `innerHTML` in whatever tab the user last
+looked at and `/debug-request` was handing back that tab's cookies and localStorage.
+
+All four are gated in the panel now, and enforced **server-side** as well: a gate that exists only in the
+client is not a gate, and refusing at the source keeps the queue from filling with commands that would fire
+the instant consent is given. Pinned both ways - refused while off, accepted once on.
+
+(Full build only; the public build strips this surface entirely, verified in the built zip.)
+
 ### Profiles: one product, several kinds of meeting
 
 The meeting-type list was the real hardcode - daily syncs, Sentry incidents, story-point refinement - while

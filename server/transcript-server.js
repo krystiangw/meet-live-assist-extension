@@ -803,6 +803,21 @@ function parseObjectBody(body, res, what = 'bad json') {
   return data;
 }
 
+// Page control - acting in, editing, reading the DOM of, or debugging the user's real logged-in tab - is
+// gated by the 🕹 toggle. That gate lived ONLY in the panel, and only on one of the four routes: the red
+// "the assistant can control this tab" banner read as the consent control for all of it while /edit was
+// assigning innerHTML in whatever tab the user last looked at and /debug was handing back its cookies.
+//
+// A gate that exists only in the client is not a gate, so it is enforced here too. Refusing at the source
+// also means the queue stays empty, rather than filling with commands that fire the moment consent is given.
+function needDrive(res, session, what) {
+  if (drive.get(session) === true) return true;
+  console.warn(`[drive] refused ${what} for ${nameOf(session)} - the user has not turned page control on`);
+  res.writeHead(403, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'page control is off', how: 'the user must enable the 🕹 toggle in the panel' }));
+  return false;
+}
+
 function cors(req, res) {
   // Reflect only the extension's own origin - never a web page's. A malicious site's cross-origin
   // request then fails its preflight (custom X-MLA-Token header forces one) and is never sent.
@@ -1106,6 +1121,8 @@ const server = http.createServer((req, res) => {
     readBody(req, 2e6, (body) => {
       const data = parseObjectBody(body, res); if (!data) return;
       const session = keyFor(req, data.session);
+      if (!needSession(res, session)) return;
+      if (!needDrive(res, session, 'a page edit')) return;
       if (!data.op) { res.writeHead(400); return res.end('no op'); }
       let e = edits.get(session);
       if (!e) { e = { seq: 0, items: [] }; edits.set(session, e); }
@@ -1133,6 +1150,8 @@ const server = http.createServer((req, res) => {
     readBody(req, 1e4, (body) => {
       const d = parseObjectBody(body, res, 'bad'); if (!d) return;
       const session = keyFor(req, d.session);
+      if (!needSession(res, session)) return;
+      if (!needDrive(res, session, 'a DOM capture')) return;
       domReq.set(session, (domReq.get(session) || 0) + 1);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ seq: domReq.get(session) }));
@@ -1165,6 +1184,8 @@ const server = http.createServer((req, res) => {
     readBody(req, 1e4, (body) => {
       const d = parseObjectBody(body, res, 'bad'); if (!d) return;
       const session = keyFor(req, d.session);
+      if (!needSession(res, session)) return;
+      if (!needDrive(res, session, 'a debug read')) return;
       const prev = dbgReq.get(session) || { seq: 0 };
       dbgReq.set(session, { seq: prev.seq + 1, kind: String(d.kind || 'storage') });
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1427,6 +1448,7 @@ const server = http.createServer((req, res) => {
       const d = parseObjectBody(body, res, 'bad json'); if (!d) return;
       const session = keyFor(req, d.session);
       if (!needSession(res, session)) return;
+      if (!needDrive(res, session, 'an act')) return;
       if (!ACT_OPS.has(d.op)) { res.writeHead(400); return res.end('bad op'); }
       let a = acts.get(session);
       if (!a) { a = { seq: 0, items: [] }; acts.set(session, a); }

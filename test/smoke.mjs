@@ -141,6 +141,30 @@ try {
   check('and the forged speaker never starts a line',
     !/^\[[^\]]*\]\s*You:/m.test(forgedBody) && !/\nYou:/.test(forgedBody), JSON.stringify(forgedBody));
 
+  // Page control - acting in, editing, reading the DOM of, or debugging the user's real logged-in tab - is
+  // gated by the panel's 🕹 toggle. That gate was in the client only, and only on one of the four routes,
+  // while /edit assigns innerHTML in whatever tab the user last looked at and /debug returns its cookies. A
+  // gate that exists only in the client is not a gate.
+  const driveSession = '2026-01-01_drive-gate';
+  await fetch(`${base}/append`, { method: 'POST', headers: auth, body: JSON.stringify({ session: driveSession, line: '[10:00] Bob: hi\n' }) });
+  const pageControl = [
+    ['/act', { session: driveSession, op: 'click', selector: '#x' }],
+    ['/edit', { session: driveSession, op: 'setHtml', selector: '#x', value: '<img onerror=x>' }],
+    ['/dom-request', { session: driveSession }],
+    ['/debug-request', { session: driveSession, kind: 'storage' }],
+  ];
+  let allRefused = true;
+  for (const [route, body] of pageControl) {
+    const st = (await fetch(`${base}${route}`, { method: 'POST', headers: auth, body: JSON.stringify(body) })).status;
+    if (st !== 403) { allRefused = false; check(`${route} is refused while page control is off`, false, `status ${st}`); }
+  }
+  check('no page-control route is accepted while the user has page control off', allRefused);
+
+  // And once consent IS given, they work - a gate that never opens is not a gate either.
+  await fetch(`${base}/drive`, { method: 'POST', headers: auth, body: JSON.stringify({ session: driveSession, on: true }) });
+  const afterConsent = (await fetch(`${base}/dom-request`, { method: 'POST', headers: auth, body: JSON.stringify({ session: driveSession }) })).status;
+  check('and accepted once the user turns it on', afterConsent === 200, `status ${afterConsent}`);
+
   // `announce` bypasses the postChat opt-out, so it must not be a general channel for posting arbitrary text
   // to every participant. It has one legitimate use - the single disclosure line - and the server honours it
   // exactly once per session; after that it is a normal postChat-gated message. Otherwise a token holder (or

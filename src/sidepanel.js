@@ -1034,7 +1034,10 @@ async function pollEdits() {
     if (!r.ok) return;
     const { items, last } = await r.json();
     if (lastEditSeq < 0) { lastEditSeq = last || 0; return; } // baseline: don't re-apply old edits
-    for (const cmd of items || []) { try { port.postMessage({ type: 'apply-edit', cmd }); } catch (_) {} }
+    // Same gate pollActs has. The red banner and the 🕹 toggle READ as the consent control for page
+    // control; without this they were the consent control for one route out of four, while /edit assigns
+    // innerHTML in the user's logged-in tab and /debug hands back its cookies.
+    for (const cmd of items || []) { if (driveOn) { try { port.postMessage({ type: 'apply-edit', cmd }); } catch (_) {} } }
     if (typeof last === 'number') lastEditSeq = Math.max(lastEditSeq, last);
   } catch (_) {}
 }
@@ -1045,7 +1048,7 @@ async function pollDomRequest() {
     if (!r.ok) return;
     const { seq } = await r.json();
     if (lastDomReqSeq < 0) { lastDomReqSeq = seq; return; }
-    if (seq > lastDomReqSeq) { lastDomReqSeq = seq; try { port.postMessage({ type: 'capture-dom' }); } catch (_) {} }
+    if (seq > lastDomReqSeq) { lastDomReqSeq = seq; if (driveOn) { try { port.postMessage({ type: 'capture-dom' }); } catch (_) {} } }
   } catch (_) {}
 }
 
@@ -1056,7 +1059,7 @@ async function pollDebugRequest() {
     if (!r.ok) return;
     const { seq, kind } = await r.json();
     if (lastDbgReqSeq < 0) { lastDbgReqSeq = seq; return; }
-    if (seq > lastDbgReqSeq) { lastDbgReqSeq = seq; try { port.postMessage({ type: 'debug-do', kind }); } catch (_) {} }
+    if (seq > lastDbgReqSeq) { lastDbgReqSeq = seq; if (driveOn) { try { port.postMessage({ type: 'debug-do', kind }); } catch (_) {} } }
   } catch (_) {}
 }
 
