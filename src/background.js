@@ -228,7 +228,15 @@ function hammingHex(a, b) {
   return d;
 }
 
-async function captureSnapshot(auto = false) {
+// Three callers, three different amounts of trust, and they used to collapse into two:
+//   auto   - the periodic sampler during a screen-share. Fenced to the meeting/shared tab.
+//   agent  - the assistant asked for one. Fenced the SAME way: the assistant reads a live untrusted audio
+//            feed, so a prompt-injected request must not be able to photograph whatever the user happens to
+//            have open - a password manager, a bank, an inbox - and hand the image back to its author.
+//   manual - the user pressed 📷. Captures what is visible, because they can see what that is.
+async function captureSnapshot(mode = 'manual') {
+  const auto = mode === 'auto';
+  const fenced = auto || mode === 'agent';
   const { mla_session } = await chrome.storage.session.get('mla_session');
   if (!mla_session) return;
   if (auto && await isPaused()) return; // no automatic frames while paused (manual 📷 still allowed)
@@ -237,17 +245,26 @@ async function captureSnapshot(auto = false) {
   // Meet tab (which renders the shared screen). Fall back to any active Meet tab.
   let tab = null;
   try { const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); tab = t || null; } catch (_) {}
-  if (auto) {
-    // Auto-capture stays ON THE MEETING - never snapshot a private tab the user flips to mid-call.
+  if (fenced) {
+    // Stays ON THE MEETING - never snapshot a private tab the user flipped to mid-call.
     // Allowed: the Meet/Zoom tab (renders a remote share) and the "presented" tab (first non-meeting tab
-    // seen during a share, i.e. the one being self-shared). Any other tab → skip. Manual 📷 / agent
-    // requests below still capture whatever's visible.
-    if (!tab || !/^https?:/.test(tab.url || '')) return;
+    // seen during a share, i.e. the one being self-shared). Any other tab → skip. Only a manual 📷 still
+    // captures whatever is visible.
+    if (!tab || !/^https?:/.test(tab.url || '')) {
+      if (!auto) broadcast({ type: 'snapshot', ok: false, reason: 'the assistant may only snapshot the meeting' });
+      return;
+    }
     const isMeeting = /^https:\/\/meet\.google\.com\//.test(tab.url) || /^https:\/\/[^/]*\.zoom\.us\//.test(tab.url);
     if (!isMeeting) {
       const { mla_shareTabId } = await chrome.storage.session.get('mla_shareTabId');
       if (mla_shareTabId == null) await chrome.storage.session.set({ mla_shareTabId: tab.id });
-      else if (tab.id !== mla_shareTabId) return; // unrelated tab the user flipped to → don't capture it
+      else if (tab.id !== mla_shareTabId) {
+        // An unrelated tab the user flipped to. Silent for the sampler, but an agent request that lands here
+        // must be reported: otherwise a refusal is indistinguishable from a snapshot that simply did not
+        // happen, and the assistant reasons from a stale frame without knowing it.
+        if (!auto) broadcast({ type: 'snapshot', ok: false, reason: 'the assistant may only snapshot the meeting or the shared tab' });
+        return;
+      }
     }
   } else {
     if (!tab || !/^https?:/.test(tab.url || '')) tab = await findActiveMeetTab();
@@ -741,7 +758,7 @@ chrome.runtime.onConnect.addListener((port) => {
     } else if (m.type === 'ensure-capture') {
       port.postMessage({ type: 'capture-probe', ...(await ensureCapture()) });
     } else if (m.type === 'snapshot-now') {
-      captureSnapshot(!!m.auto);
+      captureSnapshot(m.mode || (m.auto ? 'auto' : 'manual'));
     } else if (m.type === 'stt-start') {
       startStt();
     } else if (m.type === 'stt-stop') {

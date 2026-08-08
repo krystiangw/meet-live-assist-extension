@@ -262,6 +262,32 @@ function appendLine({ ts, speaker, text }) {
 }
 
 // ---- advice --------------------------------------------------------------
+// An <img> the panel renders is a GET to whatever host the URL names, from a privileged extension page, with
+// no click required. In a product whose privacy policy says it makes no third-party requests, that is the
+// only outbound channel there is - and advice text is the most attacker-influenced string here, since a
+// meeting participant can shape it through the transcript. So images may come from the local bridge or from
+// a data: URI, and nowhere else; the CSP enforces the same rule, and this is what makes the refusal visible
+// rather than a silent broken-image icon.
+function safeImageSrc(url) {
+  const u = String(url || '');
+  if (/^data:image\//i.test(u)) return u;
+  if (u.startsWith(`${serverUrl}/`)) return u;
+  return null;
+}
+function appendImage(parent, url, alt) {
+  const src = safeImageSrc(url);
+  if (!src) {
+    const note = document.createElement('div');
+    note.className = 'empty small';
+    note.textContent = `⚠ blocked a remote image (${String(url || '').slice(0, 60)}) - images may only come from your own machine`;
+    parent.appendChild(note);
+    return;
+  }
+  const i = document.createElement('img');
+  i.src = src; if (alt) i.alt = alt; i.className = 'rich-img';
+  parent.appendChild(i);
+}
+
 // Safe inline rich rendering - no innerHTML. Supports bare URLs, [text](url), ![alt](url) images,
 // **bold**, and `code`. Everything else stays literal text.
 // The issue tracker is configurable: Jira and Linear share the `ABC-123` key shape, and other tools have no
@@ -316,7 +342,7 @@ function renderInline(parent, line) {
     if (!best) { parent.appendChild(document.createTextNode(rest)); break; }
     if (best.m.index > 0) parent.appendChild(document.createTextNode(rest.slice(0, best.m.index)));
     const [full, g1, g2] = best.m;
-    if (best.p.kind === 'img') { const i = document.createElement('img'); i.src = g2; i.alt = g1 || ''; i.className = 'rich-img'; parent.appendChild(i); }
+    if (best.p.kind === 'img') { appendImage(parent, g2, g1 || ''); }
     else if (best.p.kind === 'link') { const a = document.createElement('a'); a.href = g2; a.textContent = g1; a.target = '_blank'; a.rel = 'noreferrer'; parent.appendChild(a); }
     else if (best.p.kind === 'url') { const a = document.createElement('a'); a.href = g1; a.textContent = g1; a.target = '_blank'; a.rel = 'noreferrer'; parent.appendChild(a); }
     else if (best.p.kind === 'jira') { parent.appendChild(trackerLink(full) || document.createTextNode(full)); }
@@ -449,7 +475,7 @@ function appendAdvice({ marker, text, image }) {
   const bd = document.createElement('span'); bd.className = 'body';
   if (m === 'SAY') renderSay(bd, text); else renderRich(bd, text);
   if (image && /^(https?:|data:image\/)/.test(image)) {
-    const img = document.createElement('img'); img.src = image; img.className = 'rich-img'; bd.appendChild(img);
+    appendImage(bd, image);
   }
   div.append(mk, bd);
   if (upd) { div.dataset.uc = String(upd); div.append(updatedBadge(upd)); div.classList.add('flash'); }
@@ -690,11 +716,13 @@ async function pollSnapRequest() {
     const { seq } = await r.json();
     if (typeof seq !== 'number') return;
     if (lastReqSeq < 0) { lastReqSeq = seq; return; } // first poll = baseline, don't fire
-    if (seq > lastReqSeq) { lastReqSeq = seq; requestCapture(); } // agent asked for a shot
+    // 'agent', not 'manual': an assistant reading a live untrusted feed must not be able to photograph a tab
+    // the user never offered it. Same fence the periodic sampler uses.
+    if (seq > lastReqSeq) { lastReqSeq = seq; try { port.postMessage({ type: 'snapshot-now', mode: 'agent' }); } catch (_) {} }
   } catch (_) { /* server down */ }
 }
 
-function requestCapture(auto) { try { port.postMessage({ type: 'snapshot-now', auto: !!auto }); } catch (_) {} }
+function requestCapture(auto) { try { port.postMessage({ type: 'snapshot-now', mode: auto ? 'auto' : 'manual' }); } catch (_) {} }
 
 // ---- decisions & action items (the board) --------------------------------
 function resetItems() { itemsEl.innerHTML = '<div class="empty small">Decisions and action items will appear here…</div>'; hasItems = false; lastItemsSeq = 0; syncSearchVisibility(); }
@@ -841,7 +869,7 @@ function appendChat({ role, text, image }) {
   div.className = 'chat-msg ' + (role === 'agent' ? 'agent' : 'user');
   renderRich(div, text);
   if (image && /^(https?:|data:image\/)/.test(image)) {
-    const img = document.createElement('img'); img.src = image; img.className = 'rich-img'; div.appendChild(img);
+    appendImage(div, image);
   }
   chatEl.appendChild(div);
   if (brainWorkEl) chatEl.appendChild(brainWorkEl); // keep the working indicator last

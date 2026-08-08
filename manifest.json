@@ -69,7 +69,7 @@
     }
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: https: http://127.0.0.1:8848"
+    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: http://127.0.0.1:8848"
   },
   "commands": {
     "toggle-stt": {

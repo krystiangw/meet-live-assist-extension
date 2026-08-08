@@ -263,13 +263,30 @@ function resolveDeviceIndex(nameSub, done) {
 
 // Cached BlackHole presence for /health (device listing spawns ffmpeg - cache to avoid a DoS via /health).
 let healthDevCache = { at: 0, blackhole: false };
+// /health is the one route with no token, and this probe spawns ffmpeg. The cache was written inside the
+// callback and only on success, so on the common install - no BlackHole - every request missed it: fifty
+// unauthenticated requests spawned fifty concurrent ffmpeg processes. Two fixes, both about the shape rather
+// than the timeout: cache the negative result too, and collapse concurrent probes onto one in-flight promise
+// so a burst costs exactly one process.
+let blackholeProbe = null;
 function checkBlackhole(done) {
   if (!IS_MAC) return done(false); // the listing goes through ffmpeg's audiotoolbox device, macOS-only
   if (Date.now() - healthDevCache.at < 60000) return done(healthDevCache.blackhole);
-  resolveDeviceIndex('BlackHole', (err, idx) => {
-    healthDevCache = { at: Date.now(), blackhole: !err && idx != null };
-    done(healthDevCache.blackhole);
+  if (blackholeProbe) return blackholeProbe.then(done); // a probe is already running - wait for that one
+  blackholeProbe = new Promise((resolve) => {
+    let settled = false;
+    const finish = (found) => {
+      if (settled) return;
+      settled = true;
+      healthDevCache = { at: Date.now(), blackhole: found }; // cached either way, so a miss is not a spawn
+      blackholeProbe = null;
+      resolve(found);
+    };
+    // An ffmpeg that never returns would otherwise pin the probe open forever and make /health hang with it.
+    const timer = setTimeout(() => finish(false), 5000);
+    resolveDeviceIndex('BlackHole', (err, idx) => { clearTimeout(timer); finish(!err && idx != null); });
   });
+  blackholeProbe.then(done);
 }
 
 function playFile(tmp, deviceIndex, done) {
@@ -870,6 +887,16 @@ const server = http.createServer((req, res) => {
     };
     checkBlackhole((blackhole) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
+      // `dir` is an absolute path, so it names the OS user - and it sits before the token gate. Removing it
+      // was tried and reverted: the MCP adapter discovers its data directory from exactly this field, and
+      // without the directory it has no token, so it cannot use a gated route to ask. Chicken and egg.
+      //
+      // Kept because the leak is not reachable by the party the token exists to stop. A web page can send
+      // this request but cannot read the reply: cors() reflects an allow-origin header only for
+      // chrome-extension:// callers, so a cross-origin read is blocked. What is left is a local process,
+      // which can read the home directory - and the token file - without asking us. A real fix is a
+      // fingerprint the adapter can match its candidate paths against; worth doing if this ever leaves
+      // loopback, not worth breaking discovery for now.
       res.end(JSON.stringify({ ok: true, dir: TRANSCRIPTS_DIR, tools: { ...tools, blackhole } }));
     });
     return;

