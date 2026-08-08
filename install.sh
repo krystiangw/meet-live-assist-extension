@@ -102,7 +102,13 @@ if command -v claude >/dev/null 2>&1; then
     echo "      claude mcp add meet-live-assist --scope user -- node \"$REPO_DIR/server/mcp-server.js\""
   fi
 else
-  echo "  · claude CLI not found - this extension is only useful with Claude Code. Once it is installed:"
+  # Not an error. The adapter is plain JSON-RPC over stdio with nothing vendor-specific in it, so any MCP
+  # client can drive it - Claude Code is simply the one this is tested against.
+  echo "  · claude CLI not found. If you use a different MCP client, register this stdio server with it:"
+  echo "      command: node \"$REPO_DIR/server/mcp-server.js\""
+  echo "    and copy the instructions from skill/meet-live-assist/SKILL.md into whatever that client reads"
+  echo "    (rules file, system prompt, AGENTS.md). See MCP-CLIENTS.md."
+  echo "    If you DO use Claude Code, install it and re-run this script:"
   echo "      claude mcp add meet-live-assist --scope user -- node \"$REPO_DIR/server/mcp-server.js\""
 fi
 

@@ -20,10 +20,15 @@ already pay for, and that is the trade. See [Data flow](#data-flow) for the thre
 
 ## Read this before you install
 
-**You need [Claude Code](https://claude.com/claude-code).** This ships the eyes, ears and hands - the
-capture, the panel, the local bridge - but not the brain. The brain is a Claude Code session on your
-machine, running a skill this installs for you. Without it you get a working transcript recorder and an
-empty advice pane, which is not what the screenshots promise.
+**You need an AI coding agent that speaks MCP - [Claude Code](https://claude.com/claude-code) is the one
+this is tested with.** This ships the eyes, ears and hands - the capture, the panel, the local bridge - but
+not the brain. The brain is an agent session on your own machine, reading the call through MCP tools. Without
+one you get a working transcript recorder and an empty advice pane, which is not what the screenshots promise.
+
+The adapter is plain JSON-RPC over stdio with nothing vendor-specific in it, so other MCP clients (Cursor,
+Cline, Continue, Zed, Codex) can drive it - but one requirement is genuinely harder to meet elsewhere: the
+client has to hold a **persistent background loop**, because MCP is client-pull and nothing on the server can
+ever start a turn. [`MCP-CLIENTS.md`](MCP-CLIENTS.md) explains what to check and what is unverified.
 
 **Your meeting is other people's conversation too.** Turning on captions is invisible to everyone else,
 unlike recording, which Meet badges. So by default this posts one line into the meeting chat when capture

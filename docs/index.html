@@ -63,12 +63,12 @@
     <g fill="#5a6bff"><rect x="40" y="51" width="7" height="16" rx="3.5"/><rect x="52" y="45" width="7" height="28" rx="3.5"/><rect x="64" y="40" width="7" height="38" rx="3.5"/><rect x="76" y="46" width="7" height="26" rx="3.5"/><rect x="88" y="52" width="7" height="14" rx="3.5"/></g>
   </svg>
   <h1>Meet Live Assist</h1>
-  <p class="tag claim">Your Claude Code session sits in the call with you: it already knows your work, it tells
-  the room it is listening, and your transcript stays on your disk.</p>
-  <p class="tag">It reads a Google Meet or Zoom call as it happens and answers you in a side panel while the
-  call is still going: what to say, what was just decided, who owns what, what you agreed to that you
-  should not have. The transcript is a file on your computer. There is no account and no server of ours.</p>
-  <span class="pill">Free · run it yourself · needs Claude Code</span>
+  <p class="tag claim">Your own agent session, in the call with you.</p>
+  <p class="tag">It reads the Google Meet or Zoom transcript as it happens and answers in a side panel while
+  the call is still going: what was just decided, who owns what, the risk you just agreed to, and the sentence
+  to say next, in the meeting's language. The transcript is a file on your disk. No account, no telemetry, no
+  server of ours.</p>
+  <span class="pill">Free · you run it yourself · needs an MCP agent (tested: Claude Code) · Meet + Zoom</span>
 </header>
 
 <div class="wrap">
@@ -96,10 +96,17 @@
 
 <section>
   <h2>What this asks of you</h2>
-  <p><strong>You need <a href="https://claude.com/claude-code">Claude Code</a>.</strong> This ships the eyes,
-  ears and hands - the capture, the panel, the local bridge - but not the brain. The brain is a Claude Code
-  session on your own machine, running a skill the installer sets up for you. Without it you get a working
-  transcript recorder and an empty advice pane, which is not what the rest of this page shows.</p>
+  <p><strong>You need an AI coding agent that speaks MCP.</strong>
+  <a href="https://claude.com/claude-code">Claude Code</a> is the one this is tested with. The extension ships
+  the eyes, ears and hands - capture, panel, local bridge - but not the brain; that is an agent session on your
+  own machine, reading the call through MCP tools. Without one you get a working transcript recorder and an
+  empty advice pane, which is not what the rest of this page shows.</p>
+  <p>Nothing in the adapter is vendor-specific - it is plain JSON-RPC over stdio, and a client calling itself
+  <code>not-claude</code> drives it fine. The catch is not the vendor, it is that MCP is <em>client-pull</em>:
+  nothing on the server can start your assistant's turn, so the client has to hold a persistent background
+  loop. That part is only verified in Claude Code, and
+  <a href="https://github.com/krystiangw/meet-live-assist-extension/blob/main/MCP-CLIENTS.md">MCP-CLIENTS.md</a>
+  says so plainly rather than printing a row of logos.</p>
   <p><strong>The meeting is other people's conversation too.</strong> Turning on captions is invisible to
   everyone else, unlike recording, which Meet badges. So by default this posts one line into the meeting chat
   when capture starts, saying an assistant is transcribing locally. You can edit that line or switch it off.

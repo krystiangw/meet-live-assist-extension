@@ -37,6 +37,22 @@ the instant consent is given. Pinned both ways - refused while off, accepted onc
 
 (Full build only; the public build strips this surface entirely, verified in the built zip.)
 
+### It was never actually limited to Claude
+
+The bridge and the MCP adapter have nothing vendor-specific in them - plain JSON-RPC over stdio, no SDK, no
+Anthropic API, no assumption about the caller. Verified by driving it from a client that identifies itself as
+`not-claude`: handshake completes, all 13 tools list, `tools/call` works. Only the packaging was Claude-shaped.
+
+- The skill mentioned Claude exactly **once**, and it was the one genuinely client-specific instruction: how
+  to arm the background loop. Generalised - the loop itself is plain shell, and the skill now says "whatever
+  your client uses to keep a long command alive", with Claude Code as the named example.
+- `install.sh` no longer treats a missing `claude` CLI as a dead end. It prints the stdio command to register
+  with any other client and completes successfully - verified with no `claude` anywhere on PATH.
+- New `MCP-CLIENTS.md` states what is true and what is untested, rather than printing a row of logos. The
+  real requirement is not the vendor: MCP is client-pull, so nothing on the server can ever start a turn, and
+  the client must hold a **persistent background loop**. That is the part only verified in Claude Code, and
+  it says so.
+
 ### Positioning, decided on evidence rather than taste
 
 A research pass settled whether to lead broad or commit the headline to one segment. Verdict: broad hero,

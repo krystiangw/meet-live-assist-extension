@@ -56,11 +56,18 @@ assisting this meeting, don't start a second watch.
    - The pin is sticky for the whole session. **A new call is not your call:** if the user joins a different
      meeting, a *fresh* agent assists it. You stay on your pinned one and, when it ends, wrap up and stop.
 
-2. **Arm a persistent Monitor as your wake source.** MCP cannot wake you - nothing starts a turn but the
-   Monitor. `attach` returns the loop ready to run as `wakeLoop`: **run it verbatim** with `persistent: true`.
-   Do not rewrite the URL - it carries the session and the reader identity, and getting either wrong looks
-   exactly like a dead server for the rest of the call. The loop prints **only** when something happened, so
-   a quiet meeting costs you nothing.
+2. **Arm a persistent background loop as your wake source.** This is the one thing MCP cannot do for you:
+   the protocol is client-pull, so nothing on the server can ever start your turn. `attach` returns the loop
+   ready to run as `wakeLoop` - a plain shell loop, no client-specific syntax. **Run it verbatim** in whatever
+   your client uses to keep a long-running command alive and surface its output (in Claude Code that is a
+   persistent Monitor; elsewhere it is a background terminal task you keep reading). Do not rewrite the URL -
+   it carries the session and the reader identity, and getting either wrong looks exactly like a dead server
+   for the rest of the call. The loop prints **only** when something happened, so a quiet meeting costs
+   nothing.
+
+   If your client cannot hold a background loop at all, you are not stuck - you just become the wake source:
+   call `poll` yourself whenever you want to catch up. You lose the "tap me when something matters" property,
+   which is most of the value, so treat that as a degraded mode rather than the intended one.
 
    What comes out, and why this and not a file tail:
    - **Only batches worth a turn.** The server writes every caption to `.txt` but releases a batch to the
