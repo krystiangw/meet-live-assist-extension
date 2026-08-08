@@ -45,9 +45,9 @@
   // Conservative ASR fix-ups: Meet/whisper mangle domain nouns. Only high-precision, whole-word
   // replacements that can't corrupt ordinary English. Extend as new manglings show up in transcripts.
   const GLOSSARY = [
-    [/\btest[ -]?g(?:orilla|uerrilla|orila)\b/gi, 'Acme'],
-    [/\bacme\b/gi, 'Acme'],
-    [/\bcore[ -]?signal\b/gi, 'Acme'],
+    // Domain nouns belong to whoever is in the meeting, not to whoever wrote this. Company names used to be
+    // hardcoded here and rewrote strangers' transcripts - "acme", a plausible Spanish ASR output,
+    // became a company they have never heard of, in the record of their own conversation.
     [/\bfeature[ -]fl(?:ag|ight)\b|\bfuture[ -]flag\b/gi, 'feature flag'], // NOT "future flight" (valid phrase)
     [/\bgen[ -]?(\d)\b/gi, 'gen$1'],
   ];

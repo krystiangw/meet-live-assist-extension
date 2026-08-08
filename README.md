@@ -113,7 +113,7 @@ presentation edits (`/edit`, `/dom*`), debug (`/debug*`), brain heartbeat (`/bra
 adapter over the same API, 13 tools. Register it once:
 
 ```bash
-claude mcp add meet-live-assist -- node <repo>/server/mcp-server.js
+claude mcp add meet-live-assist --scope user -- node <repo>/server/mcp-server.js
 ```
 
 It asks the running server where its data dir is (`/health` needs no token) and reads the token from there,
@@ -165,7 +165,8 @@ turns. A held-back batch is never lost - it rides along with the next wake, and 
 
 The server is packaged to stand alone as `meet-live-assist-server` (zero dependencies,
 `server/package.json`), so a user who only wants to run it needs neither this repo nor a clone. **It is not
-on npm yet** - that waits on the licence decision, so `npx meet-live-assist-server` will 404 until then.
+on npm yet**, so `npx meet-live-assist-server` will 404. Publishing it is a deliberate step, not a side
+effect of a docs edit.
 From a clone it is just:
 
 ```bash

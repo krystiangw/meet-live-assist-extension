@@ -93,7 +93,7 @@ cat <<EOF
 ✓ Skill installed, MCP registered, data dir ready. Three steps left, and only the first needs a terminal:
 
 1) Start the bridge server, with a pairing window open:
-     node "$REPO_DIR/server/transcript-server.js" --pair
+     TRANSCRIPTS_DIR="$TRANSCRIPTS_DIR" node "$REPO_DIR/server/transcript-server.js" --pair
    Leave it running. Verify in another shell:
      curl -s http://127.0.0.1:8848/health   # -> {"ok":true,...}
    (Data dir is $TRANSCRIPTS_DIR - set MLA_TRANSCRIPTS_DIR and re-run this script to change it.)
@@ -106,7 +106,11 @@ cat <<EOF
 
 3) Open Claude Code and ask it to assist your meeting. It loads the meet-live-assist skill and attaches.
 
+The server reads TRANSCRIPTS_DIR, this script reads MLA_TRANSCRIPTS_DIR, and they must agree - that is why
+step 1 sets it explicitly. Start it without and the skill looks in one place while the server writes to
+another, with nothing reporting a problem.
+
 Autostart (optional, macOS): server/install-server.sh installs a launchd job so step 1 stops being a
 step. Pair a new extension against a server that is already running with:
-     node "$REPO_DIR/server/transcript-server.js" --pair
+     TRANSCRIPTS_DIR="$TRANSCRIPTS_DIR" node "$REPO_DIR/server/transcript-server.js" --pair
 EOF

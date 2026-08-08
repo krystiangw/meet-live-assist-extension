@@ -48,9 +48,9 @@
   const NOISE_RE = /^(show captions|hide captions|captions|save|more|settings|napisy (są )?włączone|captions (are )?(enabled|on)|transkrypcja (jest )?włączona)$/i;
 
   const GLOSSARY = [
-    [/\btest[ -]?g(?:orilla|uerrilla|orila)\b/gi, 'Acme'],
-    [/\bacme\b/gi, 'Acme'],
-    [/\bcore[ -]?signal\b/gi, 'Acme'],
+    // Domain nouns belong to whoever is in the meeting, not to whoever wrote this. Company names used to be
+    // hardcoded here and rewrote strangers' transcripts - "acme", a plausible Spanish ASR output,
+    // became a company they have never heard of, in the record of their own conversation.
     [/\bfeature[ -]fl(?:ag|ight)\b|\bfuture[ -]flag\b/gi, 'feature flag'],
     [/\bgen[ -]?(\d)\b/gi, 'gen$1'],
   ];

@@ -25,7 +25,7 @@ agent has the relevant context for *this* meeting runs it.
 - Nothing is agent-specific in the capture, so any agent can assist any meeting.
 
 **If the tools are not connected**, register the adapter once and restart the session:
-`claude mcp add meet-live-assist -- node __MLA_REPO__/server/mcp-server.js`. Everything below is also
+`claude mcp add meet-live-assist --scope user -- node __MLA_REPO__/server/mcp-server.js`. Everything below is also
 reachable as plain HTTP on `127.0.0.1:8848` with an `X-MLA-Token` header (token in
 `__MLA_TRANSCRIPTS__/.mla-token`) - use that as a fallback only. The wake loop in step 2 is `curl` by
 necessity (a tool call cannot wake you) and does not count as mixing: it reads under its own position and
@@ -51,7 +51,7 @@ assisting this meeting, don't start a second watch.
      it. Tell the user and stop; `force: true` only if they explicitly want to take over. Re-attaching to a
      meeting **you** already hold is always allowed, so a reconnect costs you nothing.
    - It **fails** if the server is down or no meeting has produced a transcript yet, and says which. Start the
-     server with `npx meet-live-assist-server`, or load the launchd agent
+     server with `node __MLA_REPO__/server/transcript-server.js`, or load the launchd agent
      (`com.mla.meet-transcript-server.plist`). Also remind the user the extension must be capturing.
    - The pin is sticky for the whole session. **A new call is not your call:** if the user joins a different
      meeting, a *fresh* agent assists it. You stay on your pinned one and, when it ends, wrap up and stop.

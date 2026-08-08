@@ -368,13 +368,24 @@ try {
 // What this does NOT defend against: another extension of yours, already installed and holding a
 // 127.0.0.1 host permission, racing for the window while it is open. That is a real gap and the reason the
 // window is not simply left open - two minutes on demand, not always.
+// Two minutes was the window, and the thing it has to outlast is: switch to Chrome, open chrome://extensions,
+// find and enable Developer mode, Load unpacked, pick a folder, pin the icon, click it. Someone doing that for
+// the first time loses the race and lands on an error telling them to go back to the terminal. An explicit
+// --pair means a human is standing there about to do exactly that, so it gets fifteen minutes; the automatic
+// first-boot window stays short because nobody asked for it. Time was never the security boundary here - the
+// X-MLA-Pair header and the single-use claim are.
 const PAIR_WINDOW_MS = Math.max(0, parseInt(process.env.MLA_PAIR_WINDOW_MS || '120000', 10));
+const PAIR_WINDOW_REQUESTED_MS = Math.max(0, parseInt(process.env.MLA_PAIR_WINDOW_REQUESTED_MS || '900000', 10));
 let pairUntil = 0;
-function pairOpen() { return PAIR_WINDOW_MS > 0 && Date.now() < pairUntil; }
+function pairOpen() { return Date.now() < pairUntil; }
 function openPairWindow(why) {
-  if (PAIR_WINDOW_MS <= 0) return 0;
-  pairUntil = Date.now() + PAIR_WINDOW_MS;
-  console.log(`[pair] window open for ${Math.round(PAIR_WINDOW_MS / 1000)}s (${why}) - open the extension side panel to pair it`);
+  const ms = why === 'first run' ? PAIR_WINDOW_MS : PAIR_WINDOW_REQUESTED_MS;
+  if (ms <= 0) return 0;
+  pairUntil = Date.now() + ms;
+  const mins = Math.round(ms / 60000);
+  console.log(`[pair] window open for ${mins >= 1 ? mins + ' min' : Math.round(ms / 1000) + 's'} (${why})`);
+  console.log('[pair]   now: chrome://extensions -> Developer mode -> Load unpacked -> this folder, then click the icon.');
+  console.log('[pair]   the side panel takes the token by itself; nothing to copy.');
   return pairUntil;
 }
 
@@ -800,7 +811,7 @@ const server = http.createServer((req, res) => {
     // stays a 403 because only a caller doing something odd can trigger it, and there the noise is the point.
     if (!pairOpen()) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ ok: false, reason: 'no pairing window open', how: 'meet-live-assist-server --pair' }));
+      return res.end(JSON.stringify({ ok: false, reason: 'no pairing window open', how: 'restart the bridge server with --pair' }));
     }
     pairUntil = 0; // single use: a second claim in the same window would be someone else's
     // Naming the claimant is the only way a wrong pairing is ever noticed. An absent Origin is worth saying

@@ -133,7 +133,9 @@ function resetSnap() { lastSnapAt = 0; lastSnapCount = null; snapErrUntil = 0; s
 setInterval(renderSnapAge, 1000);
 function hdrs(json) { const h = { 'X-MLA-Token': serverToken }; if (json) h['Content-Type'] = 'application/json'; return h; }
 
-// Optional permissions (debugger + all-sites host) are requested at runtime on a user gesture - kept out
+// The all-sites host permission is optional and requested at runtime. `debugger` is NOT optional - Chrome
+// refuses to list it there - so it sits in the install prompt and the public build drops it entirely.
+// Requested at runtime on a user gesture - kept out
 // of the install-time prompt for a cleaner Web Store listing.
 const ALL_URLS = { origins: ['<all_urls>'] };
 async function ensurePerms(perms) {
@@ -1207,7 +1209,9 @@ function renderSetup(h, allSites) {
   const note = document.createElement('div'); note.className = 'setup-note';
   note.textContent = 'Tip: set the meeting caption language to the spoken language (⋮ → Settings → Captions).';
   setupEl.appendChild(note);
-  const missing = !h || !serverToken || !t.ffmpeg;
+  // ffmpeg and whisper are optional - only speech in and out need them. Counting them as missing opened
+  // the setup panel on a first run that was working perfectly, which reads as "broken".
+  const missing = !h || !serverToken;
   if (missing && !autoSetupShown) { autoSetupShown = true; setupEl.hidden = false; } // nudge once on first run
 }
 async function fetchHealth() {
