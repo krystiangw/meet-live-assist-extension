@@ -35,6 +35,16 @@ the point of the work below is that a stranger can actually get to the end of it
   saying plainly because it is the most misread part of this server: the gate never removed a line from the
   transcript, it only decided when to wake the assistant. `all` costs roughly four times the turns.
 
+### Two more things that only a stranger would have noticed
+
+- **Snapshots, the meeting mode and the wake-mode marker were still created world-readable.** Three writers
+  the earlier `OWNER_ONLY` sweep missed, and a `mkdirSync` that left `snapshots/<session>/` traversable. A
+  snapshot is a photograph of whatever was on screen, which makes it the most sensitive thing this server
+  stores and the writer that stayed unprotected longest. All four are pinned by assertions now.
+- **The wake-on-my-name rule carried the author's name in shipped code.** Every install would have woken a
+  stranger's assistant for a person not in their meeting, while giving that stranger nothing.
+  `MLA_URGENT_NAMES` now supplies it and defaults to empty.
+
 ### A licence
 
 - **[PolyForm Internal Use 1.0.0](LICENSE.md)**: free to use, including at your company; no redistribution,

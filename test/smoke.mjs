@@ -7,7 +7,7 @@
 // standing between a visited web page and /edit, the session guard is what stopped an hour of a real
 // interview landing in `undefined.txt`, and the advice round-trip is the whole point of the server.
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -150,6 +150,28 @@ try {
   // author's disk. A statSync here is the only thing that can tell the difference.
   const txtMode = existsSync(path.join(dir, `${session}.txt`)) ? (statSync(path.join(dir, `${session}.txt`)).mode & 0o777) : null;
   check('the transcript file is created owner-only', txtMode === 0o600, txtMode === null ? 'missing' : txtMode.toString(8));
+
+  // A snapshot is a photograph of whatever was on screen - the most sensitive thing this server stores, and
+  // the writer that stayed unprotected longest. The meeting mode and the wake-mode marker are here because
+  // they were missed twice: once when OWNER_ONLY was introduced and once when its misplacement was fixed.
+  await fetch(`${base}/mode`, { method: 'POST', headers: auth, body: JSON.stringify({ session, mode: 'lead' }) });
+  await fetch(`${base}/wake-mode`, { method: 'POST', headers: auth, body: JSON.stringify({ session, mode: 'all' }) });
+  const onePixelJpeg = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==';
+  await fetch(`${base}/snapshot`, { method: 'POST', headers: auth, body: JSON.stringify({ session, dataUrl: onePixelJpeg }) });
+  await sleep(200);
+  const modeOf = (f) => (existsSync(f) ? (statSync(f).mode & 0o777) : null);
+  for (const [label, f] of [
+    ['the meeting mode marker', path.join(dir, `${session}.mode.txt`)],
+    ['the wake-mode marker', path.join(dir, `${session}.wakeall`)],
+  ]) {
+    const m = modeOf(f);
+    check(`${label} is owner-only`, m === 0o600, m === null ? 'missing' : m.toString(8));
+  }
+  const snapDir = path.join(dir, 'snapshots', session);
+  const shots = existsSync(snapDir) ? readdirSync(snapDir).filter((f) => /\.(jpg|png)$/.test(f)) : [];
+  check('a snapshot was written', shots.length > 0, `${shots.length} files`);
+  const shotMode = shots.length ? (statSync(path.join(snapDir, shots[0])).mode & 0o777) : null;
+  check('and the screenshot itself is owner-only', shotMode === 0o600, shotMode === null ? 'missing' : shotMode.toString(8));
 
   const transcript = path.join(dir, `${session}.txt`);
   check('the transcript file is created', existsSync(transcript));

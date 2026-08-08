@@ -607,11 +607,20 @@ function isWakeAll(session) {
   return wakeAll.get(session);
 }
 
-// Wake NOW: decisions, blockers, someone calling Krystian (incl. the caption manglings of his name), and
-// real questions. This bypass is what keeps recall at 100% - the gating below only defers the rest.
-// The name list carries Meet's real manglings of "Krystian" - captions turned it into "Christian" on a
-// live test, and "Chris"/"Kirsten" on earlier calls. Missing a mangling means missing a direct callout.
-const URGENT_RE = /\b(agreed|decided|decision|action item|deadline|blocker|blocked|approved|rejected|ship it|krystian|krystiana|krystianie|christian|chris|kirsten|christos)\b/i;
+// Wake NOW: decisions, blockers, someone calling the user by name, and real questions. This bypass is what
+// keeps recall at 100% - the gating below only defers the rest.
+//
+// The names come from MLA_URGENT_NAMES and default to EMPTY. They used to be the author's, hardcoded, which
+// meant every install shipped a stranger a wake rule for a person not in their meeting - and gave the actual
+// user nothing. Include the manglings your captions produce, not just the spelling on your passport:
+// Meet turned "Krystian" into "Christian" on one live call and "Chris"/"Kirsten" on earlier ones, and a
+// missed mangling is a missed direct callout. Example:
+//   MLA_URGENT_NAMES="ada,adah,aida"
+const URGENT_NAMES = String(process.env.MLA_URGENT_NAMES || '')
+  .split(',').map((n) => n.trim()).filter(Boolean)
+  .map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+const URGENT_WORDS = ['agreed', 'decided', 'decision', 'action item', 'deadline', 'blocker', 'blocked', 'approved', 'rejected', 'ship it'];
+const URGENT_RE = new RegExp(`\\b(${[...URGENT_WORDS, ...URGENT_NAMES].join('|')})\\b`, 'i');
 // Substance: a number or a domain word. Deliberately a short, editable list - it will drift with the work.
 // NOTE: no bare "pr" here. With the /i flag and the trailing \w* it matched problem/pretty/probably/
 // present - 3-9% of batches on real calls passed on that alone. A pull request is either uppercase "PR"
@@ -883,9 +892,9 @@ const server = http.createServer((req, res) => {
       if (!m) { res.writeHead(400); return res.end('bad dataUrl'); }
       const dir = snapDirFor(session);
       try {
-        fs.mkdirSync(dir, { recursive: true });
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
         const file = path.join(dir, `${Date.now()}.${m[1] === 'png' ? 'png' : 'jpg'}`);
-        fs.writeFileSync(file, Buffer.from(m[2], 'base64'));
+        fs.writeFileSync(file, Buffer.from(m[2], 'base64'), OWNER_ONLY);
         const shots = fs.readdirSync(dir).filter((f) => /\.(jpg|png)$/.test(f)).sort();
         for (const old of shots.slice(0, Math.max(0, shots.length - SNAP_MAX))) {
           try { fs.unlinkSync(path.join(dir, old)); } catch (_) {}
@@ -1207,7 +1216,7 @@ const server = http.createServer((req, res) => {
       const s = keyFor(req, d.session);
       const on = d.all === true || d.all === 'true' || d.mode === 'all';
       wakeAll.set(s, on);
-      try { if (on) fs.writeFileSync(wakeAllFileFor(s), '1'); else fs.unlinkSync(wakeAllFileFor(s)); } catch (_) {}
+      try { if (on) fs.writeFileSync(wakeAllFileFor(s), '1', OWNER_ONLY); else fs.unlinkSync(wakeAllFileFor(s)); } catch (_) {}
       flushWake(s);
       console.log(`[wake] ${nameOf(s)} mode=${on ? 'all' : 'gated'}`);
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1489,7 +1498,7 @@ const server = http.createServer((req, res) => {
       const session = keyFor(req, data.session);
       const mode = MODES.has(data.mode) ? data.mode : 'auto';
       modes.set(session, mode);
-      try { fs.writeFileSync(modeFileFor(session), mode); } catch (_) {}
+      try { fs.writeFileSync(modeFileFor(session), mode, OWNER_ONLY); } catch (_) {}
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ mode }));
     });
