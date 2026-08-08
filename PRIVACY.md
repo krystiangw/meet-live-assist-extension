@@ -1,30 +1,54 @@
 # Privacy Policy - Meet Live Assist
 
-_Last updated: 2026-07-18. Internal / private preview._
+_Last updated: 2026-08-08._
 
 Meet Live Assist is a **local-first** browser extension. It has no accounts, no analytics, and no
 first-party servers. This policy describes what the extension accesses and where it goes.
 
 ## What the extension accesses
-- **Google Meet page content** (`https://meet.google.com/*`): the on-screen caption text, screen-share
-  state, the meeting's caption language, and the microphone mute control - read to produce the live
-  transcript and to drive assistance.
-- **Screenshots of the active tab** while you are in a Meet call, for visual context (e.g. shared slides).
-- **The text you type** into the extension's chat box.
-- **Extension settings** you enter (local server URL, server token, chosen TTS voices, your name(s) for
-  mention alerts) - stored with `chrome.storage`.
+Compare this list against `manifest.json`; if it is shorter than the manifest, the list is the bug.
+
+- **Meeting page content** on **Google Meet** (`https://meet.google.com/*`) and the **Zoom web client**
+  (`https://*.zoom.us/*`): on-screen caption text, the meeting chat, screen-share state, the caption
+  language, and the microphone mute control - read to produce the live transcript and to drive assistance.
+- **Screenshots of a tab.** Automatically only while someone is sharing a screen in your call; otherwise
+  only when you press 📷 or your own assistant asks for one.
+- **Your microphone**, in co-pilot mode only, and only after you grant it and start co-pilot from the panel.
+  Nothing is recorded before that.
+- **Tab audio** (`tabCapture`), when you start local speech-to-text with the keyboard command. This captures
+  the audio of remote participants in the meeting tab, not your microphone.
+- **The text you type** into the extension's chat box, and the one disclosure line it can post into the
+  meeting chat on your behalf.
+- **Extension settings** you enter (server URL, token, TTS voices, your name(s) for mention alerts, the
+  disclosure text) - stored with `chrome.storage`.
+
+**Permissions that sound worse than they are, named anyway.** The full build asks for `debugger`, which lets
+the assistant read the network and console of a tab you are sharing while you have the 🐞 toggle on; Chrome
+shows its own banner the whole time. It also asks, *at the moment you use them* rather than at install, for
+access to all sites - needed to screenshot or act on a tab that is not the meeting. **The public build ships
+without `debugger` and without the page-control surface entirely.**
 
 ## Where the data goes
-All of the above is sent **only** to a server you run on your own machine at `http://127.0.0.1:8848`
-(the bundled bridge server). From there it is available to your own local assistant session.
-- The extension makes **no requests to any third-party or first-party remote server.**
-- Transcripts and snapshots are written to files on **your** machine.
-- If your local assistant uses a cloud LLM, the transcript/chat you route to it are subject to **that
-  provider's** policy - that choice and configuration are yours, outside this extension.
+The **extension** sends everything it captures **only** to a server you run on your own machine at
+`http://127.0.0.1:8848`. It makes no request to any other host, ours or anyone's - there is no server of
+ours to make one to. Transcripts, snapshots, chat and summaries are files on **your** disk.
+
+**But the assistant is not local, and this document will not pretend otherwise.** The brain is your own
+Claude Code session. Whatever it reads - the transcript batches it is woken with, the questions you type -
+travels to Anthropic under **your** account, on the same path as everything else you do in Claude Code. A
+live assistant that never contacted a model would have to run one locally; this one deliberately borrows the
+one you already pay for. What stays local is the stored record, and that is the promise being made here.
+
+On Claude's Free, Pro and Max plans, whether your sessions are used to improve the model is a setting you
+control and it changes how long they are retained; see
+[Anthropic's consumer terms](https://www.anthropic.com/news/updates-to-our-consumer-terms), which state
+explicitly that this covers Claude Code. Work, Enterprise and API accounts are on different terms. Check
+which you are on before you point this at a conversation that is not only yours to share.
 
 ## What is NOT collected
-No accounts, no telemetry, no advertising identifiers, no selling or sharing of data. The extension does
-not transmit data off your device on its own.
+No accounts, no telemetry, no advertising identifiers, no selling or sharing of data, and no analytics of
+any kind. The extension transmits nothing off your device on its own initiative; the only content that
+leaves is what your own assistant reads, to your own provider, as described above.
 
 ## Retention & control
 - The local server is **token-authenticated** (`X-MLA-Token`) so no other site or app can read it.
@@ -62,4 +86,6 @@ The panel shows a one-time disclosure reminder at the start of each call.
 See `STORE.md` for the per-permission justification.
 
 ## Contact
-Internal preview - direct questions to the maintainer (Krystian).
+Questions, or something here that does not match what the code does:
+[GitHub Discussions](https://github.com/krystiangw/meet-live-assist-extension/discussions). A mismatch
+between this document and the manifest is a bug worth reporting, and it will be treated as one.

@@ -1,6 +1,7 @@
 # Meet Live Assist
 
-**Your own AI assistant sits in your meeting, and nothing leaves your machine.**
+**Your Claude Code session sits in the call with you.** It already knows your work, it tells the room it is
+listening, and your transcript stays on your disk.
 
 During a Google Meet or Zoom call this captures the transcript, shows it in a side panel, and hands it to
 an assistant running on your own computer. The assistant answers back in the panel while the call is still
@@ -8,6 +9,13 @@ going: what to say, what was decided, who owns what, what you just agreed to tha
 
 Transcripts, screenshots and chat are written to a folder on your disk and served by a server on
 `127.0.0.1` that only you can reach. There is no account, no telemetry, and no server of ours anywhere.
+
+**Where the words actually go, stated once and plainly.** The brain is your own Claude Code session, so
+whatever you route to it - the transcript batches, your questions - leaves your machine for Anthropic under
+*your* account, exactly as any other Claude Code session does. What never leaves is the stored record: the
+files, the screenshots, the chat history. If a page tells you a live meeting assistant runs entirely on your
+machine, it is either using a local model or it is not telling you the truth; this one borrows a brain you
+already pay for, and that is the trade. See [Data flow](#data-flow) for the three-line version.
 
 ## Read this before you install
 
@@ -64,6 +72,19 @@ automatically (`RETENTION_DAYS`, `0` keeps everything forever). The 🗑 button 
 meeting - transcript, chat, summary, snapshots and state - immediately. To remove the whole thing: delete
 that folder, delete `~/.claude/skills/meet-live-assist`, run `claude mcp remove meet-live-assist`, and
 remove the extension from Chrome.
+
+## Data flow
+
+| What | Where it goes |
+| --- | --- |
+| Transcript, screenshots, panel chat, summaries | **Your disk, nowhere else.** Owner-only files, one folder, served by a process bound to `127.0.0.1`. |
+| The call content you route to the assistant, and your questions | **Anthropic, via your own Claude Code session** - same path as anything else you do in Claude Code, your account, your terms. |
+| Anything else | Nothing. There is no third party here. |
+
+On Free / Pro / Max, whether your sessions improve the model is a setting you control and it changes the
+retention period; [Anthropic's consumer terms](https://www.anthropic.com/news/updates-to-our-consumer-terms)
+cover it and say explicitly that it includes Claude Code. Work and API accounts are on different terms.
+Worth knowing before you point this at a conversation that is not only yours.
 
 ## What it does during a call
 

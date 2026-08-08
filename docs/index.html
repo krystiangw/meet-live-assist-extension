@@ -63,7 +63,8 @@
     <g fill="#5a6bff"><rect x="40" y="51" width="7" height="16" rx="3.5"/><rect x="52" y="45" width="7" height="28" rx="3.5"/><rect x="64" y="40" width="7" height="38" rx="3.5"/><rect x="76" y="46" width="7" height="26" rx="3.5"/><rect x="88" y="52" width="7" height="14" rx="3.5"/></g>
   </svg>
   <h1>Meet Live Assist</h1>
-  <p class="tag claim">Your own assistant sees and hears your meeting - and nothing leaves your disk.</p>
+  <p class="tag claim">Your Claude Code session sits in the call with you: it already knows your work, it tells
+  the room it is listening, and your transcript stays on your disk.</p>
   <p class="tag">It reads a Google Meet or Zoom call as it happens and answers you in a side panel while the
   call is still going: what to say, what was just decided, who owns what, what you agreed to that you
   should not have. The transcript is a file on your computer. There is no account and no server of ours.</p>
@@ -87,6 +88,28 @@
 </section>
 
 <section>
+  <h2>Where your words actually go</h2>
+  <p>Three lines, because a product that asks to listen to your meetings owes you this before it owes you a
+  feature list.</p>
+  <table>
+    <tr><th>What</th><th>Where it goes</th></tr>
+    <tr><td>The transcript, the screenshots, your chat with the assistant, the summary</td>
+        <td><strong>Your disk. Nowhere else.</strong> Owner-only files in one folder, served by a process bound
+        to <code>127.0.0.1</code>. No account, no telemetry, no server of ours - there is no server of ours.</td></tr>
+    <tr><td>The parts of the call you route to the assistant, and the questions you ask it</td>
+        <td><strong>Anthropic, through your own Claude Code session</strong> - the same path as every other
+        thing you do in Claude Code, billed to your account, under your terms. That is the trade: this
+        borrows a brain you already pay for instead of running a weaker one locally.</td></tr>
+    <tr><td>Anything else</td><td>Nothing. There is no third party in this product.</td></tr>
+  </table>
+  <p class="note">On Claude's Free, Pro and Max plans, whether your sessions are used to improve the model is
+  a setting <em>you</em> control, and it changes how long they are kept -
+  <a href="https://www.anthropic.com/news/updates-to-our-consumer-terms">Anthropic's consumer terms</a> spell
+  it out, and it explicitly covers Claude Code. Worth two minutes of your attention before you point this at
+  a meeting that is not yours to share. Work and API accounts are on different terms.</p>
+</section>
+
+<section>
   <h2>What it does</h2>
   <div class="grid">
     <div class="card"><div class="ico">📝</div><h4>Live transcript</h4><p>Captures the Meet call transcript in real time into a side panel - from captions or local speech-to-text.</p></div>
@@ -103,7 +126,7 @@
     <div class="card"><div class="ico">🟦</div><h4>Meet & Zoom</h4><p>Works on Google Meet and the Zoom web client - same live transcript, advice and tools.</p></div>
     <div class="card"><div class="ico">🧑‍💻</div><h4>Co-pilot mode</h4><p>No meeting needed: start a session, and the assistant watches your tab and listens to your mic while you debug or build.</p></div>
     <div class="card"><div class="ico">🤖</div><h4>Action-item autopilot</h4><p>In grooming / mob sessions it captures action items and - once you opt in - creates the tickets and drops the links in the meeting chat.</p></div>
-    <div class="card"><div class="ico">🔒</div><h4>Local-first & private</h4><p>Token-authed local server, per-meeting wipe, and time-based retention. Nothing goes to a third-party product.</p></div>
+    <div class="card"><div class="ico">🔒</div><h4>Your files, your account</h4><p>Transcripts and screenshots stay on your disk - no account, no telemetry, no server of ours. What you send the assistant goes to your own Claude account, on your terms.</p></div>
   </div>
 </section>
 
@@ -251,7 +274,7 @@ curl -L -o ~/.local/share/whisper/ggml-base.bin \
 </div>
 
 <footer>
-  Meet Live Assist · a local-first live meeting assistant · runs entirely on your own machine
+  Meet Live Assist · a live meeting assistant you run yourself · your files stay on your disk
 </footer>
 </body>
 </html>
