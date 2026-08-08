@@ -1,0 +1,122 @@
+// What happens when the wake channel cannot be written.
+//
+//   node test/wake-failure.mjs
+//
+// The transcript file and the wake channel are separate writes. The .txt is the complete record; the .wake
+// channel is the only thing the assistant is ever handed. So a failure to write the channel does not lose the
+// conversation - it makes the assistant blind to a stretch of it while everything else looks healthy, which
+// is precisely the failure mode this project has paid for twice.
+//
+// It used to be worse than blind: `b.lines = []` sat outside the try, so a failed write discarded the speech
+// that had not been delivered yet. This suite makes the channel genuinely unwritable (a directory where the
+// file should be) and asserts that the lines survive, that the failure is reported, and that a later
+// successful write delivers everything that was held.
+import { spawn } from 'node:child_process';
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import net from 'node:net';
+
+const ROOT = path.resolve(import.meta.dirname, '..');
+const dir = mkdtempSync(path.join(tmpdir(), 'mla-wakefail-'));
+let failures = 0;
+let server;
+
+function check(name, ok, detail = '') {
+  console.log(`${ok ? '  ok  ' : '  FAIL'} ${name}${ok || !detail ? '' : ` - ${detail}`}`);
+  if (!ok) failures++;
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const freePort = () => new Promise((resolve, reject) => {
+  const s = net.createServer();
+  s.on('error', reject);
+  s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); });
+});
+
+const SESSION = '2026-01-01_wake-failure';
+
+try {
+  const port = await freePort();
+  const base = `http://127.0.0.1:${port}`;
+
+  // Make the wake channel unwritable in a way no permission trick can be fooled by: put a DIRECTORY exactly
+  // where the file has to go. appendFileSync then fails with EISDIR every time, deterministically, on any OS
+  // and regardless of whether the suite runs as root.
+  mkdirSync(path.join(dir, `${SESSION}.wake`), { recursive: true });
+
+  server = spawn(process.execPath, [path.join(ROOT, 'server', 'transcript-server.js')], {
+    env: { ...process.env, PORT: String(port), TRANSCRIPTS_DIR: dir, WAKE_ALL: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stderr = '';
+  server.stderr.on('data', (c) => { stderr += c; });
+
+  let health = null;
+  for (let i = 0; i < 40 && !health; i++) {
+    try { const r = await fetch(`${base}/health`); if (r.ok) health = await r.json(); } catch (_) { await sleep(150); }
+  }
+  if (!health) throw new Error(`server never answered /health\n${stderr}`);
+
+  const token = readFileSync(path.join(dir, '.mla-token'), 'utf8').trim();
+  const auth = { 'Content-Type': 'application/json', 'X-MLA-Token': token };
+
+  const say = (text) => fetch(`${base}/append`, {
+    method: 'POST', headers: auth,
+    body: JSON.stringify({ session: SESSION, line: `[10:00:00] Bob: ${text}\n` }),
+  });
+
+  // WAKE_ALL=1 so every line is released immediately and each append attempts a write.
+  await say('we agreed the deadline is Friday');
+  await say('and the blocker is the migration');
+  await sleep(400);
+
+  // The server must still be serving. A throw inside the flush used to be caught, but the buffer was cleared
+  // regardless; the point here is that neither the process nor the data goes away.
+  const stillUp = await fetch(`${base}/health`).then((r) => r.ok).catch(() => false);
+  check('the server survives a wake channel it cannot write', stillUp);
+
+  // The transcript is the complete record and must be untouched by any of this.
+  const txt = path.join(dir, `${SESSION}.txt`);
+  const body = existsSync(txt) ? readFileSync(txt, 'utf8') : '';
+  check('the transcript still has every line', body.includes('deadline is Friday') && body.includes('the migration'),
+    JSON.stringify(body.slice(-120)));
+
+  // The failure has to reach someone. The panel polls this shape every couple of seconds.
+  const status = await (await fetch(`${base}/poll?session=${SESSION}&consumer=probe&statusOnly=1`, { headers: auth })).json();
+  check('the status reports the wake channel is failing', !!(status.status && status.status.wakeError),
+    JSON.stringify(status.status && status.status.wakeError));
+
+  // And the assistant's own wake loop reads the text form, so it must say so there too.
+  const text = await (await fetch(`${base}/poll?session=${SESSION}&consumer=probe2&format=text`, { headers: auth })).text();
+  check('and the assistant is told, not just left receiving nothing', text.includes('WAKE-WRITE-FAILING'),
+    JSON.stringify(text.slice(0, 200)));
+
+  // Now clear the obstruction. The held lines must arrive - that is the whole point of not discarding them.
+  rmSync(path.join(dir, `${SESSION}.wake`), { recursive: true, force: true });
+  await say('and here is the third line');
+  await sleep(500);
+
+  const wake = path.join(dir, `${SESSION}.wake`);
+  const delivered = existsSync(wake) ? readFileSync(wake, 'utf8') : '';
+  check('the lines held during the failure are delivered once the write succeeds',
+    delivered.includes('deadline is Friday') && delivered.includes('the migration'),
+    JSON.stringify(delivered.slice(0, 200)));
+  check('together with the line that came after it', delivered.includes('the third line'));
+
+  const after = await (await fetch(`${base}/poll?session=${SESSION}&consumer=probe3&statusOnly=1`, { headers: auth })).json();
+  check('and the failure report clears once it is writing again', !(after.status && after.status.wakeError),
+    JSON.stringify(after.status && after.status.wakeError));
+} catch (e) {
+  check('the suite ran to completion', false, String((e && e.stack) || e));
+} finally {
+  // Wait for the process to actually go before removing the directory it is still writing into, or the
+  // cleanup races the final state snapshot and throws ENOTEMPTY over a suite that passed.
+  if (server) {
+    try { server.kill(); } catch (_) {}
+    await new Promise((r) => { server.once('exit', r); setTimeout(r, 3000); });
+  }
+  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}
+
+console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed');
+process.exit(failures ? 1 : 0);

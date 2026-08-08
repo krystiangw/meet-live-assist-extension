@@ -18,6 +18,7 @@
     "test:panel": "node test/panel.mjs",
     "lint": "for f in src/*.js server/*.js; do node --check \"$f\" || exit 1; done",
     "test:limits": "node test/limits.mjs",
-    "test:scope": "node test/scope.mjs"
+    "test:scope": "node test/scope.mjs",
+    "test:wake": "node test/wake-failure.mjs"
   }
 }

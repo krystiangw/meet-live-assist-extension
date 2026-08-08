@@ -700,6 +700,16 @@ function evaluateWake(session) {
   b.since = Date.now();
   scheduleWake(session);
 }
+// The last write error per session, surfaced to the panel. A failure here does not lose the transcript -
+// the .txt is written separately and keeps everything - but it does make the assistant blind to that stretch
+// of the meeting, and blind-but-looking-healthy is the failure mode this project keeps paying for.
+const wakeErrors = new Map(); // session -> { at, message }
+function wakeErrorFor(session) { return wakeErrors.get(session) || null; }
+
+// A buffer this size means the disk has been refusing us for a long time. Keep the newest, because in a live
+// meeting recent context is worth more than old, and say out loud what was dropped.
+const WAKE_RETAIN_MAX_CHARS = WAKE_MAX_CHARS * 8;
+
 function flushWake(session) {
   const b = wakeBuf.get(session);
   if (!b) return;
@@ -709,7 +719,22 @@ function flushWake(session) {
     fs.appendFileSync(wakeFileFor(session), b.lines.join(''), OWNER_ONLY);
     // One line per brain turn - this is the log to read when tuning the WAKE_* thresholds for a real call.
     console.log(`[wake] ${nameOf(session)} +${b.lines.length} lines (window ${b.window}ms)`);
-  } catch (e) { console.error('[transcript] wake write failed', e); }
+  } catch (e) {
+    // Clearing the buffer here - which is what happened while this line sat outside the try - discarded
+    // speech the assistant had not been given yet, on the one path whose entire job is to deliver it. Keep
+    // the lines and retry on the next flush; the wake channel is append-only, so a retry costs nothing.
+    console.error(`[transcript] wake write failed for ${nameOf(session)} - keeping ${b.lines.length} line(s) to retry:`, e.message);
+    wakeErrors.set(session, { at: Date.now(), message: String(e.message || e) });
+    let chars = b.lines.reduce((n, l) => n + l.length, 0);
+    let dropped = 0;
+    while (chars > WAKE_RETAIN_MAX_CHARS && b.lines.length > 1) {
+      chars -= b.lines[0].length; b.lines.shift(); dropped++;
+    }
+    if (dropped) console.error(`[transcript] wake buffer over ${WAKE_RETAIN_MAX_CHARS} chars - dropped the ${dropped} oldest line(s)`);
+    b.lastAt = Date.now(); // respect the min gap before retrying rather than spinning on a broken disk
+    return;
+  }
+  wakeErrors.delete(session);
   b.lines = []; b.firstAt = 0; b.since = 0; b.lastAt = Date.now(); b.window = WAKE_BASE_MS;
 }
 
@@ -1224,6 +1249,9 @@ const server = http.createServer((req, res) => {
     const ap = autopilot.get(s) || { create: false, postChat: false };
     const sup = (suppress.get(s) || []).filter((e) => !e.ts || Date.now() - e.ts < SUPPRESS_TTL_MS);
     const lines = [`state=${control.get(s) || 'running'} mode=${modes.get(s) || 'auto'} create=${ap.create ? 1 : 0} postChat=${ap.postChat ? 1 : 0} wake=${isWakeAll(s) ? 'all' : 'gated'}${remoteNames.get(s) ? ` remote=${remoteNames.get(s)}` : ''}${sttLangs.get(s) ? ` lang=${sttLangs.get(s)}` : ''}`];
+    // The assistant needs to know it is being starved, not just quietly receive nothing.
+    const we = wakeErrorFor(s);
+    if (we) lines.push(`WAKE-WRITE-FAILING ${we.message} - you are not receiving this meeting; tell the user`);
     for (const e of sup) lines.push(`suppress[${e.kind || 'any'}] ${e.text}`);
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end(lines.join('\n') + '\n');
@@ -1729,6 +1757,9 @@ const server = http.createServer((req, res) => {
       state: control.get(s) || 'running',
       mode: modes.get(s) || 'auto',
       wake: isWakeAll(s) ? 'all' : 'gated',
+      // Present only when the wake channel is failing to write. A console line in a log file nobody tails is
+      // not a report; the panel polls this every two seconds and can say so where the user is already looking.
+      wakeError: wakeErrorFor(s),
       autopilot: { create: !!ap.create, postChat: !!ap.postChat },
       remoteName: remoteNames.get(s) || null,
       sttLang: sttLangs.get(s) || null,
@@ -1877,6 +1908,12 @@ const server = http.createServer((req, res) => {
           + ` postChat=${status.autopilot.postChat ? 1 : 0} wake=${status.wake}`
           + `${status.remoteName ? ` remote=${status.remoteName}` : ''}${status.sttLang ? ` lang=${status.sttLang}` : ''}\n`;
         for (const e of status.suppress) out += `suppress[${e.kind || 'any'}] ${e.text}\n`;
+      }
+      // Outside the statusChanged block on purpose: while the channel is failing, the assistant is receiving
+      // no batches at all, so `statusChanged` is the one thing that will not fire. Reporting it only on a
+      // change would mean reporting it never, which is the shape of every silent failure in this project.
+      if (status.wakeError) {
+        out += `WAKE-WRITE-FAILING ${status.wakeError.message} - you are NOT receiving this meeting; tell the user in the panel\n`;
       }
       for (const r of ccr.items.filter((i) => i.seq > ackFrom)) out += `callchat[${r.ok ? 'sent' : 'failed'}] ${r.reason || ''}\n`;
       // Prefixed, and above the transcript: the user asking you something directly outranks the meeting.
