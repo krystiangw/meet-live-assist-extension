@@ -31,3 +31,87 @@ jobs:
         with:
           name: zips
           path: dist/*.zip
+
+  # The tests above exercise the code. This exercises the thing a stranger actually does first, on an OS
+  # nobody here runs: a clean checkout, no Claude CLI, a sandboxed HOME, every profile. The install path has
+  # broken twice in ways the unit suites could not see - a placeholder left raw, an env var read under two
+  # different names - and both were caught by running it rather than by reading it.
+  install-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install with every profile, with no Claude CLI on PATH
+        run: |
+          set -euo pipefail
+          for profile in engineering second-language research generic; do
+            home="$(mktemp -d)"
+            HOME="$home" MLA_TRANSCRIPTS_DIR="$home/data" MLA_PROFILE="$profile" \
+              MLA_USER="Ada" MLA_LANGUAGE="Spanish" MLA_DOMAIN="support" ./install.sh
+            skill="$home/.claude/skills/meet-live-assist/SKILL.md"
+            test -f "$skill" || { echo "::error::$profile did not install a skill"; exit 1; }
+            if grep -q '__MLA_' "$skill"; then
+              echo "::error::$profile left placeholders unsubstituted"; grep -o '__MLA_[A-Z_]*__' "$skill" | sort -u; exit 1
+            fi
+            grep -q "Ada" "$skill" || { echo "::error::$profile did not personalise the skill"; exit 1; }
+            echo "  ok  $profile"
+          done
+
+      - name: Refuse an unknown profile rather than silently defaulting
+        run: |
+          home="$(mktemp -d)"
+          if HOME="$home" MLA_TRANSCRIPTS_DIR="$home/data" MLA_PROFILE=does-not-exist ./install.sh; then
+            echo "::error::an unknown profile was accepted"; exit 1
+          fi
+          echo "  ok  refused"
+
+      # Everything here is Linux-specific and has never run on Linux: the scratch directory that replaced
+      # /tmp, the binary resolution that falls through Homebrew to /usr/bin, and the degradation when the
+      # optional media tools are simply absent - which is the normal case on a fresh machine.
+      - name: Run the server end to end on Linux, with no ffmpeg and no whisper
+        run: |
+          set -euo pipefail
+          data="$(mktemp -d)"
+          TRANSCRIPTS_DIR="$data" PORT=8848 node server/transcript-server.js --pair &
+          srv=$!
+          for i in $(seq 1 40); do curl -sf http://127.0.0.1:8848/health >/dev/null && break || sleep 0.25; done
+
+          curl -sf http://127.0.0.1:8848/health | tee /dev/stderr | grep -q '"ok":true'
+
+          token="$(cat "$data/.mla-token")"
+          curl -sf -X POST -H "X-MLA-Token: $token" -H 'Content-Type: application/json' \
+            -d '{"session":"2026-01-01_ci","line":"[10:00:00] Bob: we agreed the deadline is Friday\n"}' \
+            http://127.0.0.1:8848/append
+          test -f "$data/2026-01-01_ci.txt" || { echo "::error::no transcript written"; exit 1; }
+
+          # The permission promise, checked on the OS where the default umask actually differs.
+          mode="$(stat -c '%a' "$data/2026-01-01_ci.txt")"
+          test "$mode" = "600" || { echo "::error::transcript is $mode, expected 600"; exit 1; }
+          dirmode="$(stat -c '%a' "$data")"
+          test "$dirmode" = "700" || { echo "::error::data dir is $dirmode, expected 700"; exit 1; }
+
+          # Pairing, over the wire, from something that is not a browser.
+          curl -sf -H 'X-MLA-Pair: 1' -H 'Origin: chrome-extension://ci' http://127.0.0.1:8848/pair | grep -q '"token"'
+
+          # No meeting audio may be left lying in the shared /tmp.
+          if ls /tmp/mla-stt-* /tmp/mla-tts-* >/dev/null 2>&1; then
+            echo "::error::predictable temp files in the shared /tmp"; ls -l /tmp/mla-*; exit 1
+          fi
+
+          kill $srv
+          echo "  ok  server survives a Linux box with no media tools installed"
+
+  # The mac-only branch - say, afplay, the audiotoolbox device probe - is never executed by the Linux job,
+  # so a syntax or startup error there would ship unnoticed. This is a smoke test, not coverage.
+  macos-smoke:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm run lint
+      - run: npm test
