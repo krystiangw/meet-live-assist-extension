@@ -37,6 +37,23 @@ the instant consent is given. Pinned both ways - refused while off, accepted onc
 
 (Full build only; the public build strips this surface entirely, verified in the built zip.)
 
+### Three ways it could quietly stop working
+
+- **Meeting audio was written to the shared /tmp.** `os.tmpdir()` is per-user and 0700 on macOS, but on Linux
+  it is `/tmp`: raw chunks of the call landed there world-readable, under a `Date.now()` name another local
+  user could predict and pre-create as a symlink. One private `0700` scratch directory now, unguessable names
+  inside it, removed on exit - verified: 0 predictable names left in the shared tmp.
+- **Nothing bounded how many transcriptions ran at once.** Each is a whole process or a model pass, and a
+  burst after a reconnect could put several on the machine the user is *currently in a meeting on*. The result
+  is not a crash but a hot laptop and audio falling behind, which reads as "the transcript stopped". Queued at
+  two at a time, with a bounded backlog - a chunk that waits is still transcribed, but a backlog three minutes
+  deep is stale audio and says so rather than arriving in the middle of a later topic.
+- **Capture stalling was invisible.** The most expensive failure this project has had, twice: from the
+  server's side a broken content script and a quiet room look identical. The server now tracks when each
+  session last received a line and reports a stall on all three surfaces. The panel phrases it as a question -
+  *"if people are talking, capture has stopped; if the room is quiet, ignore this"* - because claiming the
+  wrong one trains people to ignore the warning.
+
 ### Three holes in the local-only promise
 
 - **The assistant could photograph any tab it liked.** Snapshots have three callers with three different

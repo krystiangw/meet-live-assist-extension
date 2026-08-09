@@ -45,7 +45,7 @@ try {
   mkdirSync(path.join(dir, `${SESSION}.wake`), { recursive: true });
 
   server = spawn(process.execPath, [path.join(ROOT, 'server', 'transcript-server.js')], {
-    env: { ...process.env, PORT: String(port), TRANSCRIPTS_DIR: dir, WAKE_ALL: '1' },
+    env: { ...process.env, PORT: String(port), TRANSCRIPTS_DIR: dir, WAKE_ALL: '1', CAPTURE_STALL_MS: '800' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stderr = '';
@@ -113,6 +113,24 @@ try {
   const after = await (await fetch(`${base}/poll?session=${SESSION}&consumer=probe3&statusOnly=1`, { headers: auth })).json();
   check('and the failure report clears once it is writing again', !(after.status && after.status.wakeError),
     JSON.stringify(after.status && after.status.wakeError));
+  // Capture stalling is the third member of the "everything looks green and nothing is arriving" family, and
+  // historically the most expensive: a broken content script and a quiet room are indistinguishable from the
+  // server's side. CAPTURE_STALL_MS is turned right down for the test; the contract is the signal, not 5 min.
+  const stallSession = '2026-01-01_stall';
+  await fetch(`${base}/append`, {
+    method: 'POST', headers: auth,
+    body: JSON.stringify({ session: stallSession, line: '[10:00:00] Bob: one line, then nothing\n' }),
+  });
+  const fresh = await (await fetch(`${base}/brain-ping?session=${stallSession}`, { headers: auth })).json();
+  check('a session that just received a line is not reported as stalled', !fresh.captureStall,
+    JSON.stringify(fresh.captureStall));
+  await sleep(1200); // CAPTURE_STALL_MS is 800 in this suite's env
+  const stalled = await (await fetch(`${base}/brain-ping?session=${stallSession}`, { headers: auth })).json();
+  check('and one that has gone quiet past the threshold is', !!(stalled.captureStall && stalled.captureStall.idleMs >= 800),
+    JSON.stringify(stalled.captureStall));
+  const loopText = await (await fetch(`${base}/poll?session=${stallSession}&consumer=stallprobe&format=text`, { headers: auth })).text();
+  check('and the assistant is told on its own channel', loopText.includes('CAPTURE-STALLED'), JSON.stringify(loopText.slice(0, 160)));
+
 } catch (e) {
   check('the suite ran to completion', false, String((e && e.stack) || e));
 } finally {

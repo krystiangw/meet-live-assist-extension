@@ -185,7 +185,38 @@ function whisperViaServer(wav, lang, done) {
     .catch((e) => done(e));
 }
 
+// Transcription is CPU- or GPU-bound and each call is a whole process or a model pass. Nothing bounded how
+// many ran at once: a co-pilot session and a meeting both streaming chunks, or a burst after the panel
+// reconnects, could put several whisper runs on the machine at the same moment - on the machine the user is
+// currently *in a meeting on*. The result is not a crash, it is the laptop getting hot and the audio falling
+// behind, which reads as "the transcript stopped" rather than as overload.
+//
+// A queue rather than a rejection: a chunk that waits is still transcribed a moment later, and dropping
+// speech to protect the CPU would trade the thing being measured for the thing measuring it.
+const STT_MAX_CONCURRENT = Math.max(1, parseInt(process.env.STT_MAX_CONCURRENT || '2', 10));
+let sttRunning = 0;
+const sttQueue = [];
+function sttNext() {
+  if (sttRunning >= STT_MAX_CONCURRENT || !sttQueue.length) return;
+  sttRunning++;
+  const job = sttQueue.shift();
+  job(() => { sttRunning--; sttNext(); });
+}
+// The queue is bounded too: if transcription has stalled entirely, a growing backlog is stale audio nobody
+// wants by the time it runs. Say what was dropped rather than silently transcribing a conversation from
+// three minutes ago into the middle of the current one.
+const STT_MAX_QUEUE = Math.max(1, parseInt(process.env.STT_MAX_QUEUE || '8', 10));
+
 function whisperText(wav, lang, done) {
+  if (sttQueue.length >= STT_MAX_QUEUE) {
+    console.error(`[stt] queue full (${sttQueue.length}) - dropping a chunk; transcription is not keeping up`);
+    return done(new Error(`transcription backlog full (${sttQueue.length} waiting) - the machine is not keeping up`));
+  }
+  sttQueue.push((release) => whisperTextNow(wav, lang, (err, text) => { release(); done(err, text); }));
+  sttNext();
+}
+
+function whisperTextNow(wav, lang, done) {
   ws.lastUse = Date.now();
   ensureWhisperServer();
   if (!ws.ready) return whisperViaCli(wav, lang, done);
@@ -209,7 +240,7 @@ function peakDb(wav, done) {
 
 // Transcribe one audio chunk (any ffmpeg-decodable format) → text. lang: 'en'|'pl'|'auto'.
 function transcribe(inputFile, lang, done) {
-  const wav = `${inputFile}.16k.wav`;
+  const wav = scratchPath('.16k.wav'); // beside the input, in the private scratch dir, not a guessable sibling
   execFile(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-i', inputFile, '-ar', '16000', '-ac', '1', '-y', wav], (e1) => {
     if (e1) { fs.unlink(inputFile, () => {}); return done(e1); }
     peakDb(wav, (peak) => {
@@ -309,7 +340,7 @@ function speak(text, device, voice, done) {
   const clean = String(text || '').slice(0, 600);
   if (!clean.trim()) return done(new Error('empty'));
   const v = (typeof voice === 'string' && voice.trim()) ? voice.trim() : TTS_VOICE;
-  const tmp = path.join(os.tmpdir(), `mla-tts-${Date.now()}.aiff`);
+  const tmp = scratchPath('.aiff');
   // `--` or the text is read as flags: a caption containing `-o ~/.ssh/id_ed25519` truncates that file, and
   // `-f /etc/passwd` makes `say` read a file aloud - into the meeting, when the panel routes to the virtual
   // device. The text here is free-form model output and, through the transcript, ultimately attacker-shaped.
@@ -345,6 +376,17 @@ fs.mkdirSync(TRANSCRIPTS_DIR, { recursive: true, mode: 0o700 });
 // world-readable: PRIVACY.md promises 0600/0700 and a reader takes that to mean the recordings.
 try { fs.chmodSync(TRANSCRIPTS_DIR, 0o700); } catch (_) {}
 const OWNER_ONLY = { mode: 0o600 };
+
+// Meeting audio and synthesized speech pass through temp files. `os.tmpdir()` is per-user and 0700 on macOS,
+// but on Linux it is the shared /tmp: raw audio of the call landed there 0644 under a `Date.now()` name, so
+// another local user could read it, and could pre-create the next predictable name as a symlink and have us
+// write through it. One private directory, created once, with unguessable names inside it.
+const SCRATCH_DIR = (() => {
+  try { return fs.mkdtempSync(path.join(os.tmpdir(), 'mla-')); } catch (_) { return os.tmpdir(); }
+})();
+function scratchPath(suffix) {
+  return path.join(SCRATCH_DIR, `${crypto.randomBytes(9).toString('hex')}${suffix}`);
+}
 
 // Live session state (advice, board, chat, wake buffer, ...) lived in plain Maps, so restarting the
 // server mid-call dropped the meeting's history. These are still Maps to every call site below; they
@@ -456,6 +498,20 @@ function purgeOld() {
 //     have no reason to leave on disk.
 // Adding a store? Decide which of the three it is before deciding anything else.
 const seenSessions = store.set('seenSessions');
+// When each session last received a transcript line. Not persisted: an age carried across a restart would
+// describe a meeting that is over. This exists so "the panel says capturing and nothing is arriving" - the
+// shape of every capture failure this project has had - becomes a fact someone can read instead of a
+// suspicion. Capture breaking silently is the single most expensive failure here: it looks exactly like a
+// quiet meeting until the call ends and the transcript is empty.
+const lastAppendAt = new Map(); // session -> ms
+const CAPTURE_STALL_MS = Math.max(0, parseInt(process.env.CAPTURE_STALL_MS || '300000', 10)); // 5 min
+function captureStall(session) {
+  if (!CAPTURE_STALL_MS) return null;
+  const at = lastAppendAt.get(session);
+  if (!at) return null; // nothing has ever arrived - that is the panel's watchdog, not this one
+  const idleMs = Date.now() - at;
+  return idleMs >= CAPTURE_STALL_MS ? { idleMs, since: at } : null;
+}
 
 // Advice channel (Phase 1): the "brain" POSTs advice here; the side panel polls it.
 const advice = store.map('advice'); // session -> { seq, items: [{ seq, ts, marker, text }] }
@@ -980,6 +1036,7 @@ const server = http.createServer((req, res) => {
         }
         if (line) {
           fs.appendFileSync(file, line, OWNER_ONLY); // the .txt is the complete record - nothing is ever dropped here
+          lastAppendAt.set(session, Date.now());
           queueForWake(session, line);   // whether it's worth a turn is decided on the .wake channel
           if (isWakeAll(session)) flushWake(session); // "collect everything" mode: no gate, no coalescing
         } else {
@@ -1080,8 +1137,8 @@ const server = http.createServer((req, res) => {
     req.on('data', (c) => { chunks.push(c); size += c.length; if (size > 25e6) req.destroy(); });
     req.on('end', () => {
       if (!size) { res.writeHead(400); return res.end('empty'); }
-      const tmp = path.join(os.tmpdir(), `mla-stt-${Date.now()}.webm`);
-      try { fs.writeFileSync(tmp, Buffer.concat(chunks)); } catch (_) { res.writeHead(500); return res.end('write'); }
+      const tmp = scratchPath('.webm');
+      try { fs.writeFileSync(tmp, Buffer.concat(chunks), OWNER_ONLY); } catch (_) { res.writeHead(500); return res.end('write'); }
       transcribe(tmp, lang, (err, text) => {
         if (err) {
           // The reason mattered and was thrown away. A stranger's first install fails here more often than
@@ -1269,6 +1326,7 @@ const server = http.createServer((req, res) => {
       // delivering nothing.
       wakeError: wakeErrorFor(keyFor(req, u.searchParams.get('session'))),
       sttError: sttErrorFor(keyFor(req, u.searchParams.get('session'))),
+      captureStall: captureStall(keyFor(req, u.searchParams.get('session'))),
       // A claim is only worth showing while the claimant is still heartbeating. Reporting the name of an
       // assistant that died an hour ago puts a 🧠 pill on a panel nobody is behind.
       agent: (tk && ts && Date.now() - ts < BRAIN_STALE_MS) ? tk.agent : null,
@@ -1851,6 +1909,7 @@ const server = http.createServer((req, res) => {
       // not a report; the panel polls this every two seconds and can say so where the user is already looking.
       wakeError: wakeErrorFor(s),
       sttError: sttErrorFor(s),
+      captureStall: captureStall(s),
       autopilot: { create: !!ap.create, postChat: !!ap.postChat },
       remoteName: remoteNames.get(s) || null,
       sttLang: sttLangs.get(s) || null,
@@ -2003,6 +2062,10 @@ const server = http.createServer((req, res) => {
       // Outside the statusChanged block on purpose: while the channel is failing, the assistant is receiving
       // no batches at all, so `statusChanged` is the one thing that will not fire. Reporting it only on a
       // change would mean reporting it never, which is the shape of every silent failure in this project.
+      if (status.captureStall) {
+        out += `CAPTURE-STALLED nothing has been transcribed for ${Math.round(status.captureStall.idleMs / 60000)} min`
+          + ' - either the room is silent or capture has broken; ask the user which, do not assume\n';
+      }
       if (status.wakeError) {
         out += `WAKE-WRITE-FAILING ${status.wakeError.message} - you are NOT receiving this meeting; tell the user in the panel\n`;
       }
@@ -2119,6 +2182,8 @@ for (const [event, label] of [['uncaughtException', 'uncaught exception'], ['unh
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
     for (const s of wakeBuf.keys()) flushWake(s);
+    // Take the scratch directory with us: it holds fragments of meeting audio.
+    if (SCRATCH_DIR !== os.tmpdir()) { try { fs.rmSync(SCRATCH_DIR, { recursive: true, force: true }); } catch (_) {} }
     store.close(); // final snapshot, so a restart resumes from the last second rather than the last tick
     process.exit(0);
   });

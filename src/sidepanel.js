@@ -635,14 +635,22 @@ function setBrainEmpty(live) { setSetupStep('assistant', !!live); }
 // assistant receives nothing) or local speech-to-text is erroring (so nothing is transcribed). Both used to
 // be a line in a log file nobody tails. Said once per distinct problem, in the panel, in plain words.
 let lastPipelineProblem = '';
-function showPipelineProblem(wakeError, sttError) {
-  const problem = wakeError ? `wake:${wakeError.message}` : (sttError ? `stt:${sttError.message}` : '');
+function showPipelineProblem(wakeError, sttError, captureStall) {
+  const problem = wakeError ? `wake:${wakeError.message}`
+    : sttError ? `stt:${sttError.message}`
+    // Bucketed by whole minutes so a stall does not re-announce itself on every poll, but a stall that keeps
+    // growing says so again at the next minute - the difference between "still stalled" and "stalled longer".
+    : captureStall ? `stall:${Math.round(captureStall.idleMs / 60000)}` : '';
   if (problem === lastPipelineProblem) return;
   lastPipelineProblem = problem;
   if (!problem) return;
   const text = wakeError
     ? `⚠ **Your assistant is not receiving this meeting.** The server cannot write the channel it reads: ${wakeError.message}. The transcript file is still complete - this is about delivery, not the recording.`
-    : `⚠ **Speech-to-text is failing**, so nothing is being transcribed from audio: ${sttError.message}. Captions, if the meeting has them, are unaffected.`;
+    : sttError
+    ? `⚠ **Speech-to-text is failing**, so nothing is being transcribed from audio: ${sttError.message}. Captions, if the meeting has them, are unaffected.`
+    // Deliberately phrased as a question. A silent room and broken capture look identical from here, and
+    // claiming the second when it is the first trains people to ignore the warning.
+    : `⚠ **Nothing has been transcribed for ${Math.round(captureStall.idleMs / 60000)} minutes.** If people are talking, capture has stopped - reload the meeting tab. If the room is quiet, ignore this.`;
   appendChat({ role: 'agent', text });
 }
 
@@ -651,10 +659,10 @@ async function pollBrain() {
   try {
     const r = await fetch(`${serverUrl}/brain-ping?session=${encodeURIComponent(currentSession)}`, { headers: hdrs() });
     if (!r.ok) { setBrainWork(''); return; } // can't confirm activity → don't leave a stale bubble pinned
-    const { ageMs, status, statusAgeMs, estTokens, agent, wakeError, sttError } = await r.json();
+    const { ageMs, status, statusAgeMs, estTokens, agent, wakeError, sttError, captureStall } = await r.json();
     // A pipeline that is failing has to say so here, because every other signal looks healthy: capture is
     // green, the server is green, the assistant is heartbeating - and nothing is reaching it.
-    showPipelineProblem(wakeError, sttError);
+    showPipelineProblem(wakeError, sttError, captureStall);
     const live = ageMs != null && ageMs < 45000; // heartbeat within 45s = attached
     // Name the attached agent so it's obvious WHICH one is on (multiple agents share the machine).
     setStatus(brainEl, live ? `🧠 ${agent || 'assistant'} on` : '🧠 no assistant', live ? 'ok' : 'bad');
