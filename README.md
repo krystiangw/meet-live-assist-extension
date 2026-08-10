@@ -1,8 +1,15 @@
 # Meet Live Assist
 
-**Your own Claude Code session, in the call with you.** It reads the Meet or Zoom transcript as it happens and
+**Your own agent session, in the call with you.** It reads the Meet or Zoom transcript as it happens and
 answers in a side panel while the call is still going: what was decided, who owns what, the risk you just
 agreed to, and the sentence to say next, in the meeting's language.
+
+<p align="center">
+  <img src="docs/media/panel-live.gif" width="380"
+       alt="The side panel during a release review: someone proposes the 15th, a RISK card points out it is inside the release freeze, a SAY card offers the sentence to push back with, and the decision lands on the 18th." />
+  <br />
+  <em>The real side panel, eleven seconds of a release review. The call is invented; the interface is not.</em>
+</p>
 
 During a Google Meet or Zoom call this captures the transcript, shows it in a side panel, and hands it to
 an assistant running on your own computer. The assistant answers back in the panel while the call is still
