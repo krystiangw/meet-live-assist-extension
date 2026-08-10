@@ -50,7 +50,7 @@ part is your configuration, not this server.
 
 ## Requirements
 
-**Node 20+** is the only hard requirement. Two optional binaries unlock the audio features:
+**Node 20+** is the only hard requirement. The audio features need two more binaries:
 
 | | install | without it |
 | --- | --- | --- |
@@ -84,5 +84,5 @@ curl -s http://127.0.0.1:8848/health
 # {"ok":true,"dir":"...","tools":{"ffmpeg":true,"whisper":true,"whisperModel":"ggml-base.bin","blackhole":false}}
 ```
 
-`tools` tells you which optional features are live, so a missing `ffmpeg` shows up here rather than as a
+`tools` tells you which optional features are live, so a missing `ffmpeg` shows up here instead of as a
 mystery later.

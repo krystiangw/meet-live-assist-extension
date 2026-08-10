@@ -24,7 +24,7 @@ Compare this list against `manifest.json`; if it is shorter than the manifest, t
 
 **Permissions that sound worse than they are, named anyway.** The full build asks for `debugger`, which lets
 the assistant read the network and console of a tab you are sharing while you have the 🐞 toggle on; Chrome
-shows its own banner the whole time. It also asks, *at the moment you use them* rather than at install, for
+shows its own banner the whole time. It also waits until *the moment you use them* to ask for
 access to all sites - needed to screenshot or act on a tab that is not the meeting. **The public build ships
 without `debugger` and without the page-control surface entirely.**
 
@@ -92,7 +92,7 @@ an action, on a channel the room cannot reach.
 That instruction is a real boundary, but it is enforced by the model following its skill, not by a wall. If
 you have connected powerful or destructive tools to your Claude Code, understand that you are pointing a
 capable agent at a live, untrusted audio feed, and set the trust of your connected tools accordingly. This is
-the honest limit of a bring-your-own-brain design, and it is stated here rather than left for you to discover.
+the honest limit of a bring-your-own-brain design, and you should hear it here first.
 
 ## Recording & consent
 Capturing a meeting transcript and screenshots is a form of recording. You are responsible for obtaining

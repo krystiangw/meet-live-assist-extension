@@ -47,8 +47,8 @@ is your call to make, and `PRIVACY.md` says so plainly.
 
 Requirements: Node 20+, Chrome 116+, Claude Code. Speaking *into* the call is macOS-only (it uses `say`
 and `afplay`); elsewhere advice still appears in the panel and the server says why it cannot speak. Local
-speech-to-text works anywhere `ffmpeg` and `whisper.cpp` do, and the panel's setup row shows which of the
-two are actually present rather than failing quietly.
+speech-to-text works anywhere `ffmpeg` and `whisper.cpp` do, and the panel's setup row names which of the
+two is missing instead of failing quietly.
 
 ## Install (three steps)
 
@@ -83,7 +83,7 @@ the markers, the modes, the board - is the same, because those turned out to be 
 | `generic` | anything else | responding well in real time |
 
 They are plain files in [`skill/profiles/`](skill/profiles/) - about a dozen lines each. Write your own and
-pass its name; the installer refuses a profile it cannot find rather than silently using the default.
+pass its name; the installer refuses a profile it cannot find; it never falls back to the default.
 
 ## What it stores, and how to get rid of it
 
@@ -214,7 +214,7 @@ reach another's meeting is stated in one place and tested directly.
 
 **Auth:** every route except `/health` requires an `X-MLA-Token` header. The server generates the token
 into `<transcripts>/.mla-token` on first start; the brain reads that file, and the extension **pairs** for
-it rather than being handed a copy by a human. Without the token any website you visit could reach the
+it, so no human ever handles a copy. Without the token any website you visit could reach the
 localhost server.
 
 **Pairing.** `GET /pair` returns the token exactly once, and only while a window is open - the server's
@@ -303,7 +303,7 @@ curl -s http://127.0.0.1:8899/health
 
 **A restart mid-call is survivable.** Advice, the decisions board, chat, the wrap-up, the wake buffer and
 each assistant's read position are snapshotted to `<transcripts>/.state/` and reloaded on boot, so a bounce
-costs at most the last couple of seconds (`STATE_SNAPSHOT_MS`, default 2000) rather than the meeting. Two
+costs at most the last couple of seconds (`STATE_SNAPSHOT_MS`, default 2000), never the meeting. Two
 things deliberately do **not** come back, because they are answers about one call and a recurring series
 reuses its meet code: the panel's Stop/pause state, and consent (🕹 drive, autopilot). You will still see a
 brief capture gap while the process is down.
@@ -347,7 +347,7 @@ MLA_PRO=1 ./install.sh      # keep the page-control sections (pairs with the ful
 ```
 
 It refuses to run on the author's machine without `MLA_FORCE=1`, because there the destination is the
-canonical personal skill rather than a copy of the template.
+canonical personal skill, not a copy of the template.
 
 ## Checks
 

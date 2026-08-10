@@ -7,8 +7,7 @@ Draft listing copy + the permission justifications the review dashboard asks for
 public zip drops the `debugger` permission and strips the page-control + live-debugging surface (DOM edits,
 agent-driven clicks, network/console reads) so the listing has one purpose: a meeting assistant that sees
 and hears. The full `./build.sh` zip keeps everything and is for load-unpacked use only. What the cut
-covers is marked `mla:pro-start` / `mla:pro-end` in `src/`; the build fails rather than shipping a dangling
-reference. The bundled skill is cut the same way, by `install.sh` (see `MLA_PRO`).
+covers is marked `mla:pro-start` / `mla:pro-end` in `src/`; a dangling reference fails the build. The bundled skill is cut the same way, by `install.sh` (see `MLA_PRO`).
 
 ## Short description (≤132 chars)
 Live co-pilot for Google Meet & Zoom: real-time transcript, colour-coded advice, action items, snapshots,
@@ -34,19 +33,23 @@ Meet Live Assist is an independent project. It is not affiliated with, endorsed 
 Productivity
 
 ## Permission justifications
-- **sidePanel** - the entire UI (transcript, advice, chat) lives in the side panel.
-- **storage** - persist user settings (local server URL, chosen TTS voices).
-- **alarms** - periodic heartbeat that keeps the service worker alive during long calls.
-- **host `https://meet.google.com/*` + `https://*.zoom.us/*`** - read captions/state and inject the assistant UI.
-- **host `http://127.0.0.1:8848/*`** - talk to the user's own local bridge server.
-- **tabCapture** - capture the meeting tab's audio for optional local speech-to-text.
-- **offscreen** - the only MV3 surface that can consume the captured audio stream (tab or mic).
-- **clipboardWrite** - copy an advice line to paste into the meeting chat.
-- **notifications** - fire a system alert on a 🔴 RISK advice item when the panel is hidden mid-call.
-- **scripting** - inject the caption reader into the meeting tab.
-- **debugger** - **not in the public build.** Chrome forbids `debugger` in `optional_permissions`, so it can
-  only be required, and required it draws heavier review plus a scarier install warning for a capability the
-  store build no longer uses. `build.sh --public` removes both the permission and the code behind it.
+
+| Permission | Why it is needed |
+| --- | --- |
+| `sidePanel` | The entire UI lives there: transcript, advice, chat. |
+| `storage` | Persist settings: local server URL, chosen TTS voices. |
+| `alarms` | Heartbeat that keeps the service worker alive through a long call. |
+| host `https://meet.google.com/*`, `https://*.zoom.us/*` | Read captions and call state, inject the assistant UI. |
+| host `http://127.0.0.1:8848/*` | Talk to the user's own local bridge server. |
+| `tabCapture` | Capture the meeting tab's audio for optional local speech-to-text. |
+| `offscreen` | The only MV3 surface that can consume a captured audio stream. |
+| `clipboardWrite` | Copy an advice line to paste into the meeting chat. |
+| `notifications` | Alert on a 🔴 RISK item when the panel is hidden mid-call. |
+| `scripting` | Inject the caption reader into the meeting tab. |
+
+**`debugger` is not in the public build at all.** Chrome forbids it in `optional_permissions`, so it can only
+be required, and required it draws heavier review plus a scarier install warning for a capability the store
+build no longer uses. `build.sh --public` removes the permission and the code behind it.
 
 **Optional (requested at runtime, on a user gesture - not at install):**
 - **optional host `<all_urls>`** - needed by `captureVisibleTab` to snapshot a shared slide or app, and by
@@ -83,4 +86,4 @@ Capture posts a single line into the meeting chat when it starts ("I'm using an 
 transcribes this meeting locally on my machine"), sent as the user, once per meeting. It is **on by
 default**; the wording is editable and it can be turned off in Options. Turning captions on is invisible to
 the rest of the room, so this is what makes the transcript visible to them. Delivery is verified and a
-failure is surfaced in the panel rather than assumed.
+failure is surfaced in the panel, never assumed.
