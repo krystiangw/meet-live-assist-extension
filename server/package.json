@@ -1,6 +1,6 @@
 {
   "name": "meet-live-assist-server",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Local bridge server for the Meet Live Assist browser extension: transcript sink, advice channel, action-item board, snapshots, local STT and TTS. Zero dependencies, binds to 127.0.0.1 only.",
   "license": "SEE LICENSE IN LICENSE.md",
   "keywords": [

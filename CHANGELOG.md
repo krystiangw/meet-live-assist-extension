@@ -4,6 +4,27 @@ Notable changes only. Earlier history is in `git log` (91 commits from 2026-07-1
 point the project was prepared for a public release, because that is where a version number began to mean
 something to anyone other than the author.
 
+## 0.7.1 - 2026-08-10
+
+Everything here came from loading the public build on a real call, which nothing before it had done.
+
+- **Captions did not come on by themselves.** The code clicks CC only when the button's label says
+  captions are off; Google reworded it, so the state read as neither on nor off, nothing was clicked, and
+  it retried in silence for fifty seconds. It now clicks once when there is no caption region at all,
+  then checks whether one appeared and clicks back if it did not. The rule the old code was protecting -
+  never silently override a human's choice about being transcribed - still holds.
+- **The panel showed every line twice.** Google also renamed the per-utterance caption classes, so capture
+  fell to the region fallback, where the element holds the whole call rather than one utterance. The
+  finalizer subtracted what it had committed, so the transcript file was correct throughout; the live
+  preview sent the raw cumulative text, so the panel alternated a growing wall with clean lines and never
+  merged them. The preview subtracts the same way now.
+- **capture-health reasons were thrown away.** The panel printed one generic line no matter what the
+  content script reported.
+- **`--pair` guessed the data dir.** launchd sets `TRANSCRIPTS_DIR` and `npx` from any folder does not, so
+  the CLI minted a token in its own guess and failed with a 403 naming a path the user had never seen. It
+  asks the running server where its data lives now, and the pairing window it reports is the one actually
+  opened rather than a constant that said two minutes while the window was fifteen.
+
 ## 0.7.0 - 2026-08-10
 
 The release prepared for the store submission. Two of these change behaviour; the rest is what a stranger
