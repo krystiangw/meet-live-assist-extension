@@ -118,7 +118,11 @@ function stopAll() {
   chrome.runtime.sendMessage({ type: 'stt-status', on: false });
 }
 
-chrome.runtime.onMessage.addListener((m) => {
+chrome.runtime.onMessage.addListener((m, sender) => {
+  // These messages carry the server URL and token that captured audio is posted to, so the sender has to be
+  // one of our own extension pages. A content script shares the extension id but not its origin, and
+  // sender.tab is set for anything running in a page.
+  if (sender.id !== chrome.runtime.id || sender.tab || !String(sender.url || '').startsWith(chrome.runtime.getURL(''))) return;
   if (m.type === 'offscreen-start') startSource(m.source === 'mic' ? 'mic' : 'tab', m.streamId, m);
   else if (m.type === 'offscreen-stop') { if (m.source) stopSource(m.source); else stopAll(); }
 });

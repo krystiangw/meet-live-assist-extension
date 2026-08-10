@@ -479,6 +479,16 @@ function purgeOld() {
     // wipe the advice and the board of the call happening right now. Verified, and it was a live bug.
     const survivors = new Set(fs.readdirSync(TRANSCRIPTS_DIR).filter((f) => !f.startsWith('.')).map((f) => keyFor(null, sessionOf(f))));
     for (const s of touched) if (!survivors.has(s)) store.forget(s);
+    // A session can hold state without ever having held a file: /advice, /items and /chat all write state,
+    // and none of them creates one. Those were surviving every sweep, which made PRIVACY.md's "its state is
+    // dropped with them" false. Session names start with the meeting's date, so age them by that rather than
+    // by a file that does not exist - and leave anything unparseable alone rather than guessing.
+    const cutoffDay = new Date(cutoff).toISOString().slice(0, 10);
+    for (const key of store.keys()) {
+      if (survivors.has(key)) continue;
+      const day = /^(\d{4}-\d{2}-\d{2})_/.exec(key);
+      if (day && day[1] < cutoffDay) store.forget(key);
+    }
     if (fs.existsSync(SNAP_DIR)) for (const d of fs.readdirSync(SNAP_DIR)) {
       const dp = path.join(SNAP_DIR, d);
       try { if (fs.statSync(dp).mtimeMs < cutoff) fs.rmSync(dp, { recursive: true, force: true }); } catch (_) {}
@@ -898,7 +908,7 @@ function cors(req, res) {
   if (origin.startsWith('chrome-extension://')) res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-MLA-Token, X-MLA-Pair');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-MLA-Token, X-MLA-Pair, X-MLA-Panel');
   // Chrome Private Network Access: extension -> 127.0.0.1 preflight is blocked without this.
   res.setHeader('Access-Control-Allow-Private-Network', 'true');
 }
@@ -969,6 +979,31 @@ const server = http.createServer((req, res) => {
 
   // Claim the token, once, while the window is open. Sits before the gate by necessity: the whole point is
   // that the caller does not have the token yet.
+  // `--pair` against an already-running server proves it can read the token file without putting the token
+  // on the wire. Five minutes of clock skew, and the digest is useless afterwards.
+  function pairProofOk(req) {
+    if (req.url !== '/pair-open') return false;
+    const ts = String(req.headers['x-mla-pair-ts'] || '');
+    const got = String(req.headers['x-mla-pair-proof'] || '');
+    if (!/^\d{10,16}$/.test(ts) || Math.abs(Date.now() - Number(ts)) > 300000) return false;
+    const want = crypto.createHash('sha256').update(`${TOKEN}:${ts}`).digest('hex');
+    return got.length === want.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want));
+  }
+
+  // These two routes are consent, not data: `drive` lets the agent act on the tab, `autopilot` lets it create
+  // tickets and message every participant. The brain holds the same token as the panel, so a token check alone
+  // would let a prompt-injected assistant grant itself both. The panel marks its own writes; nothing in the
+  // skill or the MCP adapter sends this header, so the brain cannot flip its own gates by accident or by
+  // instruction. Origin, when Chrome attaches one, must still be the extension's.
+  function panelOnly(req, res, what) {
+    const origin = req.headers.origin || '';
+    if (req.headers['x-mla-panel'] === '1' && (!origin || origin.startsWith('chrome-extension://'))) return true;
+    console.warn(`[mla] refused ${what}: only the side panel may change consent`);
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: `${what} is set from the side panel, not by the assistant` }));
+    return false;
+  }
+
   if (req.method === 'GET' && (req.url === '/pair' || req.url.startsWith('/pair?'))) {
     // Two conditions, and the second is the one that matters. An Origin, if the caller sends one at all,
     // must be the extension's - Chrome does not always attach one to a privileged extension-page fetch, so
@@ -998,10 +1033,11 @@ const server = http.createServer((req, res) => {
   }
 
   // Everything past here requires the shared token (see TOKEN_FILE above).
-  if ((req.headers['x-mla-token'] || '') !== TOKEN) { res.writeHead(403); return res.end('forbidden'); }
+  if ((req.headers['x-mla-token'] || '') !== TOKEN && !pairProofOk(req)) { res.writeHead(403); return res.end('forbidden'); }
 
   // Re-open the window on a server that is already running - the `--pair` CLI path. Behind the gate, so
-  // only something that can already read the token file can offer it to anyone.
+  // only something that can already read the token file can offer it to anyone. The CLI proves it holds the
+  // token without sending it (see the EADDRINUSE handler): whoever holds the port might not be us.
   if (req.method === 'POST' && req.url === '/pair-open') {
     const until = openPairWindow('requested');
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1493,6 +1529,7 @@ const server = http.createServer((req, res) => {
 
   // Autopilot flags: panel sets them; brain reads them each turn to decide auto-create / post-to-chat.
   if (req.method === 'POST' && req.url === '/autopilot') {
+    if (!panelOnly(req, res, 'autopilot')) return;
     readBody(req, 1e4, (body) => {
       const d = parseObjectBody(body, res, 'bad'); if (!d) return;
       const s = keyFor(req, d.session);
@@ -1512,6 +1549,7 @@ const server = http.createServer((req, res) => {
 
   // Drive flag: panel opt-in for the agent to control the tab. Panel sets; brain reads before acting.
   if (req.method === 'POST' && req.url === '/drive') {
+    if (!panelOnly(req, res, 'drive')) return;
     readBody(req, 1e4, (body) => {
       const d = parseObjectBody(body, res, 'bad'); if (!d) return;
       drive.set(keyFor(req, d.session), !!d.on);
@@ -2210,7 +2248,13 @@ server.on('error', (e) => {
     // `--pair` against an already-running server is the common case, not an error: the launchd job owns the
     // port and the user just wants to pair a newly installed extension. Ask the running one to open its
     // window instead of telling them to stop it.
-    const req = http.request({ host: '127.0.0.1', port: PORT, path: '/pair-open', method: 'POST', headers: { 'X-MLA-Token': TOKEN } }, (r) => {
+    // Not `X-MLA-Token`. A busy port is not proof that our server is the one holding it - any local process
+    // can bind 127.0.0.1:8848 first and would be handed a token it could not otherwise read (`.mla-token` is
+    // 0600). A timestamped digest proves possession and discloses nothing reusable.
+    const ts = String(Date.now());
+    const proof = crypto.createHash('sha256').update(`${TOKEN}:${ts}`).digest('hex');
+    const req = http.request({ host: '127.0.0.1', port: PORT, path: '/pair-open', method: 'POST',
+      headers: { 'X-MLA-Pair-Ts': ts, 'X-MLA-Pair-Proof': proof } }, (r) => {
       if (r.statusCode === 200) console.log(`[pair] the running server has opened a ${Math.round(PAIR_WINDOW_MS / 1000)}s window - open the extension side panel now`);
       else console.error(`[pair] the running server refused (HTTP ${r.statusCode}) - is ${TOKEN_FILE} the token it uses?`);
       r.resume();

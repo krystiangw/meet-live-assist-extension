@@ -136,6 +136,10 @@ function renderSnapAge() {
 function resetSnap() { lastSnapAt = 0; lastSnapCount = null; snapErrUntil = 0; snapEl.onclick = null; snapEl.style.cursor = ''; setStatus(snapEl, 'shots 0', 'idle'); }
 setInterval(renderSnapAge, 1000);
 function hdrs(json) { const h = { 'X-MLA-Token': serverToken }; if (json) h['Content-Type'] = 'application/json'; return h; }
+// Consent writes (/drive, /autopilot) carry this; the server refuses them without it. The brain holds the
+// same token, so the header is what separates "the user ticked a box" from "the assistant asked to be
+// trusted" - see panelOnly() in the server.
+function panelHdrs(json) { const h = hdrs(json); h['X-MLA-Panel'] = '1'; return h; }
 
 // The all-sites host permission is optional and requested at runtime. `debugger` is NOT optional - Chrome
 // refuses to list it there - so it sits in the install prompt and the public build drops it entirely.
@@ -800,7 +804,7 @@ let lastCallChatSeq = -1; // baseline so old queued messages aren't replayed on 
 async function postAutopilot() {
   if (!currentSession) return;
   try {
-    await fetch(`${serverUrl}/autopilot`, { method: 'POST', headers: hdrs(true),
+    await fetch(`${serverUrl}/autopilot`, { method: 'POST', headers: panelHdrs(true),
       body: JSON.stringify({ session: currentSession, create: autoCreateEl.checked, postChat: postChatEl.checked }) });
   } catch (_) {}
 }
@@ -840,7 +844,7 @@ let driveOn = false;
 let lastActSeq = -1;
 async function postDrive(on) {
   if (!currentSession) return;
-  try { await fetch(`${serverUrl}/drive`, { method: 'POST', headers: hdrs(true), body: JSON.stringify({ session: currentSession, on }) }); } catch (_) {}
+  try { await fetch(`${serverUrl}/drive`, { method: 'POST', headers: panelHdrs(true), body: JSON.stringify({ session: currentSession, on }) }); } catch (_) {}
 }
 function setDrive(on) { driveOn = on; driveBtn.classList.toggle('on', on); driveBar.hidden = !on; }
 driveBtn.addEventListener('click', async () => {

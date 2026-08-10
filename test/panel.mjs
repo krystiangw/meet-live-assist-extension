@@ -54,6 +54,9 @@ try {
   const q = encodeURIComponent(session);
   const get = (route) => fetch(`${base}${route}`, { headers: hdrs() });
   const post = (route, body) => fetch(`${base}${route}`, { method: 'POST', headers: hdrs(true), body: JSON.stringify(body) });
+  // The panel marks its consent writes; the server refuses them otherwise (panelOnly).
+  const postConsent = (route, body) => fetch(`${base}${route}`, { method: 'POST',
+    headers: { ...hdrs(true), 'X-MLA-Panel': '1' }, body: JSON.stringify(body) });
 
   // The panel's own cursors. Every one of these must advance, or the panel re-renders the same item
   // forever or never renders the next one.
@@ -166,7 +169,7 @@ try {
   const sup = await (await get(`/suppress?session=${q}`)).json();
   check('a dismissed topic is recorded', sup.items.some((i) => i.text === 'pricing'), JSON.stringify(sup.items));
 
-  await post('/autopilot', { session, create: true, postChat: false });
+  await postConsent('/autopilot', { session, create: true, postChat: false });
   const ap = await (await get(`/autopilot?session=${q}`)).json();
   check('autopilot survives the round trip with postChat still off', ap.create === true && ap.postChat === false, JSON.stringify(ap));
 

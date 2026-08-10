@@ -169,6 +169,15 @@ function createStore({ dir, log = () => {}, migrateKey = null }) {
     return wrote;
   }
 
+  // Every session key the state knows about, across all registered collections. Retention needs this: a
+  // session can have state (advice, board items) and never have had a file on disk, and those were being
+  // left behind forever by a sweep that only looked at files.
+  function keys() {
+    const out = new Set();
+    for (const { collection } of registered) for (const k of collection.keys()) out.add(k);
+    return out;
+  }
+
   function forget(key) {
     for (const { collection } of registered) collection.delete(key);
     snapshot();
@@ -181,7 +190,7 @@ function createStore({ dir, log = () => {}, migrateKey = null }) {
     if (owned) { try { fs.unlinkSync(owned); } catch (_) {} owned = null; }
   }
 
-  return { map, set, snapshot, forget, close, stateDir };
+  return { map, set, snapshot, forget, keys, close, stateDir };
 }
 
 module.exports = { createStore };

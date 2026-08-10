@@ -72,6 +72,9 @@ try {
   check('token is long enough to not be guessable', token.length >= 32, `${token.length} chars`);
 
   const auth = { 'Content-Type': 'application/json', 'X-MLA-Token': token };
+  // /drive and /autopilot are consent, not data: the panel marks its own writes so a token-holding brain
+  // cannot grant itself the tab or the meeting chat. See panelOnly() in the server.
+  const panelAuth = { ...auth, 'X-MLA-Panel': '1' };
   const session = '2026-01-01_smoke-test';
 
   // /auth-check must answer 200 either way: the panel polls it before a token exists, and a 403 there put a
@@ -161,7 +164,7 @@ try {
   check('no page-control route is accepted while the user has page control off', allRefused);
 
   // And once consent IS given, they work - a gate that never opens is not a gate either.
-  await fetch(`${base}/drive`, { method: 'POST', headers: auth, body: JSON.stringify({ session: driveSession, on: true }) });
+  await fetch(`${base}/drive`, { method: 'POST', headers: panelAuth, body: JSON.stringify({ session: driveSession, on: true }) });
   const afterConsent = (await fetch(`${base}/dom-request`, { method: 'POST', headers: auth, body: JSON.stringify({ session: driveSession }) })).status;
   check('and accepted once the user turns it on', afterConsent === 200, `status ${afterConsent}`);
 
@@ -215,7 +218,10 @@ try {
     for (const body of ['null', '"a string"', '[1,2]', '17']) {
       let status = 0;
       try {
-        status = (await fetch(`${base}/${route}`, { method: 'POST', headers: auth, body })).status;
+        // the consent routes refuse an unmarked caller before they ever parse a body, so mark them here or
+        // this checks the gate instead of the parser
+        const h = route === 'drive' || route === 'autopilot' ? panelAuth : auth;
+        status = (await fetch(`${base}/${route}`, { method: 'POST', headers: h, body })).status;
       } catch (_) { survivedAll = false; break; }
       if (status !== 400) allRejected = false;
     }
@@ -335,8 +341,19 @@ try {
   // writing to the meeting chat; a recurring series reuses its meet code, so persisting either would
   // hand back a Monday "yes" on Thursday. `stopped` is worse: it would kill the next call's assistant on
   // its first turn, silently, because the skill treats it as "wrap up and stop".
-  await fetch(`${base}/drive`, { method: 'POST', headers: auth, body: JSON.stringify({ session, on: true }) });
-  await fetch(`${base}/autopilot`, { method: 'POST', headers: auth, body: JSON.stringify({ session, create: true, postChat: true }) });
+  // The brain holds the same token as the panel, so the token alone cannot separate "the user ticked a box"
+  // from "the assistant asked to be trusted". A prompt-injected assistant flipping postChat on and then
+  // writing to every participant is the attack this closes.
+  const selfGrant = await fetch(`${base}/autopilot`, { method: 'POST', headers: auth,
+    body: JSON.stringify({ session, create: true, postChat: true }) });
+  check('a token alone cannot grant the assistant the meeting chat', selfGrant.status === 403, `status ${selfGrant.status}`);
+  const selfDrive = await fetch(`${base}/drive`, { method: 'POST', headers: auth, body: JSON.stringify({ session, on: true }) });
+  check('nor the right to drive the tab', selfDrive.status === 403, `status ${selfDrive.status}`);
+  check('and the refusal left the flag off',
+    (await (await fetch(`${base}/drive?session=${encodeURIComponent(session)}`, { headers: auth })).json()).on !== true);
+
+  await fetch(`${base}/drive`, { method: 'POST', headers: panelAuth, body: JSON.stringify({ session, on: true }) });
+  await fetch(`${base}/autopilot`, { method: 'POST', headers: panelAuth, body: JSON.stringify({ session, create: true, postChat: true }) });
   await fetch(`${base}/control`, { method: 'POST', headers: auth, body: JSON.stringify({ session, state: 'stopped' }) });
   check('the consent was actually granted before the restart',
     (await (await fetch(`${base}/drive?session=${encodeURIComponent(session)}`, { headers: auth })).json()).on === true);

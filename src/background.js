@@ -747,6 +747,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // ---- side panel <-> SW (long-lived port) ---------------------------------
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'sidepanel') return;
+  // A name is not a credential. A content script runs with our extension id and can open a port called
+  // 'sidepanel' too, and this port carries snapshot-now, apply-edit, capture-dom and copilot-start. The page's
+  // own scripts cannot reach it, but the content script sits on a hostile page, so trust the sender's origin:
+  // extension pages are chrome-extension:// and have no sender.tab.
+  const from = String((port.sender && port.sender.url) || '');
+  if (port.sender?.tab || !from.startsWith(chrome.runtime.getURL(''))) {
+    console.warn('[mla] refused a sidepanel port from', from || 'an unknown sender');
+    try { port.disconnect(); } catch (_) {}
+    return;
+  }
   panelPorts.add(port);
   port.onDisconnect.addListener(() => panelPorts.delete(port));
   port.onMessage.addListener(async (m) => {
