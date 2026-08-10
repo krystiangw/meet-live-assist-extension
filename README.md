@@ -252,8 +252,10 @@ resolve from Homebrew, `/usr/local`, `/usr/bin` and then `PATH`, so Linux works 
 architecture. **Text-to-speech is macOS-only** (`say` + `afplay`); elsewhere advice still shows as text in
 the panel and only spoken output is missing. Details: [`server/README.md`](server/README.md).
 
-Publishing a new version is `cd server && npm publish` (check `npm pack --dry-run` first: it should be
-six files, ~42 kB - the server, the MCP adapter, the state store, the wake-channel cut helper, a README and the manifest).
+Publishing a new version is `cd server && npm publish`. Run `npm pack --dry-run` first and read the list: it
+should be **eight files, ~61 kB** - the server, the MCP adapter, the session-name sanitiser, the state store,
+the wake-channel cut helper, a README, the licence and the manifest. Anything else in that list is something
+you did not mean to publish.
 
 ### Autostart it on a Mac (launchd)
 
