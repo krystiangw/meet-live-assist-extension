@@ -235,11 +235,14 @@ turns. A held-back batch is never lost - it rides along with the next wake, and 
 
 ### Stand up the server
 
-The server is packaged to stand alone as `meet-live-assist-server` (zero dependencies,
-`server/package.json`), so a user who only wants to run it needs neither this repo nor a clone. **It is not
-on npm yet**, so `npx meet-live-assist-server` will 404. Publishing it is a deliberate step, not a side
-effect of a docs edit.
-From a clone it is just:
+The server stands alone as [`meet-live-assist-server`](https://www.npmjs.com/package/meet-live-assist-server)
+(zero dependencies), so someone who only wants to run it needs neither this repo nor a clone:
+
+```bash
+npx meet-live-assist-server
+```
+
+From a clone it is:
 
 ```bash
 node server/transcript-server.js --pair
