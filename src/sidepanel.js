@@ -191,8 +191,12 @@ function renderLine(el, ts, speaker, text, final) {
 }
 // Same utterance if the two texts share a substantial leading chunk - tolerant of ASR revising later words
 // (e.g. "…TG site cream" → "…TG site. Creamier"), which a strict prefix check would wrongly split.
+// Compared without case or punctuation, because Meet rewrites both as it finalizes a segment: "dobra jak się
+// dzisiaj" became "dobra Jak się dzisiaj macie", and one capital letter six characters in was enough to start
+// a second line for the same sentence.
+const normUtterance = (x) => (x || '').toLowerCase().replace(/[^a-z0-9ąćęłńóśźż]+/g, ' ').replace(/\s+/g, ' ').trim();
 function sameUtterance(a, b) {
-  a = (a || '').trim(); b = (b || '').trim();
+  a = normUtterance(a); b = normUtterance(b);
   if (!a) return true;
   let i = 0; const n = Math.min(a.length, b.length);
   while (i < n && a[i] === b[i]) i++;

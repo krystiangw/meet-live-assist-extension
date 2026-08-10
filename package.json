@@ -1,6 +1,6 @@
 {
   "name": "meet-live-assist",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "description": "Live meeting co-pilot for Google Meet and Zoom: transcript capture, colour-coded advice, action items, snapshots, chat and TTS, driven by your own local assistant.",
   "license": "SEE LICENSE IN LICENSE.md",

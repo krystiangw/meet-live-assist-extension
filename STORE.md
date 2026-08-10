@@ -79,7 +79,7 @@ Privacy policy: `PRIVACY.md`.
 - [x] Bundled skill is a template, not the author's personal one (`install.sh` fills user/language/domain).
 - [x] Privacy policy at a URL that works: https://krystiangw.github.io/meet-live-assist/privacy.html
       (goes live with the docs sync; the form rejects a 404).
-- [x] Upload zip rebuilt at the submitted version: `dist/meet-live-assist-0.7.1-public.zip`
+- [x] Upload zip rebuilt at the submitted version: `dist/meet-live-assist-0.7.2-public.zip`
       (225 KB across 17 files). Verified as an artifact, not on the build script's word: manifest has 8
       permissions and no `debugger`, no `chrome.debugger` call survives the strip, every stripped file still
       parses, and every path the manifest and the shipped HTML reference exists inside the zip.

@@ -4,6 +4,23 @@ Notable changes only. Earlier history is in `git log` (91 commits from 2026-07-1
 point the project was prepared for a public release, because that is where a version number began to mean
 something to anyone other than the author.
 
+## 0.7.2 - 2026-08-10
+
+The duplicate lines 0.7.1 claimed to fix were still there on the next call. The fix was right about where
+to subtract and wrong about what it was subtracting from.
+
+- **Meet's caption area is a window, not a log.** Old utterances scroll out of it, and the recogniser
+  rewrites words it has already shown: it capitalises the first word of a sentence when it commits it and
+  adds punctuation. Either edit breaks a character-prefix comparison, and the moment it breaks, the entire
+  visible window looks new and is sent again. What is new is now found by aligning WORDS compared without
+  case or punctuation, keeping the longest overlap between what was sent and what is on screen.
+- **One capital letter was starting a second line.** The panel decides whether a message continues the
+  current line by comparing text; "dobra jak się dzisiaj" and "dobra Jak się dzisiaj macie" diverge at
+  character six, so the same sentence got two lines. That comparison ignores case and punctuation now.
+- **`test/captions.mjs`** replays a Meet that scrolls its window and rewrites its own words, through the
+  functions lifted out of the shipped source. It asserts the transcript loses and repeats nothing and that
+  the panel ends with one line per utterance, and it fails if the previous logic is put back.
+
 ## 0.7.1 - 2026-08-10
 
 Everything here came from loading the public build on a real call, which nothing before it had done.

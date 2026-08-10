@@ -8,7 +8,7 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 
-const SUITES = ['scope', 'smoke', 'panel', 'mcp', 'limits', 'retention', 'wake-failure', 'health-burst'];
+const SUITES = ['scope', 'captions', 'smoke', 'panel', 'mcp', 'limits', 'retention', 'wake-failure', 'health-burst'];
 const here = import.meta.dirname;
 
 const run = (name) => new Promise((resolve) => {

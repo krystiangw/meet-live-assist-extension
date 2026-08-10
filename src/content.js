@@ -165,6 +165,31 @@
     return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
+  // What of the text now on screen has NOT been handed over yet.
+  //
+  // Meet's caption area is a WINDOW over the stream, not an append-only log: old utterances scroll out of it,
+  // and the recogniser rewrites words it has already shown - capitalising after a sentence break ("jak" →
+  // "Jak"), adding punctuation. Either one breaks a character-prefix test (`text.startsWith(sent)`), and the
+  // moment it breaks, the whole visible window looks new and gets sent again. That is what put the same
+  // sentence in the panel two and three times over.
+  // So align on WORDS compared without case or punctuation, and take the LONGEST overlap between the tail of
+  // what was sent and the head of what is on screen. No overlap at all means the window has scrolled clean
+  // past everything we hold, and then the whole of it really is new.
+  const wordKey = (w) => w.toLowerCase().replace(/[^a-z0-9ąćęłńóśźż]+/g, '');
+  function unsentTail(sent, text) {
+    const cur = String(text || '').trim();
+    if (!sent || !cur) return cur;
+    const curWords = cur.split(/\s+/).filter(Boolean);
+    const sentKeys = String(sent).trim().split(/\s+/).filter(Boolean).map(wordKey);
+    const curKeys = curWords.map(wordKey);
+    for (let k = Math.min(sentKeys.length, curKeys.length); k > 0; k--) {
+      let same = true;
+      for (let i = 0; i < k; i++) if (sentKeys[sentKeys.length - k + i] !== curKeys[i]) { same = false; break; }
+      if (same) return curWords.slice(k).join(' ');
+    }
+    return cur;
+  }
+
   // ---- Hand a finalized line to the service worker -------------------------
   function send(msg) {
     try {
@@ -173,14 +198,10 @@
   }
 
   // Live: emit the growing caption immediately so the panel shows it in real time.
+  // The invariant that keeps the panel to one line per utterance: an interim carries exactly the tail that
+  // the next cap-final will carry, so the finalized line REPLACES the live one instead of landing under it.
   function emitInterim(tr) {
-    // In region-fallback mode `tr.text` is the WHOLE caption history, not the current utterance, so sending
-    // it raw paints the panel with a growing wall of everything said so far next to the clean finalized
-    // lines. finalize() already subtracts what it has committed, which is why the transcript file stayed
-    // correct while the panel did not; do the same here. On a divergence (ASR revised earlier words) fall
-    // back to the full text: it self-corrects on the next commit and a wrong preview is worse than a long one.
-    let text = tr.text;
-    if (tr.fallback && tr.sent && text.startsWith(tr.sent)) text = text.slice(tr.sent.length).trim();
+    const text = unsentTail(tr.sent, tr.text);
     if (!text) return;
     send({ type: 'cap', session, id: tr.id, ts: tr.ts, speaker: tr.speaker || '', text });
   }
@@ -193,17 +214,7 @@
     tr.lastFinal = now();
     // Emit only what hasn't been sent for this block (matters after priming, and for a block that keeps
     // growing past a forced mid-monologue commit).
-    let delta = text;
-    if (tr.sent) {
-      if (text.startsWith(tr.sent)) delta = text.slice(tr.sent.length).trim();
-      else {
-        // ASR revised something earlier in a cumulative stream - emit from the first divergence, backed up
-        // to a word boundary, instead of re-sending the whole history.
-        let i = 0; const n = Math.min(tr.sent.length, text.length);
-        while (i < n && tr.sent[i] === text[i]) i++;
-        if (i > 40) { const sp = text.lastIndexOf(' ', i); delta = text.slice(sp > 0 ? sp : i).trim(); }
-      }
-    }
+    const delta = unsentTail(tr.sent, text);
     tr.sent = text;
     const out = dropAlreadyEmitted(delta);
     if (!out) return;
