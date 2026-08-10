@@ -19,6 +19,17 @@ const DEFAULT_PL = 'Zosia';
 
 function serverUrl() { return (input.value || DEFAULT_SERVER).trim().replace(/\/+$/, ''); }
 
+// This field decides where the transcript, the snapshots and the captured audio are posted. The extension
+// promises that none of it leaves the machine, and with the optional <all_urls> permission granted, a
+// non-loopback value here would quietly make that false - a typo, a paste, or a page that talked someone
+// into it. Loopback only, and say why rather than silently rewriting what they typed.
+const LOOPBACK = /^https?:\/\/(127\.0\.0\.1|\[::1\]|localhost)(:\d{1,5})?$/i;
+function serverUrlProblem(url) {
+  if (LOOPBACK.test(url)) return '';
+  return 'The bridge server runs on your own machine. This has to be 127.0.0.1, localhost or [::1] - '
+    + 'anything else would send your meetings off the device.';
+}
+
 function fill(sel, voices, prefix, selected, fallback) {
   const matches = voices.filter((v) => v.locale.startsWith(prefix)).sort((a, b) => a.name.localeCompare(b.name));
   sel.innerHTML = '';
@@ -76,6 +87,16 @@ document.getElementById('enableMic').addEventListener('click', async () => {
 });
 
 document.getElementById('save').addEventListener('click', async () => {
+  const problem = serverUrlProblem(serverUrl());
+  if (problem) {
+    saved.textContent = problem;
+    saved.style.color = '#d1495b';
+    saved.style.opacity = '1';
+    input.focus();
+    return;
+  }
+  saved.textContent = 'Saved ✓';
+  saved.style.color = '';
   await chrome.storage.local.set({ serverUrl: serverUrl(), ttsVoiceEn: enSel.value, ttsVoicePl: plSel.value, mla_token: (tokenInput.value || '').trim(), mla_names: (namesInput.value || '').trim(), mla_tracker_name: (trackerNameInput.value || '').trim(), mla_tracker_url: (trackerUrlInput.value || '').trim(), mla_glossary: (glossaryInput.value || '').trim(), mla_announce: announceBox.checked, mla_announce_text: (announceTextInput.value || '').trim() || ANNOUNCE_DEFAULT });
   saved.style.opacity = '1';
   setTimeout(() => { saved.style.opacity = '0'; }, 1500);

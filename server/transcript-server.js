@@ -974,11 +974,19 @@ const server = http.createServer((req, res) => {
   // Safe to sit before the gate: it reveals only whether the caller already knows the token.
   if (req.method === 'GET' && req.url.startsWith('/auth-check')) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ authed: (req.headers['x-mla-token'] || '') === TOKEN }));
+    return res.end(JSON.stringify({ authed: tokenOk(req) }));
   }
 
   // Claim the token, once, while the window is open. Sits before the gate by necessity: the whole point is
   // that the caller does not have the token yet.
+  // Constant-time, because `!==` on strings returns as soon as two bytes differ and the timing of that is a
+  // side channel. Irrelevant over loopback, free to get right, and the code is public now.
+  function tokenOk(req) {
+    const got = Buffer.from(String(req.headers['x-mla-token'] || ''));
+    const want = Buffer.from(TOKEN);
+    return got.length === want.length && crypto.timingSafeEqual(got, want);
+  }
+
   // `--pair` against an already-running server proves it can read the token file without putting the token
   // on the wire. Five minutes of clock skew, and the digest is useless afterwards.
   function pairProofOk(req) {
@@ -1033,7 +1041,7 @@ const server = http.createServer((req, res) => {
   }
 
   // Everything past here requires the shared token (see TOKEN_FILE above).
-  if ((req.headers['x-mla-token'] || '') !== TOKEN && !pairProofOk(req)) { res.writeHead(403); return res.end('forbidden'); }
+  if (!tokenOk(req) && !pairProofOk(req)) { res.writeHead(403); return res.end('forbidden'); }
 
   // Re-open the window on a server that is already running - the `--pair` CLI path. Behind the gate, so
   // only something that can already read the token file can offer it to anyone. The CLI proves it holds the

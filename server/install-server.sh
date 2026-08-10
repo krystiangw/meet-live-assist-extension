@@ -113,7 +113,8 @@ launchctl load -w "$PLIST"
 for _ in $(seq 1 20); do
   if curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then
     printf '\n✅ server up on 127.0.0.1:%s\n' "$PORT"
-    printf '   token (paste into the extension Options): %s\n' "$(cat "$TRANSCRIPTS_DIR/.mla-token")"
+    printf '   pair the extension: node %s --pair\n' "$SERVER_JS"
+    printf '   (the panel collects the token itself; it is in %s/.mla-token if you ever need it by hand)\n' "$TRANSCRIPTS_DIR"
     printf '   restart: launchctl kickstart -k gui/$UID/%s\n' "$LABEL"
     printf '   stop:    launchctl unload -w %s\n' "$PLIST"
     exit 0
