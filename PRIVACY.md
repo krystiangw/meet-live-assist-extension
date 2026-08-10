@@ -100,5 +100,5 @@ See `STORE.md` for the per-permission justification.
 
 ## Contact
 Questions, or something here that does not match what the code does:
-[GitHub Discussions](https://github.com/krystiangw/meet-live-assist-extension/discussions). A mismatch
+[an issue](https://github.com/krystiangw/meet-live-assist-extension/issues/new?template=something-broke.yml). A mismatch
 between this document and the manifest is a bug worth reporting, and it will be treated as one.

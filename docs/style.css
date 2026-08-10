@@ -83,3 +83,5 @@
   ul.clients li.yes { border-color: color-mix(in srgb, var(--brand1) 55%, transparent);
     background: color-mix(in srgb, var(--brand1) 10%, var(--card)); }
   ul.clients li.yes span { color: var(--brand1); font-weight: 600; }
+
+  footer .fine { display: block; max-width: 640px; margin: 14px auto 0; font-size: .8rem; opacity: .8; }

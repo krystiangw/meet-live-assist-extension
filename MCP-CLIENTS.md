@@ -43,7 +43,7 @@ before anything else.
 
 ## If you get it working
 
-Please say so in [Discussions](https://github.com/krystiangw/meet-live-assist-extension/discussions), and say
+Please say so in [an issue](https://github.com/krystiangw/meet-live-assist-extension/issues/new?template=something-broke.yml), and say
 which client - especially how it handled the background loop. That is the one part nobody has verified outside
 Claude Code, and a single report turns "should work" into "works", which is a distinction this project cares
 about.

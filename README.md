@@ -149,6 +149,8 @@ destructive tools to Claude Code, set their trust accordingly. `PRIVACY.md` says
 
 Built by [Krystian Gwizdała](https://krystiangw.github.io/krystiangw/).
 
+*Meet Live Assist is an independent project. It is not affiliated with, endorsed by or sponsored by Google or Zoom; "Google Meet" and "Zoom" are their owners' trademarks and are used here only to say which products this works with.*
+
 ## Licence, in plain words
 
 [PolyForm Internal Use 1.0.0](LICENSE.md). Free, and **yes, you may use it at work** - "internal business

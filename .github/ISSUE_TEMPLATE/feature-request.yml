@@ -1,0 +1,26 @@
+name: Feature request
+description: Something it should do in a meeting and does not
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The useful version of this is a moment, not a feature. What happened in the call, and what you
+        wished had been on screen at that second.
+  - type: textarea
+    id: moment
+    attributes:
+      label: The moment in the call
+      placeholder: Someone quoted a number I knew was wrong and I could not find the source before we moved on.
+    validations:
+      required: true
+  - type: textarea
+    id: want
+    attributes:
+      label: What you wanted to see
+      placeholder: The figure with the ticket it came from, before the topic closed.
+  - type: input
+    id: profile
+    attributes:
+      label: Which profile you installed
+      placeholder: engineering / research / second-language / generic

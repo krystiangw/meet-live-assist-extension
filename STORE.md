@@ -27,6 +27,9 @@ no analytics and no servers of ours, and your transcripts stay in files on your 
 then does with them is your configuration: if it uses a cloud model, that model's provider sees what you
 route to it.
 
+## Trademark notice (put this in the listing description)
+Meet Live Assist is an independent project. It is not affiliated with, endorsed by or sponsored by Google or Zoom; "Google Meet" and "Zoom" are their owners' trademarks and are used here only to say which products this works with.
+
 ## Category
 Productivity
 

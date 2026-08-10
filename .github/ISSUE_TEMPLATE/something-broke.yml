@@ -1,0 +1,33 @@
+name: Something broke
+description: It did not work, or it worked and then stopped
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        There is no analytics in this project and there never will be, so a failure nobody types out is a
+        failure nobody sees. A sentence about what you expected and what happened beats a filled-in form.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      placeholder: The transcript filled up but the advice pane stayed empty for the whole call.
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Meet or Zoom, and which browser
+      placeholder: Google Meet, Chrome 131 on macOS 15
+  - type: input
+    id: agent
+    attributes:
+      label: Which agent you attached
+      placeholder: Claude Code / Cursor / none yet
+  - type: textarea
+    id: health
+    attributes:
+      label: What the server says
+      description: Optional, but it answers half the questions on its own.
+      placeholder: curl -s http://127.0.0.1:8848/health
+      render: shell
