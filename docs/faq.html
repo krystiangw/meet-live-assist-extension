@@ -48,6 +48,10 @@
     <tr><td>Where does my transcript go?</td><td>A folder on your disk. Files are owner-only
       (<code>0600</code>), the folder is <code>0700</code>.</td></tr>
     <tr><td>Does anything phone home?</td><td>No. The extension talks only to <code>127.0.0.1</code>.</td></tr>
+    <tr><td>Does this website track me?</td><td>It counts visits with
+      <a href="https://www.goatcounter.com">GoatCounter</a>: aggregate numbers only, no cookies, nothing that
+      identifies a person, which is why there is no consent banner. That is the marketing site. The extension
+      is a separate thing and reports nothing, to anyone, ever.</td></tr>
     <tr><td>What about the AI?</td><td>The assistant is <em>your</em> Claude Code session. What you route to it is
       between you and Anthropic.</td></tr>
     <tr><td>Can a website reach the server?</td><td>No. Every route but <code>/health</code> needs a token,
@@ -151,5 +155,10 @@
   <br />
   <span class="fine">Meet Live Assist is an independent project. It is not affiliated with, endorsed by or sponsored by Google or Zoom; "Google Meet" and "Zoom" are their owners' trademarks and are used here only to say which products this works with.</span>
 </footer>
+<!-- Visit counting for this website only. GoatCounter stores aggregate stats, no cookies and nothing that
+     identifies a person, so there is no consent banner and nothing to opt out of. The extension itself still
+     sends nothing anywhere: see the Q&amp;A. Swap MYCODE for the registered code. -->
+<script data-goatcounter="https://MYCODE.goatcounter.com/count"
+        async src="https://gc.zgo.at/count.js"></script>
 </body>
 </html>

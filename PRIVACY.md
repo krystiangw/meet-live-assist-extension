@@ -50,6 +50,10 @@ No accounts, no telemetry, no advertising identifiers, no selling or sharing of 
 any kind. The extension transmits nothing off your device on its own initiative; the only content that
 leaves is what your own assistant reads, to your own provider, as described above.
 
+One thing that is not the extension: the project's website counts visits with GoatCounter, which stores
+aggregate numbers and nothing that identifies a person. That is a marketing page you visited, not software
+you installed, and the two are kept separate deliberately.
+
 ## Retention & control
 - The local server is **token-authenticated** (`X-MLA-Token`) so no other site or app can read it.
 - Stored transcripts, chat, summaries and snapshots are **auto-purged after a retention window** (default
