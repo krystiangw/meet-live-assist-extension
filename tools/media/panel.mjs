@@ -8,7 +8,79 @@ export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 export const OUT = path.join(ROOT, 'docs', 'media');
 export const PANEL_URL = 'file://' + path.join(ROOT, 'src', 'sidepanel.html');
 
-export async function fillPanel(page, script) {
+// Installed into the page as window.__mla: the panel's own writers, reduced to what a scripted scene needs
+// and building the same DOM the real ones build (see appendItem / renderInline in src/sidepanel.js).
+// Tracker keys become links exactly as linkify() does once the user has set a tracker URL in Options.
+const WRITERS = `window.__mla = (() => {
+  const TRACKER = 'https://team.atlassian.net/browse/{key}';
+  const keys = (parent, text) => {
+    const re = /\\b[A-Z][A-Z0-9]{1,5}-\\d+\\b/g;
+    let last = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) parent.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const a = document.createElement('a');
+      a.href = TRACKER.replace('{key}', m[0]); a.textContent = m[0]; a.target = '_blank'; a.rel = 'noreferrer';
+      parent.appendChild(a);
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
+  };
+  const rich = (parent, text) => {
+    for (const part of String(text).split(/(\\*\\*[^*]+\\*\\*)/g)) {
+      if (!part) continue;
+      if (part.startsWith('**')) { const b = document.createElement('strong'); keys(b, part.slice(2, -2)); parent.appendChild(b); }
+      else keys(parent, part);
+    }
+  };
+  return {
+    rich,
+    tracker: '',
+    line(ts, who, text) {
+      const log = document.getElementById('log');
+      const d = document.createElement('div'); d.className = 'line';
+      const t = document.createElement('span'); t.className = 'ts'; t.textContent = ts + ' ';
+      const w = document.createElement('span'); w.className = 'spk'; w.textContent = who + ': ';
+      d.append(t, w, document.createTextNode(text));
+      log.appendChild(d); log.scrollTop = log.scrollHeight;
+    },
+    advice(marker, text, flash) {
+      const d = document.createElement('div'); d.className = 'advice-item ' + marker + (flash ? ' flash' : '');
+      const m = document.createElement('span'); m.className = 'marker'; m.textContent = marker;
+      const body = document.createElement('span'); body.className = 'body'; rich(body, text);
+      d.append(m, body); document.getElementById('advice').appendChild(d);
+    },
+    item(kind, text, owner, flash) {
+      const decision = kind === 'decision';
+      const d = document.createElement('div'); d.className = 'item ' + (decision ? 'decision' : 'action') + (flash ? ' flash' : '');
+      const k = document.createElement('span'); k.className = 'kind'; k.textContent = decision ? 'DECISION' : 'ACTION';
+      const body = document.createElement('div'); body.className = 'body';
+      const txt = document.createElement('div'); txt.className = 'txt'; rich(txt, text);
+      body.appendChild(txt);
+      if (owner) {
+        const meta = document.createElement('div'); meta.className = 'meta';
+        meta.appendChild(document.createTextNode('owner: '));
+        const s = document.createElement('strong'); s.textContent = owner; meta.appendChild(s);
+        body.appendChild(meta);
+      }
+      d.append(k, body);
+      if (!decision) {
+        const b = document.createElement('button'); b.className = 'jira';
+        b.textContent = 'Draft ' + (window.__mla.tracker || 'note');
+        d.appendChild(b);
+      }
+      const items = document.getElementById('items');
+      items.appendChild(d); items.scrollTop = items.scrollHeight;
+    },
+    chat(role, text) {
+      const d = document.createElement('div'); d.className = 'chat-msg ' + role; rich(d, text);
+      document.getElementById('chat').appendChild(d);
+    },
+  };
+})();`;
+
+// Header, toggles and an empty board. Everything a scene adds afterwards goes through window.__mla.
+async function prime(page, s) {
+  await page.evaluate(WRITERS);
   await page.evaluate((s) => {
     const set = (id, text, cls) => { const e = document.getElementById(id); if (!e) return; e.textContent = text; if (cls) e.className = 'status ' + cls; };
     set('capStatus', s.capturing || 'capturing', 'ok');
@@ -17,48 +89,34 @@ export async function fillPanel(page, script) {
     set('snapStatus', s.shots || 'shots 3', 'idle');
     document.getElementById('session').textContent = s.session;
     document.getElementById('modeSel').value = s.mode;
+    document.getElementById('autoCreate').checked = !!(s.autopilot && s.autopilot.create);
+    document.getElementById('postChat').checked = !!(s.autopilot && s.autopilot.postChat);
+    window.__mla.tracker = s.tracker || '';
+    for (const id of ['log', 'advice', 'items', 'chat']) document.getElementById(id).innerHTML = '';
+  }, s);
+}
 
-    const log = document.getElementById('log'); log.innerHTML = '';
-    for (const [ts, who, text] of s.transcript) {
-      const d = document.createElement('div'); d.className = 'line';
-      const t = document.createElement('span'); t.className = 'ts'; t.textContent = ts + ' ';
-      const w = document.createElement('span'); w.className = 'spk'; w.textContent = who + ': ';
-      d.append(t, w, document.createTextNode(text)); log.appendChild(d);
-    }
-
-    // Minimal bold renderer, matching what the panel does with **…**
-    const rich = (parent, text) => {
-      for (const part of text.split(/(\*\*[^*]+\*\*)/g)) {
-        if (!part) continue;
-        if (part.startsWith('**')) { const b = document.createElement('strong'); b.textContent = part.slice(2, -2); parent.appendChild(b); }
-        else parent.appendChild(document.createTextNode(part));
-      }
-    };
-
-    const adv = document.getElementById('advice'); adv.innerHTML = '';
-    for (const [marker, text] of s.advice) {
-      const d = document.createElement('div'); d.className = 'advice-item ' + marker;
-      const m = document.createElement('span'); m.className = 'marker'; m.textContent = marker;
-      const body = document.createElement('span'); body.className = 'body'; rich(body, text);
-      d.append(m, body); adv.appendChild(d);
-    }
-
-    const items = document.getElementById('items'); items.innerHTML = '';
-    for (const [kind, text, owner] of s.items) {
-      const d = document.createElement('div'); d.className = 'item ' + kind;
-      const k = document.createElement('span'); k.className = 'kind'; k.textContent = kind === 'decision' ? 'DECISION' : 'ACTION';
-      const body = document.createElement('span'); body.textContent = ' ' + text + (owner ? ` - ${owner}` : '');
-      d.append(k, body);
-      if (kind === 'action') { const b = document.createElement('button'); b.className = 'jira'; b.textContent = 'Draft note'; d.appendChild(b); }
-      items.appendChild(d);
-    }
-
-    const chat = document.getElementById('chat'); chat.innerHTML = '';
-    for (const [role, text] of s.chat) {
-      const d = document.createElement('div'); d.className = 'chat-msg ' + role; rich(d, text); chat.appendChild(d);
-    }
+export async function fillPanel(page, script) {
+  await prime(page, script);
+  await page.evaluate((s) => {
+    for (const [ts, who, text] of s.transcript) window.__mla.line(ts, who, text);
+    for (const [marker, text] of s.advice) window.__mla.advice(marker, text, false);
+    for (const [kind, text, owner] of s.items) window.__mla.item(kind, text, owner, false);
+    for (const [role, text] of s.chat) window.__mla.chat(role, text);
   }, script);
   await page.waitForTimeout(300);
+}
+
+// The same writers, exposed one call at a time so a clip can play a scene forward instead of showing the
+// end state. The board starts empty; the timeline in the clip script fills it.
+export async function driver(page, script) {
+  await prime(page, script);
+  return {
+    say: (ts, who, text) => page.evaluate(([ts, who, text]) => window.__mla.line(ts, who, text), [ts, who, text]),
+    advise: (marker, text) => page.evaluate(([m, t]) => window.__mla.advice(m, t, true), [marker, text]),
+    item: (kind, text, owner) => page.evaluate(([k, t, o]) => window.__mla.item(k, t, o, true), [kind, text, owner]),
+    chat: (role, text) => page.evaluate(([r, t]) => window.__mla.chat(r, t), [role, text]),
+  };
 }
 
 // A meeting a stranger recognises: a release call where a date gets promised that contradicts a freeze.
@@ -85,6 +143,37 @@ export const RELEASE_REVIEW = {
     ['agent', '🧠 **assistant** attached. Mode: lead.'],
     ['user', 'what did we actually agree about the freeze?'],
     ['agent', 'On 22 July you agreed **no customer-facing releases 13-17 Aug**. Marc was in that call.'],
+  ],
+};
+
+// The other half of the value, and the harder half to put in prose: with autopilot on the assistant is not
+// suggesting, it is doing. It checks a claim against the tracker, files the ticket and drafts the note while
+// the conversation carries on without you.
+export const PLANNING = {
+  session: '2026-08-10_sprint-planning',
+  mode: 'produce',
+  tracker: 'Jira',
+  autopilot: { create: true, postChat: true },
+  transcript: [
+    ['09:31:04', 'Dana', 'search revamp should be quick, we did filters in Q1'],
+    ['09:31:12', 'Marc', 'filters was what, two weeks'],
+    ['09:31:20', 'You', 'it felt longer than that'],
+    ['09:31:34', 'Dana', 'ok then search is a month, not a sprint'],
+    ['09:31:47', 'Marc', 'someone raise a ticket for the reindex spike'],
+    ['09:32:05', 'Dana', 'and we need the planning note before Friday'],
+  ],
+  advice: [
+    ['INFO', 'Filters took **31 days** (PROJ-2841, 12 Feb to 15 Mar), not two weeks. Three of those weeks were the reindex.'],
+    ['ACTION', 'Created **PROJ-3120** - Reindex spike, 3 days, owner you. Link posted in the meeting chat.'],
+    ['ACTION', 'Drafted **Search revamp - planning note**: the sizing, the two open questions, who owns what.'],
+  ],
+  items: [
+    ['decision', 'Search revamp is a month, not a sprint', 'Dana'],
+    ['action', 'Reindex spike - PROJ-3120', 'You'],
+  ],
+  chat: [
+    ['agent', '🧠 **assistant** attached. Mode: produce. Auto-create on.'],
+    ['agent', 'Filed **PROJ-3120** and dropped the link in the call chat.'],
   ],
 };
 

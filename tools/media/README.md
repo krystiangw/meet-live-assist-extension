@@ -9,20 +9,31 @@ advertising a UI that no longer exists.
 
 ```sh
 npm i -D playwright && npx playwright install chromium   # not a project dependency
-node tools/media/still.mjs     # docs/media/panel-full.png
+node tools/media/still.mjs     # docs/media/panel-{full,planning}.png - the panel on its own
 node tools/media/clip.mjs      # docs/media/panel-live.{mp4,gif} + poster  (needs ffmpeg)
-node tools/media/store.mjs     # docs/media/store-*.png - the 1280x800 Chrome Web Store tiles
+node tools/media/stage.mjs     # docs/media/call-share.png + the two in-a-call store tiles
+node tools/media/call-clip.mjs # docs/media/{call,planning}-live.{mp4,gif} + posters - both scenes in motion
+node tools/media/store.mjs     # docs/media/store-{1,2}-*.png - the caption store tiles
 node tools/media/og-card.mjs   # docs/media/og-card.png  (reads panel-full.png, run it last)
 ```
 
-`panel.mjs` holds the shared filler and the two scripted sessions (a release review, a co-pilot debug) that
-every image draws from, so a wording change lands everywhere at once.
+`panel.mjs` holds the shared writers and the three scripted sessions (a release review, a sprint
+planning call with autopilot on, a co-pilot debug);
+`call-shell.mjs` holds the browser window, the participant tiles and the shared screen. A wording change in
+either lands in every image at once.
 
-The store tiles are a caption beside the live panel, not a photograph of a browser window. That is
-deliberate: faking a call grid means inventing faces, and a listing image that invents its own users is the
-one thing a reviewer should reject.
+**No invented people.** The participant tiles are camera-off tiles - the initial-in-a-circle every call app
+falls back to, which is what most working calls look like anyway. There is no stock photography, no
+generated face and no Google or Meet branding; only the address bar names the product. Set
+`MLA_FACE=/path/to/photo.jpg` to drop a real photo into the "You" tile.
 
 Already have Playwright somewhere else: `MLA_PLAYWRIGHT=/path/to/playwright/index.mjs node tools/media/still.mjs`.
 
-The invented call is a release review where a date gets promised that contradicts a freeze. Keep it that way
-if you edit the scripts: it is the shortest scene in which the product's actual value is visible.
+The two scenes are chosen, not decorative. The release review is the shortest scene in which catching
+something *before* it becomes a promise is visible. The planning call is the only way to show the half that
+prose keeps failing to sell: with autopilot on the assistant checks a claim against the tracker, files the
+ticket and drafts the note itself, and nobody typed anything. Keep both if you edit the scripts.
+
+Everything the planning scene shows is behaviour the skill actually specifies (`create` ON = standing
+authorization to create, echo `🟠 ACTION → what I created`; `postChat` ON = share the link with the room).
+If that contract changes, change the scene, or the page starts promising something the product stopped doing.

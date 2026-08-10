@@ -5,10 +5,11 @@ answers in a side panel while the call is still going: what was decided, who own
 agreed to, and the sentence to say next, in the meeting's language.
 
 <p align="center">
-  <img src="docs/media/panel-live.gif" width="380"
-       alt="The side panel during a release review: someone proposes the 15th, a RISK card points out it is inside the release freeze, a SAY card offers the sentence to push back with, and the decision lands on the 18th." />
+  <img src="docs/media/call-live.gif" width="820"
+       alt="A release review: someone shares an August calendar and promises the 15th, and the panel docked beside the call flags that the date is inside the agreed release freeze, offers the sentence to push back with, and records the decision to move to the 18th." />
   <br />
-  <em>The real side panel, eleven seconds of a release review. The call is invented; the interface is not.</em>
+  <em>A release review, fourteen seconds, panel docked beside the call. The conversation is invented and the
+  cameras are off, as they are on most working calls. The interface is the shipping one.</em>
 </p>
 
 During a Google Meet or Zoom call this captures the transcript, shows it in a side panel, and hands it to
@@ -121,10 +122,22 @@ Worth knowing before you point this at a conversation that is not only yours.
 - **Colour-coded advice** from the brain (🟢SAY/🔵INFO/🟡SUMMARY/🟣EXPLAIN/🔴RISK/🟠ACTION), rich
   (links/images/diagrams/lists), each **copyable**; RISK fires an audible + notification cue.
 - **Brain-liveness** pill (is a Claude session actually attached?), **capture watchdog** (warns if captions break).
-- **Decisions & action-items board** with one-click **Draft Jira**; **recap** quick-asks; two-way **chat**.
+- **Decisions & action-items board** with a one-click **Draft <your tracker>** (whatever you named in
+  Options, or a plain note if you named nothing); **recap** quick-asks; two-way **chat**.
+- **Autopilot** - flip 🤖 Auto-create and it stops proposing and starts doing: the ticket or the note is
+  created as the action item comes up, no per-item confirm. 📣 Post links to chat shares the link with
+  the room. Both are off until you turn them on.
 - **Snapshots** (auto on screen-share + on demand), **TTS into the call**, **local STT** (whisper),
   **meeting modes** + type-awareness, **live presentation edits** + **debug** of the shared tab.
 - **Talk-time**, **muted-mic** + **personal-mention** alerts; **post-call summary** export.
+
+<p align="center">
+  <img src="docs/media/planning-live.gif" width="820"
+       alt="A sprint planning call: the assistant corrects a sizing claim against the tracker, records the decision, then files a ticket and drafts the planning note without being asked." />
+  <br />
+  <em>Sprint planning with autopilot on. Nobody typed anything into the panel: the correction, the decision,
+  the ticket and the note all arrive while the meeting carries on.</em>
+</p>
 
 **A note on trust.** The assistant is your own Claude Code session with your own tools, and it reads a live,
 untrusted audio feed. It is instructed to let *only what you type* authorize an action - no spoken line, under
@@ -133,6 +146,8 @@ destructive tools to Claude Code, set their trust accordingly. `PRIVACY.md` says
 
 **Landing page:** [`docs/index.html`](docs/index.html), also hosted at
 **https://krystiangw.github.io/meet-live-assist/**.
+
+Built by [Krystian Gwizdała](https://krystiangw.github.io/krystiangw/).
 
 ## Licence, in plain words
 

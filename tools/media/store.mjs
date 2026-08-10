@@ -12,7 +12,7 @@ mkdirSync(OUT, { recursive: true });
 
 const TILES = [
   {
-    file: 'store-1-in-a-call.png',
+    file: 'store-1-advice.png',
     script: RELEASE_REVIEW,
     title: 'Advice while the call is<br/>still going',
     lines: [

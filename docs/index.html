@@ -62,13 +62,16 @@
   .note { background: color-mix(in srgb, var(--brand1) 8%, transparent); border: 1px solid color-mix(in srgb, var(--brand1) 25%, transparent);
     border-radius: 10px; padding: 12px 16px; color: var(--muted); font-size: .93rem; }
   footer { padding: 40px 20px 60px; text-align: center; color: var(--muted); font-size: .88rem; }
-  figure.shot { margin: 28px auto 0; max-width: 100%; }
+  /* 840px is .wrap's content width, so the hero figure - which sits outside .wrap - lines up with the ones
+     inside it instead of running the full viewport. */
+  figure.shot { margin: 28px auto 0; max-width: 840px; }
   figure.shot img, figure.shot video {
     display: block; margin: 0 auto; width: 100%; max-width: 420px; height: auto; border-radius: 14px;
     border: 1px solid var(--line); background: var(--card);
     box-shadow: 0 18px 50px color-mix(in srgb, var(--brand2) 20%, transparent);
   }
   figure.shot.tall img { max-width: 340px; }
+  figure.shot.wide img, figure.shot.wide video { max-width: 100%; }
   figure.shot figcaption { margin-top: 12px; text-align: center; color: var(--muted); font-size: .85rem; }
 </style>
 </head>
@@ -84,16 +87,17 @@
   <p class="tag claim">Your own agent session, in the call with you.</p>
   <p class="tag">It reads the Google Meet or Zoom transcript as it happens and answers in a side panel while
   the call is still going: what was just decided, who owns what, the risk you just agreed to, and the sentence
-  to say next, in the meeting's language. The transcript is a file on your disk. No account, no telemetry, no
-  server of ours.</p>
+  to say next, in the meeting's language. It decides when to speak up on its own, so you never stop listening
+  to go and ask it. The transcript is a file on your disk. No account, no telemetry, no server of ours.</p>
   <span class="pill">Free · you run it yourself · needs an MCP agent (tested: Claude Code) · Meet + Zoom</span>
-  <figure class="shot">
-    <video autoplay loop muted playsinline controls poster="media/panel-live-poster.jpg"
-           aria-label="The side panel during a release review: a risk and a suggested sentence appear while the call is still going.">
-      <source src="media/panel-live.mp4" type="video/mp4" />
-      <img src="media/panel-live.gif" alt="The side panel during a release review: a risk and a suggested sentence appear while the call is still going." />
+  <figure class="shot wide">
+    <video autoplay loop muted playsinline controls poster="media/call-live-poster.jpg"
+           aria-label="A release review: someone shares a calendar and promises the 15th, and the panel beside the call flags that the date is inside the agreed release freeze.">
+      <source src="media/call-live.mp4" type="video/mp4" />
+      <img src="media/call-live.gif" alt="A release review: someone shares a calendar and promises the 15th, and the panel beside the call flags that the date is inside the agreed release freeze." />
     </video>
-    <figcaption>The real side panel, 11 seconds of a release review. The call is invented; the interface is not.</figcaption>
+    <figcaption>A release review, 14 seconds, panel docked beside the call. The conversation is invented and
+    the cameras are off, as they are on most working calls. The interface is the shipping one.</figcaption>
   </figure>
 </header>
 
@@ -118,12 +122,52 @@
         <td><span class="marker" style="color:#d1242f">🔴 RISK</span> the contradiction, while you can still
         say "actually, let me check something".</td></tr>
   </table>
+  <figure class="shot wide">
+    <img src="media/call-share.png" width="1440" height="900" loading="lazy"
+         alt="The call with a shared screen: an August calendar with the 13th to 17th marked as a freeze and the 15th marked promised, and beside it the panel flagging that the promised date sits inside the freeze." />
+    <figcaption>The fourth row, as it actually looks: someone shares the calendar, the 15th goes in, and the
+    panel has already said why that is a problem.</figcaption>
+  </figure>
   <figure class="shot tall">
     <img src="media/panel-full.png" width="840" height="2000" loading="lazy"
          alt="The full side panel: status pills, suggestions with RISK, SAY and INFO markers, a decisions and action items board with a draft-note button, the live transcript, and the in-panel chat." />
     <figcaption>The same call seen whole: advice at the top, the decision board under it, transcript and chat
     below. Fictional participants, real interface.</figcaption>
   </figure>
+</section>
+
+<section>
+  <h2>It does not wait for you to ask</h2>
+  <p>You could type all of this to an agent in a terminal yourself. You would also stop listening while you
+  did it, and in a live call that costs more than the answer is worth. So it reads along, decides on its own
+  when it has something worth your attention, and puts it in the panel before you had thought to ask. Your
+  half of the work is listening to the room, which is the half that cannot be delegated.</p>
+  <p><strong>It checks what the room is asserting.</strong> "Filters took about two weeks" is the kind of
+  sentence that gets repeated until it becomes a plan. If your tracker says 31 days, you get 31 days and the
+  ticket it came from, while the sizing is still open rather than after it has shipped.</p>
+  <p><strong>And with one toggle it stops suggesting and starts doing.</strong> Turn on 🤖 Auto-create and the
+  moment someone says "raise a ticket for that", the ticket exists, with the link already dropped in the
+  meeting chat if you also turned that on. Same for a planning note or a summary. You authorize once, in the
+  panel, not once per item, and both toggles are off until you flip them.</p>
+  <figure class="shot wide">
+    <video autoplay loop muted playsinline controls poster="media/planning-live-poster.jpg"
+           aria-label="A sprint planning call: the assistant corrects a sizing claim against the tracker, records the decision, then files a ticket and drafts the planning note without being asked.">
+      <source src="media/planning-live.mp4" type="video/mp4" />
+      <img src="media/planning-live.gif" alt="A sprint planning call: the assistant corrects a sizing claim against the tracker, records the decision, then files a ticket and drafts the planning note without being asked." />
+    </video>
+    <figcaption>Sprint planning, 15 seconds. Nobody typed anything into the panel: the correction, the
+    decision, the ticket and the note all arrive while the meeting carries on.</figcaption>
+  </figure>
+  <figure class="shot tall">
+    <img src="media/panel-planning.png" width="840" height="2000" loading="lazy"
+         alt="The panel in produce mode with Auto-create and Post links to chat both on: an INFO card correcting a sizing claim, two ACTION cards recording a created ticket and a drafted note, and a board holding the decision and the linked ticket." />
+    <figcaption>The same session, close up. <code>PROJ-3120</code> is a link because the assistant filed it,
+    not a placeholder.</figcaption>
+  </figure>
+  <p class="note"><strong>Not tied to Jira.</strong> The tracker is whatever you name in Options, and with no
+  name at all the button says "Draft note" and the assistant produces a plain one. Your agent creates things
+  through the tools your own session already has, so a team on Linear, Asana, Notion or nothing in particular
+  is not a special case here.</p>
 </section>
 
 <section>
@@ -299,6 +343,15 @@ Chrome extension  ──HTTP──►  Local bridge server (127.0.0.1:8848)
     <tr><td><span class="marker" style="color:#d1242f">🔴 RISK</span></td><td>A risk, a decision to recall, or a contradiction to flag.</td></tr>
     <tr><td><span class="marker" style="color:#e36209">🟠 ACTION</span></td><td>Something you could do / were asked to do - the assistant can perform it on your confirmation.</td></tr>
   </table>
+  <figure class="shot">
+    <video autoplay loop muted playsinline controls poster="media/panel-live-poster.jpg"
+           aria-label="Close-up of the panel: a risk card, then a suggested sentence, then the decision, arriving one after another during the call.">
+      <source src="media/panel-live.mp4" type="video/mp4" />
+      <img src="media/panel-live.gif" alt="Close-up of the panel: a risk card, then a suggested sentence, then the decision, arriving one after another during the call." />
+    </video>
+    <figcaption>Markers arriving in order, close up: the risk first, then the sentence, then the decision it
+    ended in.</figcaption>
+  </figure>
 </section>
 
 <section>
@@ -362,10 +415,19 @@ Chrome extension  ──HTTP──►  Local bridge server (127.0.0.1:8848)
   exists if you type it. It is the difference between guessing who this is for and knowing.</p>
 </section>
 
+<section>
+  <h2>Who made this</h2>
+  <p>Built by Krystian Gwizdała, for his own calls first. There is no company behind it and no roadmap
+  committee - which is why the answer to "will you add X" is usually just yes or no.
+  <a href="https://krystiangw.github.io/krystiangw/">More of what I work on →</a></p>
+</section>
+
 </div>
 
 <footer>
   Meet Live Assist · a live meeting assistant you run yourself · your files stay on your disk
+  <br />
+  by <a href="https://krystiangw.github.io/krystiangw/">Krystian Gwizdała</a>
 </footer>
 </body>
 </html>
