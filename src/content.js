@@ -174,7 +174,15 @@
 
   // Live: emit the growing caption immediately so the panel shows it in real time.
   function emitInterim(tr) {
-    send({ type: 'cap', session, id: tr.id, ts: tr.ts, speaker: tr.speaker || '', text: tr.text });
+    // In region-fallback mode `tr.text` is the WHOLE caption history, not the current utterance, so sending
+    // it raw paints the panel with a growing wall of everything said so far next to the clean finalized
+    // lines. finalize() already subtracts what it has committed, which is why the transcript file stayed
+    // correct while the panel did not; do the same here. On a divergence (ASR revised earlier words) fall
+    // back to the full text: it self-corrects on the next commit and a wrong preview is worse than a long one.
+    let text = tr.text;
+    if (tr.fallback && tr.sent && text.startsWith(tr.sent)) text = text.slice(tr.sent.length).trim();
+    if (!text) return;
+    send({ type: 'cap', session, id: tr.id, ts: tr.ts, speaker: tr.speaker || '', text });
   }
   // Finalize: lock the line and hand the full text to the server/brain (once per block).
   function finalize(tr) {
