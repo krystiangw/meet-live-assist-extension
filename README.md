@@ -34,8 +34,9 @@ not the brain. The brain is an agent session on your own machine, reading the ca
 one you get a working transcript recorder and an empty advice pane, which is not what the screenshots promise.
 
 The adapter is plain JSON-RPC over stdio with nothing vendor-specific in it, so other MCP clients (Cursor,
-Cline, Continue, Zed, Codex) can drive it - but one requirement is genuinely harder to meet elsewhere: the
-client has to hold a **persistent background loop**, because MCP is client-pull and nothing on the server can
+Cline, Continue, Zed, Codex) can drive it - Codex CLI was checked and completes tool calls against the bridge.
+One requirement is genuinely harder to meet elsewhere: the client has to hold a **persistent background
+loop**, because MCP is client-pull and nothing on the server can
 ever start a turn. [`MCP-CLIENTS.md`](MCP-CLIENTS.md) explains what to check and what is unverified.
 
 **Your meeting is other people's conversation too.** Turning on captions is invisible to everyone else,

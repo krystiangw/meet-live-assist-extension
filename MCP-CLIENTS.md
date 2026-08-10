@@ -5,9 +5,15 @@ JSON-RPC over stdio - no vendor SDK, no Anthropic API, no assumptions about who 
 driving it from a client that identifies itself as `not-claude`: the handshake completes, `tools/list` returns
 all 13 tools, and `tools/call` works.
 
-So the honest answer to "does this need Claude?" is: **no, but Claude Code is the only client it has actually
-been tested with**, and one requirement below is genuinely hard to satisfy elsewhere. Both facts matter more
-than a compatibility badge.
+So the honest answer to "does this need Claude?" is **no**, and there are now two data points rather than one:
+
+| Client | What was actually checked | Date |
+| --- | --- | --- |
+| Claude Code | run through live meetings end to end, including the background loop | ongoing |
+| Codex CLI 0.147.0 | `codex mcp add` registers the adapter, the tool is discovered, and a `poll` call completes against the bridge and returns valid JSON. The background loop was **not** tested. | 2026-08-10 |
+
+Everything else in this document is about the requirement that separates those two rows: tool calls are the
+easy half.
 
 ## What any client needs
 

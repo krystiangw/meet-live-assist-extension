@@ -74,14 +74,19 @@
   .toc a { display: inline-block; padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px;
     background: var(--card); text-decoration: none; font-size: .88rem; }
 
-  /* Client compatibility strip. Names, not logos: a borrowed logo implies an endorsement, and only one of
-     these has actually been run through a meeting. */
-  ul.clients { display: flex; flex-wrap: wrap; gap: 10px; padding: 0; margin: 18px 0 0; list-style: none; }
-  ul.clients li { display: flex; flex-direction: column; gap: 2px; padding: 10px 16px; border-radius: 12px;
-    border: 1px solid var(--line); background: var(--card); font-weight: 600; font-size: .95rem; }
-  ul.clients li span { font-weight: 400; font-size: .78rem; color: var(--muted); }
-  ul.clients li.yes { border-color: color-mix(in srgb, var(--brand1) 55%, transparent);
-    background: color-mix(in srgb, var(--brand1) 10%, var(--card)); }
-  ul.clients li.yes span { color: var(--brand1); font-weight: 600; }
 
   footer .fine { display: block; max-width: 640px; margin: 14px auto 0; font-size: .8rem; opacity: .8; }
+
+  /* Client compatibility strip. Official marks (simple-icons, CC0) used nominatively to say which clients
+     this works with - the tier under each name is what has actually been checked, not a badge. */
+  ul.clients { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px;
+    padding: 0; margin: 18px 0 0; list-style: none; }
+  ul.clients li { display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 16px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--card); text-align: center; }
+  ul.clients li svg { width: 26px; height: 26px; fill: var(--fg); opacity: .85; }
+  ul.clients li b { font-size: .95rem; }
+  ul.clients li span { font-size: .76rem; color: var(--muted); }
+  ul.clients li.meeting, ul.clients li.tools { border-color: color-mix(in srgb, var(--brand1) 50%, transparent);
+    background: color-mix(in srgb, var(--brand1) 9%, var(--card)); }
+  ul.clients li.meeting svg, ul.clients li.tools svg { opacity: 1; fill: var(--brand1); }
+  ul.clients li.meeting span, ul.clients li.tools span { color: var(--brand1); font-weight: 600; }
