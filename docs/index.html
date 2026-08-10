@@ -80,6 +80,7 @@
     panel has already said why that is a problem.</figcaption>
   </figure>
 </section>
+
 <section>
   <h2>It does not wait for you to ask</h2>
   <p>You could type all of this to an agent in a terminal yourself. You would also stop listening while you
@@ -106,6 +107,7 @@
   through the tools your own session already has, so a team on Linear, Asana, Notion or nothing in particular
   is not a special case here.</p>
 </section>
+
 <section>
   <h2>What this asks of you</h2>
   <p><strong>You need an AI coding agent that speaks MCP.</strong>
@@ -113,11 +115,6 @@
   the eyes, ears and hands - capture, panel, local bridge - but not the brain; that is an agent session on your
   own machine, reading the call through MCP tools. Without one you get a working transcript recorder and an
   empty advice pane, which is not what the rest of this page shows.</p>
-  <p>The adapter is plain JSON-RPC over stdio, so other MCP clients can drive it. MCP is client-pull, though:
-  nothing on the server can start your assistant's turn, so the client has to hold a persistent background
-  loop, and only Claude Code is verified to do that.
-  <a href="https://github.com/krystiangw/meet-live-assist-extension/blob/main/MCP-CLIENTS.md">MCP-CLIENTS.md</a>
-  says what to check in yours, rather than printing a row of logos.</p>
   <p><strong>The meeting is other people's conversation too.</strong> Turning on captions is invisible to
   everyone else, unlike recording, which Meet badges. So by default this posts one line into the meeting chat
   when capture starts, saying an assistant is transcribing locally. You can edit that line or switch it off.
@@ -127,27 +124,63 @@
   <p class="more">Where we draw the line on interviews and exams, and what happens to a
   recording you did not ask for: <a href="faq.html">the questions page</a>.</p>
 </section>
+
+<section>
+  <h2>Whichever agent you already use</h2>
+  <p>This ships the eyes, ears and hands. The brain is whatever agent you already run, and the adapter is plain
+  JSON-RPC over stdio with nothing vendor-specific in it. What matters is not the vendor: it is whether your
+  client can hold a <strong>persistent background loop</strong>, because MCP is client-pull and nothing here
+  can start your assistant's turn.</p>
+  <ul class="clients">
+    <li class="yes">Claude Code<span>verified end to end</span></li>
+    <li>Cursor<span>speaks MCP</span></li>
+    <li>Cline<span>speaks MCP</span></li>
+    <li>Continue<span>speaks MCP</span></li>
+    <li>Zed<span>speaks MCP</span></li>
+    <li>VS Code<span>speaks MCP</span></li>
+    <li>Codex<span>speaks MCP</span></li>
+  </ul>
+  <p class="note">Every client on that list speaks the protocol. Only the first has been run through a real
+  meeting, and the background loop is the part that varies, so the rest are untested rather than supported.
+  <a href="https://github.com/krystiangw/meet-live-assist-extension/blob/main/MCP-CLIENTS.md">MCP-CLIENTS.md</a>
+  tells you what to check in yours.</p>
+</section>
+
 <section>
   <h2>Which meeting is yours</h2>
-  <p>Same product, same install. This only decides which meetings the assistant knows about and what it leads
-  with - pick one at install time and it stops guessing at someone else's kind of call.</p>
+  <p>Same product, same install. The profile you pick decides which meetings the assistant expects and what it
+  leads with, so it stops guessing at someone else's kind of call.</p>
   <div class="grid">
+    <div class="card"><div class="ico">🎯</div><h4>You are running the meeting</h4>
+      <p>Product, delivery, engineering management. Decisions and owners land on a board as they are agreed,
+      a date that contradicts an earlier one gets flagged while it is still a proposal, and the ticket someone
+      asked for exists before the call ends.<br><code>MLA_PROFILE=engineering</code></p></div>
+    <div class="card"><div class="ico">💻</div><h4>You are building the thing</h4>
+      <p>Standups, incident triage, refinement. It knows your tickets and your repo, flags scope creep, and
+      writes decisions down as they are made. With no meeting at all, co-pilot mode watches the tab you are
+      working in.<br><code>MLA_PROFILE=engineering</code></p></div>
+    <div class="card"><div class="ico">🎨</div><h4>You are presenting work</h4>
+      <p>A design review produces opinions faster than anyone writes them down, and half of them are about
+      something on screen. Snapshots keep what was being shown when it was said, and the board keeps what was
+      actually agreed rather than what everyone remembers.<br><code>MLA_PROFILE=generic</code></p></div>
+    <div class="card"><div class="ico">🔬</div><h4>You are interviewing someone</h4>
+      <p>Research, usability, hiring. Moderate the conversation instead of taking notes: it stays quiet, flags
+      a leading question the moment you ask one, tracks which topics you have not covered, and writes the
+      debrief afterwards.<br><code>MLA_PROFILE=research</code></p></div>
+    <div class="card"><div class="ico">🤝</div><h4>You are on a call with a customer</h4>
+      <p>Sales, success, consulting. The number you are about to quote and the date you are about to promise
+      get checked against your own notes while the call is live, and what you committed to is written down
+      instead of reconstructed on Friday.<br><code>MLA_PROFILE=generic</code></p></div>
     <div class="card" id="second-language"><div class="ico">🌍</div><h4>The meeting is not in your first language</h4>
       <p><em>You already know the answer; it just is not in English yet.</em> By the time the sentence is ready
       the conversation has moved on. This puts it on your screen in time to say it, and explains the idiom
       nobody defined.<br><code>MLA_PROFILE=second-language</code></p></div>
-    <div class="card"><div class="ico">💻</div><h4>The meeting is about software you are building</h4>
-      <p>Standups, incident triage, refinement, design review. It knows your tickets and your repo, flags scope
-      creep, and writes decisions down as they are made.
-      <br><code>MLA_PROFILE=engineering</code></p></div>
-    <div class="card"><div class="ico">🔬</div><h4>The meeting is you interviewing someone</h4>
-      <p>Moderate the conversation instead of taking notes. It stays quiet, flags a leading question the moment
-      you ask one, tracks which topics you have not covered, and writes the debrief afterwards.
-      <br><code>MLA_PROFILE=research</code></p></div>
   </div>
-  <p>Anything else: <code>generic</code>, or write your own profile as a file - they are about a dozen lines
-  each.</p>
+  <p>None of these? <code>generic</code> covers it, or write your own profile as a file - they are about a
+  dozen lines each. A customer call is someone else's conversation as much as yours; the disclosure line above
+  is on by default for a reason.</p>
 </section>
+
 <section>
   <h2>Where your words actually go</h2>
   <table>
@@ -162,6 +195,7 @@
     <tr><td>Anything else</td><td>Nothing. There is no third party in this product.</td></tr>
   </table>
 </section>
+
 <section>
   <h2>Install it</h2>
   <p>Three steps, and only the first two need a terminal. Requires Node 20+ and Chrome 116+.</p>
@@ -195,6 +229,7 @@ curl -s http://127.0.0.1:8848/health   # → {"ok":true,...}</code></pre>
   </ol>
   <p class="more">Autostart the server, speak into the call, or transcribe without captions: <a href="reference.html#optional">the optional steps</a>.</p>
 </section>
+
 <section>
   <h2>Tell us if it is any good</h2>
   <p>This is early and free, and the only thing that decides whether it grows is whether anyone finds it
@@ -205,6 +240,7 @@ curl -s http://127.0.0.1:8848/health   # → {"ok":true,...}</code></pre>
   and was it the right one?</strong> There is no analytics here and there never will be, so that answer only
   exists if you type it.</p>
 </section>
+
 <section>
   <h2>Who made this</h2>
   <p>Built by Krystian Gwizdała, for his own calls first. There is no company behind it and no roadmap
