@@ -1049,7 +1049,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/pair-open') {
     const until = openPairWindow('requested');
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ ok: until > 0, until, windowMs: PAIR_WINDOW_MS }));
+    return res.end(JSON.stringify({ ok: until > 0, until, windowMs: Math.max(0, until - Date.now()) }));
   }
 
   if (req.method === 'POST' && req.url === '/append') {
@@ -2249,6 +2249,34 @@ server.listen(PORT, '127.0.0.1', () => {
   setInterval(purgeOld, 6 * 3600 * 1000); // re-check a few times a day
 });
 
+// Proves possession of the token without putting it on the wire: a busy port is not proof that our server
+// is the one holding it, and any local process could bind 127.0.0.1:8848 first and be handed a token it
+// could not otherwise read (`.mla-token` is 0600).
+function askForWindow(token) {
+  const ts = String(Date.now());
+  const proof = crypto.createHash('sha256').update(`${token}:${ts}`).digest('hex');
+  const req = http.request({ host: '127.0.0.1', port: PORT, path: '/pair-open', method: 'POST',
+    headers: { 'X-MLA-Pair-Ts': ts, 'X-MLA-Pair-Proof': proof } }, (r) => {
+    let body = '';
+    r.on('data', (c) => { body += c; });
+    r.on('end', () => {
+      if (r.statusCode === 200) {
+        // Report what the server actually opened. Printing a local constant is how this ended up telling
+        // people they had two minutes when the window was fifteen.
+        let ms = 0;
+        try { ms = Number(JSON.parse(body).windowMs) || 0; } catch (_) {}
+        const left = ms >= 60000 ? `${Math.round(ms / 60000)} min` : `${Math.round(ms / 1000)}s`;
+        console.log(`[pair] the running server has opened a ${left} window - load the extension and open the side panel now`);
+      } else {
+        console.error(`[pair] the running server refused (HTTP ${r.statusCode}). It is running a different build, or a different process owns port ${PORT}.`);
+      }
+      process.exit(r.statusCode === 200 ? 0 : 1);
+    });
+  });
+  req.on('error', (err) => { console.error(`[pair] cannot reach the running server: ${err.message}`); process.exit(1); });
+  req.end();
+}
+
 // Without this a busy port ends in an unhandled 'error' event and eighteen lines of stack trace, which
 // says "the server is broken" when it means "one is already running".
 server.on('error', (e) => {
@@ -2256,20 +2284,31 @@ server.on('error', (e) => {
     // `--pair` against an already-running server is the common case, not an error: the launchd job owns the
     // port and the user just wants to pair a newly installed extension. Ask the running one to open its
     // window instead of telling them to stop it.
-    // Not `X-MLA-Token`. A busy port is not proof that our server is the one holding it - any local process
-    // can bind 127.0.0.1:8848 first and would be handed a token it could not otherwise read (`.mla-token` is
-    // 0600). A timestamped digest proves possession and discloses nothing reusable.
-    const ts = String(Date.now());
-    const proof = crypto.createHash('sha256').update(`${TOKEN}:${ts}`).digest('hex');
-    const req = http.request({ host: '127.0.0.1', port: PORT, path: '/pair-open', method: 'POST',
-      headers: { 'X-MLA-Pair-Ts': ts, 'X-MLA-Pair-Proof': proof } }, (r) => {
-      if (r.statusCode === 200) console.log(`[pair] the running server has opened a ${Math.round(PAIR_WINDOW_MS / 1000)}s window - open the extension side panel now`);
-      else console.error(`[pair] the running server refused (HTTP ${r.statusCode}) - is ${TOKEN_FILE} the token it uses?`);
-      r.resume();
-      r.on('end', () => process.exit(r.statusCode === 200 ? 0 : 1));
-    });
-    req.on('error', (err) => { console.error(`[pair] cannot reach the running server: ${err.message}`); process.exit(1); });
-    req.end();
+    //
+    // The running server almost certainly has a different data dir than whatever this invocation guessed -
+    // launchd sets TRANSCRIPTS_DIR, `npx` from a random folder does not - and a token computed from the
+    // wrong file fails as a 403 naming a path the user has never seen. /health needs no token and reports
+    // the dir, so ask it, then read the token the running server is actually using.
+    http.get({ host: '127.0.0.1', port: PORT, path: '/health' }, (h) => {
+      let body = '';
+      h.on('data', (c) => { body += c; });
+      h.on('end', () => {
+        let dir = '';
+        try { dir = String(JSON.parse(body).dir || ''); } catch (_) {}
+        let token = TOKEN;
+        if (dir && path.resolve(dir) !== path.resolve(TRANSCRIPTS_DIR)) {
+          try {
+            token = fs.readFileSync(path.join(dir, '.mla-token'), 'utf8').trim();
+            console.log(`[pair] the running server keeps its data in ${dir} - using the token from there`);
+          } catch (_) {
+            console.error(`[pair] the running server keeps its data in ${dir}, and its token is not readable from here.`);
+            console.error(`[pair] run this with the same data dir: TRANSCRIPTS_DIR=${dir} node ${__filename} --pair`);
+            return process.exit(1);
+          }
+        }
+        askForWindow(token);
+      });
+    }).on('error', (err) => { console.error(`[pair] cannot reach the running server: ${err.message}`); process.exit(1); });
     return;
   }
   if (e.code === 'EADDRINUSE') {
