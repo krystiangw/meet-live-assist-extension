@@ -82,8 +82,8 @@
   } catch (_) {}
 
   const CC_LABEL_HINTS = ['caption', 'subtitle', 'napis', 'untertitel', 'sous-titre', 'subtítulo', 'subtitulo'];
-  const CC_ON_HINTS = ['turn off', 'wyłącz', 'wylacz', 'disable', 'stop'];
-  const CC_OFF_HINTS = ['turn on', 'włącz', 'wlacz', 'enable'];
+  const CC_ON_HINTS = ['turn off', 'wyłącz', 'wylacz', 'disable', 'stop', 'hide', 'ukryj'];
+  const CC_OFF_HINTS = ['turn on', 'włącz', 'wlacz', 'enable', 'show', 'pokaż', 'pokaz'];
 
   // ---- STATE ---------------------------------------------------------------
   let session = null;
@@ -318,6 +318,21 @@
     if (btn) {
       if (btn.on && !btn.off) { captionsHandled = true; return; }
       if (btn.off) { try { btn.el.click(); } catch (_) {} captionsHandled = true; return; }
+      // Found the button but cannot read its state from the label, which is what happens whenever Google
+      // rewords it. The old code did nothing here and retried silently for fifty seconds, so captions never
+      // came on and nothing said why. There is no caption region either, so the odds are they are off.
+      // Click once and check: if a region appears we were right; if not we just turned someone's captions
+      // off, so put them back and say so rather than leaving the room transcribed against their choice.
+      if (attempt >= 3) {
+        captionsHandled = true;
+        try { btn.el.click(); } catch (_) { return; }
+        setTimeout(() => {
+          if (firstRegion()) return;
+          try { btn.el.click(); } catch (_) {}
+          send({ type: 'capture-health', ok: false, reason: 'cannot tell whether captions are on - turn them on with the CC button' });
+        }, 2500);
+        return;
+      }
     }
     if (attempt < 25) setTimeout(() => ensureCaptionsOn(attempt + 1), 2000);
   }

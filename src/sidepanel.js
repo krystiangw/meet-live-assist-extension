@@ -1191,7 +1191,9 @@ function onMessage(msg) {
       else if (!msg.ok) setStatus(capEl, `⚠ capture: ${msg.reason}`, 'bad');
       break;
     case 'capture-health':
-      if (!msg.ok) setStatus(capEl, '⚠ no captions - turn on CC / check language', 'bad');
+      // Show the reason the content script sent. It knows whether captions are off, whether Meet's markup
+      // moved, or whether it could not read the button at all, and a single generic line threw that away.
+      if (!msg.ok) setStatus(capEl, '⚠ ' + (msg.reason || 'no captions - turn on CC / check language'), 'bad');
       else setStatus(capEl, 'capturing', 'ok');
       break;
     case 'sharing':
