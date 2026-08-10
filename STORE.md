@@ -70,14 +70,19 @@ Privacy policy: `PRIVACY.md`.
 - [x] `debugger` and the page-control surface stripped from the public build (`build.sh --public`).
 - [x] Bundled skill is a template, not the author's personal one (`install.sh` fills user/language/domain).
 - [x] Privacy policy hosted publicly (https://krystiangw.github.io/meet-live-assist/) - link it in the listing.
-- [ ] Rebuild the upload zip at the version you are submitting (`npm run build:public`).
+- [x] Upload zip rebuilt at the submitted version: `dist/meet-live-assist-0.7.0-public.zip`
+      (223 KB across 17 files). Verified as an artifact, not on the build script's word: manifest has 8
+      permissions and no `debugger`, no `chrome.debugger` call survives the strip, every stripped file still
+      parses, and every path the manifest and the shipped HTML reference exists inside the zip.
 - [x] Screenshots (1280x800): `store-1-in-a-call.png`, `store-2-screen-share.png`,
       `store-3-co-pilot.png` - the extension in a call, beside a shared screen, and in co-pilot mode.
       Regenerate with `node tools/media/stage.mjs`.
 - [ ] Note in the listing that a local companion server is required (link the docs/integration page).
 - [ ] Note that the first 📷 asks for screen access: `<all_urls>` is granted on a gesture, not at install,
       so an unexpected prompt reads as a failure. Same for starting co-pilot.
-- [ ] Pick a licence and decide whether the source repo goes public alongside the listing.
+- [x] Licence picked: PolyForm Internal Use 1.0.0, and `package.json` points at the file because there is
+      no SPDX identifier for it.
+- [ ] Decide whether the source repo goes public alongside the listing.
 - [ ] Submit unlisted first; go public once the review comes back clean.
 
 ## Disclosure to other participants

@@ -4,6 +4,49 @@ Notable changes only. Earlier history is in `git log` (91 commits from 2026-07-1
 point the project was prepared for a public release, because that is where a version number began to mean
 something to anyone other than the author.
 
+## 0.7.0 - 2026-08-10
+
+The release prepared for the store submission. Two of these change behaviour; the rest is what a stranger
+reads before deciding to install.
+
+### A gate that only exists in the client is not a gate
+
+The service worker accepted any port called `sidepanel`, and a content script runs with the extension's own
+id, so a compromised one could open that port and reach `snapshot-now`, `apply-edit`, `capture-dom` and
+`copilot-start`. Ports are now checked by the sender's origin: extension pages are `chrome-extension://` and
+carry no `sender.tab`. The offscreen document got the same check, because its message also carries the server
+URL and token that captured audio is posted to.
+
+`/drive` and `/autopilot` were behind the shared token, and the assistant holds that token too, so a
+prompt-injected agent could grant itself the tab and the meeting chat and then write to every participant.
+The panel now marks its own consent writes with a header that nothing in the skill or the MCP adapter sends.
+Three tests cover it, verified by removing the gate and watching them go red.
+
+### The Options field could point anywhere
+
+Any URL was accepted. With the optional `<all_urls>` permission granted, a non-loopback value there sends the
+transcript, the snapshots and the captured audio off the machine, in a product whose promise is that they
+stay on it. Loopback only now, refused with a reason. The check rejects `127.0.0.1.evil.com` and
+`localhost.evil.com`.
+
+### Smaller, still real
+
+- `--pair` against a busy port sent the token to whoever held `127.0.0.1:8848`, which need not be this server
+  and could not otherwise read a `0600` file. It sends a timestamped digest now and discloses nothing reusable.
+- Token comparison is constant-time. Irrelevant over loopback, free to fix, and the code is public now.
+- `install-server.sh` no longer prints the token to stdout, where it lands in scrollback and in logs.
+- A session that held state but never held a file survived every retention sweep, which made the privacy
+  policy's "its state is dropped with them" false. State now ages out by the date in the session name.
+- `PolyForm-Internal-Use-1.0.0` is not an SPDX identifier: npm warns and GitHub renders the licence as
+  Unknown. Both manifests point at the file instead.
+
+### What a stranger sees
+
+The landing page is three pages now: an overview that sells, a reference for the parts and the API, and a
+Q&A. Everything published carries real imagery rendered from the shipping panel: two scenes in motion, the
+call around the panel, and three 1280x800 store tiles. Feedback goes to issues with two templates, because
+Discussions was switched off and four links pointed at it.
+
 ## 0.6.0 - 2026-08-08
 
 ### The authorization model rested on a forgeable label
