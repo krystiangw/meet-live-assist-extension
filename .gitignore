@@ -1,3 +1,11 @@
 dist/
 .DS_Store
 transcripts/
+
+# Credentials. The repo is public, so a token dropped here by npm or by hand would be one `git add -A`
+# away from being live on the internet.
+.npmrc
+.env
+.env.*
+*.pem
+*.key
