@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Meet Live Assist - questions</title>
+<meta name="description" content="Where the transcript goes, what phones home, how long anything is kept, whether you can use it at work, and where we draw the line." />
+<link rel="canonical" href="https://krystiangw.github.io/meet-live-assist/faq.html" />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://krystiangw.github.io/meet-live-assist/faq.html" />
+<meta property="og:title" content="Meet Live Assist - questions" />
+<meta property="og:description" content="Where the transcript goes, what phones home, how long anything is kept, whether you can use it at work, and where we draw the line." />
+<meta property="og:image" content="https://krystiangw.github.io/meet-live-assist/media/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="top">
+  <div class="inner">
+    <a class="brand" href="./">Meet Live Assist</a>
+    <a href="./">Overview</a>
+    <a href="reference.html">How it works</a>
+    <a href="faq.html" aria-current="page">Questions</a>
+    <a href="https://github.com/krystiangw/meet-live-assist-extension">GitHub</a>
+  </div>
+</nav>
+
+<div class="wrap">
+<div class="page-head">
+  <h1>Questions</h1>
+  <p>The ones worth answering before you install something that listens to your meetings.</p>
+  <ul class="toc">
+    <li><a href="#privacy">Your meeting</a></li>
+    <li><a href="#needs">What you need</a></li>
+    <li><a href="#platform">Platforms</a></li>
+    <li><a href="#trouble">When it does not work</a></li>
+    <li><a href="#line">Where we draw the line</a></li>
+  </ul>
+</div>
+
+<section id="privacy">
+  <h2>What it does with your meeting</h2>
+  <p>Every line below is checkable against the source.</p>
+  <table>
+    <tr><th>Question</th><th>Answer</th></tr>
+    <tr><td>Where does my transcript go?</td><td>A folder on your disk. Files are owner-only
+      (<code>0600</code>), the folder is <code>0700</code>.</td></tr>
+    <tr><td>Does anything phone home?</td><td>No. The extension talks only to <code>127.0.0.1</code>.</td></tr>
+    <tr><td>What about the AI?</td><td>The assistant is <em>your</em> Claude Code session. What you route to it is
+      between you and Anthropic.</td></tr>
+    <tr><td>Can a website reach the server?</td><td>No. Every route but <code>/health</code> needs a token,
+      and the server accepts cross-origin requests only from the extension.</td></tr>
+    <tr><td>How long is it kept?</td><td>14 days by default, then purged automatically. 🗑 in the panel wipes
+      one meeting - transcript, chat, summary, snapshots, state - immediately.</td></tr>
+    <tr><td>How do I remove all of it?</td><td>Delete the data folder, delete
+      <code>~/.claude/skills/meet-live-assist</code>, run <code>claude mcp remove meet-live-assist</code>,
+      remove the extension.</td></tr>
+    <tr><td>Do the others in the call know?</td><td>Only if you tell them. By default it posts one line in
+      the meeting chat saying so, and tells you in the panel when that line could not be delivered.</td></tr>
+    <tr><td>Can I use it at work?</td><td>Yes. The licence
+      (<a href="https://polyformproject.org/licenses/internal-use/1.0.0">PolyForm Internal Use 1.0.0</a>)
+      permits the internal business operations of you and your company. You may not redistribute or sell it.
+      Source-available, not open source: free to use, and the code stays the author's.</td></tr>
+  </table>
+  <p class="note">Capturing a meeting is recording. Disclosure is not consent - where consent is required,
+  getting it is on you.</p>
+</section>
+
+<section id="needs">
+  <h2>What you need to run it</h2>
+  <table>
+    <tr><th>Question</th><th>Answer</th></tr>
+    <tr><td>What does it cost?</td><td>Nothing. It is free, and the source is there to read. The cost you already
+      carry is the assistant: this has no model of its own and borrows your agent session rather than
+      billing you twice for one.</td></tr>
+    <tr><td>Do I have to use Claude Code?</td><td>No, but it is the only client this has been tested with.
+      The adapter is plain JSON-RPC over stdio with nothing vendor-specific in it. The requirement that is
+      genuinely hard to meet elsewhere is a <strong>persistent background loop</strong>: MCP is client-pull,
+      so nothing on the server can start your assistant's turn, and something on the client side has to keep
+      asking. <a href="https://github.com/krystiangw/meet-live-assist-extension/blob/main/MCP-CLIENTS.md">What
+      to check in your client</a>.</td></tr>
+    <tr><td>What if I do not connect an assistant at all?</td><td>You get a working transcript recorder and
+      an empty advice pane. That is worth saying plainly, because the screenshots on this site are of the
+      pane with an assistant behind it.</td></tr>
+    <tr><td>Does it need my calendar, my email, my Google account?</td><td>None of them. There is nothing to
+      sign in to.</td></tr>
+  </table>
+</section>
+
+<section id="platform">
+  <h2>Where it runs</h2>
+  <table>
+    <tr><th>Question</th><th>Answer</th></tr>
+    <tr><td>Which meetings?</td><td>Google Meet and the Zoom web client. Not the Zoom desktop app.</td></tr>
+    <tr><td>Windows or Linux?</td><td>The server needs Node 20 and nothing else, and binary lookup covers
+      Linux paths, so the panel, the transcript and the advice all work. Two things are macOS-only: speaking
+      <em>into</em> the call (it uses <code>say</code> and <code>afplay</code>) and the autostart job (launchd).
+      Elsewhere advice still appears as text and the server tells you why it cannot speak.</td></tr>
+    <tr><td>Does it record audio?</td><td>Only if you turn on local speech-to-text, which transcribes with
+      whisper.cpp on your machine. Otherwise it reads the captions the meeting is already generating and
+      never touches the audio stream.</td></tr>
+    <tr><td>Do I need a fast machine?</td><td>For captions, no. Local speech-to-text is the only heavy part,
+      and it is optional.</td></tr>
+  </table>
+</section>
+
+<section id="trouble">
+  <h2>When it does not work</h2>
+  <table>
+    <tr><th>Symptom</th><th>What it means</th></tr>
+    <tr><td>The panel says the pairing window expired</td><td>Run
+      <code>node server/transcript-server.js --pair</code> again. Against a server that is already running it
+      just reopens the window, and the panel collects the token itself.</td></tr>
+    <tr><td>Transcript is filling, advice pane stays empty</td><td>No assistant is attached. The panel has a
+      liveness pill for exactly this, so you find out during the call rather than after it.</td></tr>
+    <tr><td>Transcript stopped mid-meeting</td><td>Captions broke, or the tab was reloaded without the
+      content script. The panel warns instead of quietly recording nothing.</td></tr>
+    <tr><td>Nothing at all appears</td><td>Check the server: <code>curl -s http://127.0.0.1:8848/health</code>.
+      It reports its own state and which optional tools it can find.</td></tr>
+    <tr><td>It gave up halfway and I do not know why</td><td>Say so in
+      <a href="https://github.com/krystiangw/meet-live-assist-extension/discussions">Discussions</a>. There is
+      no analytics here, so a failure nobody types out is a failure nobody sees.</td></tr>
+  </table>
+</section>
+
+<section id="line">
+  <h2>Where we draw the line</h2>
+  <p class="note"><strong>Not for a job interview or an exam, where the other side is assessing you.</strong>
+  Preparation, and your own working meetings, yes. This is our line, not a rule we are quoting: Anthropic's
+  <a href="https://www.anthropic.com/legal/aup">usage policy</a> asks you not to submit AI-assisted work
+  without permission or attribution, and its hiring and testing clauses are aimed at employers rather than at
+  candidates. We would rather say where we stand than let you find out from a news story.</p>
+</section>
+<section>
+  <h2>What your AI provider sees</h2>
+  <p class="note">On consumer Claude plans, whether your sessions are used to improve the model is a setting
+  <em>you</em> control, and it changes how long they are kept.
+  <a href="https://www.anthropic.com/news/updates-to-our-consumer-terms">Anthropic's consumer terms</a> spell
+  it out, Claude Code included; work and API accounts are on different terms. Read it before you point this
+  at a meeting that is not yours to share.</p>
+</section>
+
+</div>
+
+<footer>
+  Meet Live Assist · a live meeting assistant you run yourself · your files stay on your disk
+  <br />
+  by <a href="https://krystiangw.github.io/krystiangw/">Krystian Gwizdała</a>
+</footer>
+</body>
+</html>

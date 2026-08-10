@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How Meet Live Assist works - architecture, features and server API</title>
+<meta name="description" content="The three pieces, the full feature list, the six advice markers, the optional install steps and the local server API." />
+<link rel="canonical" href="https://krystiangw.github.io/meet-live-assist/reference.html" />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://krystiangw.github.io/meet-live-assist/reference.html" />
+<meta property="og:title" content="How Meet Live Assist works" />
+<meta property="og:description" content="The three pieces, the full feature list, the six advice markers, the optional install steps and the local server API." />
+<meta property="og:image" content="https://krystiangw.github.io/meet-live-assist/media/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="top">
+  <div class="inner">
+    <a class="brand" href="./">Meet Live Assist</a>
+    <a href="./">Overview</a>
+    <a href="reference.html" aria-current="page">How it works</a>
+    <a href="faq.html">Questions</a>
+    <a href="https://github.com/krystiangw/meet-live-assist-extension">GitHub</a>
+  </div>
+</nav>
+
+<div class="wrap">
+<div class="page-head">
+  <h1>How it works</h1>
+  <p>The parts, the full feature list, the markers, the HTTP API, and the install steps that are optional.</p>
+  <ul class="toc">
+    <li><a href="#pieces">The three pieces</a></li>
+    <li><a href="#features">Everything it does</a></li>
+    <li><a href="#markers">Advice markers</a></li>
+    <li><a href="#optional">Optional install steps</a></li>
+    <li><a href="#api">Server API</a></li>
+  </ul>
+</div>
+
+<section id="pieces">
+  <h2>The three pieces</h2>
+  <p>Three pieces, all on your machine:</p>
+  <pre><code>Google Meet tab
+   │  (transcript, snapshots, mic control)
+   ▼
+Chrome extension  ──HTTP──►  Local bridge server (127.0.0.1:8848)
+   ▲  (advice, chat, TTS)          │
+   └───────────────────────────────┤  transcript file + advice/chat channels
+                                    ▼
+                          The "brain" - a Claude Code session with YOUR
+                          context (notes, docs, tools) reads the call over MCP
+                          and replies with advice / chat / TTS.</code></pre>
+  <p class="note">The extension only captures and displays. The intelligence is the brain - a local agent session that already knows your work.</p>
+</section>
+<section id="features">
+  <h2>What it does</h2>
+  <div class="grid">
+    <div class="card"><div class="ico">📝</div><h4>Live transcript</h4><p>Captures the Meet call transcript in real time into a side panel - from captions or local speech-to-text.</p></div>
+    <div class="card"><div class="ico">🎧</div><h4>Local STT</h4><p>Optional caption-free transcription of the call audio via whisper.cpp - fully offline, no cloud, no subscription.</p></div>
+    <div class="card"><div class="ico">🟢</div><h4>Colour-coded advice</h4><p>Your assistant pushes what to say, facts, summaries, risks and actions - links & images included.</p></div>
+    <div class="card"><div class="ico">📷</div><h4>Smart snapshots</h4><p>Auto-captures the tab while someone shares their screen; on-demand otherwise - visual context for the assistant.</p></div>
+    <div class="card"><div class="ico">💬</div><h4>In-panel chat</h4><p>A two-way back-channel to ask the assistant things mid-call without speaking.</p></div>
+    <div class="card"><div class="ico">🔊</div><h4>Speak into the call</h4><p>Text-to-speech in the call's language that can be routed straight into the meeting.</p></div>
+    <div class="card"><div class="ico">✏️</div><h4>Live demo edits</h4><p>Ask the assistant to fix a typo or hide a broken element on your shared screen - presentation-only, revertable, never saved.</p></div>
+    <div class="card"><div class="ico">🎛️</div><h4>Meeting modes</h4><p>Listener, Lead, or Auto - tune how proactively the assistant suggests based on your role in the call.</p></div>
+    <div class="card"><div class="ico">📋</div><h4>Decisions & action items</h4><p>A live board of decisions and owner-tagged action items, and one click asks the assistant to draft the ticket or note.</p></div>
+    <div class="card"><div class="ico">⏮️</div><h4>Recap & alerts</h4><p>Ask "what did I miss?" anytime; get nudged when you're named, look muted, or a risk appears.</p></div>
+    <div class="card"><div class="ico">🎯</div><h4>Meeting-type aware</h4><p>Detects standup / 1:1 / incident / review and adapts what it surfaces; remembers recurring series.</p></div>
+    <div class="card"><div class="ico">🟦</div><h4>Meet & Zoom</h4><p>Works on Google Meet and the Zoom web client - same live transcript, advice and tools.</p></div>
+    <div class="card"><div class="ico">🧑‍💻</div><h4>Co-pilot mode</h4><p>No meeting needed: start a session, and the assistant watches your tab and listens to your mic while you debug or build.</p></div>
+    <div class="card"><div class="ico">🤖</div><h4>Action-item autopilot</h4><p>In grooming / mob sessions it captures action items and - once you opt in - creates the tickets and drops the links in the meeting chat.</p></div>
+    <div class="card"><div class="ico">🔒</div><h4>Your files, your account</h4><p>What you send the assistant goes to your own Claude account. Everything else stays on your disk.</p></div>
+  </div>
+</section>
+<section id="markers">
+  <h2>Advice markers</h2>
+  <table>
+    <tr><th>Marker</th><th>Meaning</th></tr>
+    <tr><td><span class="marker" style="color:#1a7f37">🟢 SAY</span></td><td>Exact words you can say right now (in the call's language). Press 🔊 to voice it.</td></tr>
+    <tr><td><span class="marker" style="color:#2f6feb">🔵 INFO</span></td><td>A fact, number, link or name from your context.</td></tr>
+    <tr><td><span class="marker" style="color:#b8860b">🟡 SUMMARY</span></td><td>Where the discussion is / what was just decided.</td></tr>
+    <tr><td><span class="marker" style="color:#8250df">🟣 EXPLAIN</span></td><td>A short explanation of a term or the <em>why</em> behind something.</td></tr>
+    <tr><td><span class="marker" style="color:#d1242f">🔴 RISK</span></td><td>A risk, a decision to recall, or a contradiction to flag.</td></tr>
+    <tr><td><span class="marker" style="color:#e36209">🟠 ACTION</span></td><td>Something you could do / were asked to do - the assistant can perform it on your confirmation.</td></tr>
+  </table>
+  <figure class="shot">
+    <video autoplay loop muted playsinline controls poster="media/panel-live-poster.jpg"
+           aria-label="Close-up of the panel: a risk card, then a suggested sentence, then the decision, arriving one after another during the call.">
+      <source src="media/panel-live.mp4" type="video/mp4" />
+      <img src="media/panel-live.gif" alt="Close-up of the panel: a risk card, then a suggested sentence, then the decision, arriving one after another during the call." />
+    </video>
+    <figcaption>Markers arriving in order, close up: the risk first, then the sentence, then the decision it
+    ended in.</figcaption>
+  </figure>
+</section>
+<section id="optional">
+  <h2>Optional install steps</h2>
+  <p>The three steps on the <a href="./">overview</a> get you a working panel. These three are worth doing
+  once you know you are keeping it.</p>
+  <ol class="steps">
+    <li>
+      <h3>(Optional) Autostart the server</h3>
+      <p>On macOS, <code>./server/install-server.sh</code> installs a launchd job so step 2 stops being a
+      step. It works out your node binary and paths itself.</p>
+    </li>
+    <li>
+      <h3>(Optional) Enable "speak into the call"</h3>
+      <p>TTS needs a virtual audio device so synthesized speech reaches Meet as your microphone:</p>
+      <pre><code>brew install blackhole-2ch</code></pre>
+      <p>Then in <strong>Audio MIDI Setup</strong> create an <strong>Aggregate Device</strong> combining your real microphone + <strong>BlackHole 2ch</strong> (drift-correct BlackHole), and set it as your macOS default input. Tick <strong>🎙 into call</strong> in the panel and press 🔊 on a suggestion.</p>
+    </li>
+    <li>
+      <h3>(Optional) Local speech-to-text</h3>
+      <p>To transcribe the call's audio instead of scraping captions, install whisper.cpp and a model, then
+      start it with <strong>⌘⇧U</strong> while the Meet tab is focused (a keyboard command is required so Chrome
+      grants tab-capture access; the panel's 🎧 checkbox reflects the state):</p>
+      <pre><code>brew install whisper-cpp
+mkdir -p ~/.local/share/whisper
+curl -L -o ~/.local/share/whisper/ggml-base.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin</code></pre>
+    </li>
+    </ol>
+</section>
+<section id="api">
+  <h2>Server API</h2>
+  <table>
+    <tr><th>Endpoint</th><th>Purpose</th></tr>
+    <tr><td><code>POST /append</code></td><td>Transcript sink (from the extension).</td></tr>
+    <tr><td><code>POST /advice</code> · <code>GET /advice</code></td><td>Brain pushes advice; panel polls it. Supports rich text + <code>image</code>.</td></tr>
+    <tr><td><code>POST /chat</code> · <code>GET /chat</code></td><td>Two-way chat (<code>role: user|agent</code>).</td></tr>
+    <tr><td><code>POST /snapshot</code> · <code>POST /snapshot-request</code></td><td>Store a tab snapshot; brain requests one.</td></tr>
+    <tr><td><code>POST /speak</code> · <code>GET /voices</code></td><td>TTS (per-language voice, optional device routing).</td></tr>
+    <tr><td><code>POST /stt</code></td><td>Transcribe an audio chunk locally with whisper.cpp.</td></tr>
+    <tr><td><code>POST /items</code> · <code>GET /items</code></td><td>Decisions & action-items board.</td></tr>
+    <tr><td><code>POST /mode</code> · <code>GET /mode</code></td><td>Meeting mode (listener / lead / auto).</td></tr>
+    <tr><td><code>POST /summary</code> · <code>GET /summary</code></td><td>Post-call summary artifact (copy / download).</td></tr>
+    <tr><td><code>POST /brain-ping</code></td><td>Liveness heartbeat - the panel shows if a brain is attached.</td></tr>
+    <tr><td><code>POST /clear</code></td><td>Wipe one meeting (transcript, chat, summary, snapshots).</td></tr>
+    <tr><td><code>GET /health</code></td><td>Status + tool checks (ffmpeg / whisper / BlackHole). The only route that needs no token.</td></tr>
+  </table>
+  <p class="note">Every route except <code>/health</code> requires an <code>X-MLA-Token</code> header (the token from <code>.mla-token</code>).</p>
+</section>
+
+</div>
+
+<footer>
+  Meet Live Assist · a live meeting assistant you run yourself · your files stay on your disk
+  <br />
+  by <a href="https://krystiangw.github.io/krystiangw/">Krystian Gwizdała</a>
+</footer>
+</body>
+</html>

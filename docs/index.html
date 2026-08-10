@@ -9,73 +9,24 @@
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://krystiangw.github.io/meet-live-assist/" />
 <meta property="og:title" content="Meet Live Assist" />
-<meta property="og:description" content="Your own agent session, in the call with you. Reads the Meet or Zoom transcript live and answers in a side panel. Runs on your machine: no account, no telemetry." />
+<meta property="og:description" content="Your own agent session, in the call with you. Reads the Google Meet or Zoom transcript live and answers in a side panel. Runs on your machine: no account, no telemetry." />
 <meta property="og:image" content="https://krystiangw.github.io/meet-live-assist/media/og-card.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
 <meta name="twitter:card" content="summary_large_image" />
-<style>
-  :root {
-    color-scheme: light dark;
-    --bg: #ffffff; --fg: #1a1a2e; --muted: #5b5b73; --card: #f6f7fb;
-    --line: #e6e7ef; --brand1: #4f7cff; --brand2: #6f4ff0; --code: #f0f1f7;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #0f1117; --fg: #e8e9f0; --muted: #9aa0b4; --card: #171a22;
-            --line: #262a36; --code: #1b1f29; }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; font: 16px/1.6 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); }
-  a { color: var(--brand1); }
-  .wrap { max-width: 880px; margin: 0 auto; padding: 0 20px; }
-  header.hero { padding: 64px 20px 40px; text-align: center;
-    background: radial-gradient(1200px 400px at 50% -10%, color-mix(in srgb, var(--brand2) 22%, transparent), transparent); }
-  .logo { width: 76px; height: 76px; border-radius: 18px; box-shadow: 0 8px 30px color-mix(in srgb, var(--brand2) 40%, transparent); }
-  h1 { font-size: 2.2rem; margin: 18px 0 6px; letter-spacing: -0.02em; }
-  .tag { color: var(--muted); font-size: 1.15rem; margin: 0 auto; max-width: 560px; }
-  .tag.claim { color: var(--fg); font-size: 1.35rem; font-weight: 600; max-width: 620px; }
-  .tag + .tag { margin-top: 14px; font-size: 1rem; }
-  .pill { display: inline-block; margin-top: 18px; padding: 5px 14px; border-radius: 20px; font-size: .85rem;
-    background: color-mix(in srgb, var(--brand1) 15%, transparent); color: var(--brand1); font-weight: 600; }
-  section { padding: 36px 0; border-top: 1px solid var(--line); }
-  h2 { font-size: 1.4rem; margin: 0 0 18px; letter-spacing: -0.01em; }
-  h3 { font-size: 1.05rem; margin: 24px 0 6px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
-  .card .ico { font-size: 1.4rem; }
-  .card h4 { margin: 8px 0 4px; font-size: 1rem; }
-  .card p { margin: 0; color: var(--muted); font-size: .93rem; }
-  ol.steps { padding-left: 0; list-style: none; counter-reset: s; }
-  ol.steps > li { position: relative; padding: 0 0 20px 46px; counter-increment: s; }
-  ol.steps > li::before { content: counter(s); position: absolute; left: 0; top: 0;
-    width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: .9rem;
-    color: #fff; background: linear-gradient(135deg, var(--brand1), var(--brand2)); }
-  ol.steps > li:not(:last-child)::after { content: ""; position: absolute; left: 14px; top: 34px; bottom: 4px; width: 2px; background: var(--line); }
-  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  code { background: var(--code); padding: 2px 6px; border-radius: 5px; font-size: .9em; }
-  pre { background: var(--code); padding: 14px 16px; border-radius: 10px; overflow-x: auto; border: 1px solid var(--line); }
-  pre code { background: none; padding: 0; }
-  table { width: 100%; border-collapse: collapse; font-size: .93rem; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { color: var(--muted); font-weight: 600; }
-  .marker { font-weight: 700; white-space: nowrap; }
-  .note { background: color-mix(in srgb, var(--brand1) 8%, transparent); border: 1px solid color-mix(in srgb, var(--brand1) 25%, transparent);
-    border-radius: 10px; padding: 12px 16px; color: var(--muted); font-size: .93rem; }
-  footer { padding: 40px 20px 60px; text-align: center; color: var(--muted); font-size: .88rem; }
-  /* 840px is .wrap's content width, so the hero figure - which sits outside .wrap - lines up with the ones
-     inside it instead of running the full viewport. */
-  figure.shot { margin: 28px auto 0; max-width: 840px; }
-  figure.shot img, figure.shot video {
-    display: block; margin: 0 auto; width: 100%; max-width: 420px; height: auto; border-radius: 14px;
-    border: 1px solid var(--line); background: var(--card);
-    box-shadow: 0 18px 50px color-mix(in srgb, var(--brand2) 20%, transparent);
-  }
-  figure.shot.tall img { max-width: 340px; }
-  figure.shot.wide img, figure.shot.wide video { max-width: 100%; }
-  figure.shot figcaption { margin-top: 12px; text-align: center; color: var(--muted); font-size: .85rem; }
-</style>
+<link rel="stylesheet" href="style.css" />
 </head>
 <body>
+<nav class="top">
+  <div class="inner">
+    <a class="brand" href="./">Meet Live Assist</a>
+    <a href="./" aria-current="page">Overview</a>
+    <a href="reference.html">How it works</a>
+    <a href="faq.html">Questions</a>
+    <a href="https://github.com/krystiangw/meet-live-assist-extension">GitHub</a>
+  </div>
+</nav>
+
 <header class="hero">
   <svg class="logo" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" aria-label="Meet Live Assist">
     <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f7cff"/><stop offset="1" stop-color="#6f4ff0"/></linearGradient></defs>
@@ -87,8 +38,8 @@
   <p class="tag claim">Your own agent session, in the call with you.</p>
   <p class="tag">It reads the Google Meet or Zoom transcript as it happens and answers in a side panel while
   the call is still going: what was just decided, who owns what, the risk you just agreed to, and the sentence
-  to say next, in the meeting's language. It decides when to speak up on its own, so you never stop listening
-  to go and ask it. The transcript is a file on your disk. No account, no telemetry, no server of ours.</p>
+  to say next. <strong>It decides when to speak up on its own, so you never stop listening to go and ask it.</strong>
+  The transcript is a file on your disk.</p>
   <span class="pill">Free · you run it yourself · needs an MCP agent (tested: Claude Code) · Meet + Zoom</span>
   <figure class="shot wide">
     <video autoplay loop muted playsinline controls poster="media/call-live-poster.jpg"
@@ -105,13 +56,13 @@
 
 <section>
   <h2>What a call looks like with it</h2>
-  <p>Four moments from a real call, in the order they happen. Note that the "say this" line is one of six
-  markers, not the product - it sits next to the decision you need to remember and the risk you just agreed to.</p>
+  <p>Four moments, in the order they happen. The "say this" line is one of six markers, and it sits next to
+  the decisions and risks the panel surfaces alongside it.</p>
   <table>
     <tr><th>In the room</th><th>In your panel, a second later</th></tr>
     <tr><td>Someone asks you a direct question and you need a beat to assemble the answer.</td>
-        <td><span class="marker" style="color:#1a7f37">🟢 SAY</span> a complete sentence, in the meeting's
-        language, that you can read out without rehearsing.</td></tr>
+        <td><span class="marker" style="color:#1a7f37">🟢 SAY</span> a complete sentence you can read out
+        without rehearsing.</td></tr>
     <tr><td>A number gets disputed and nobody has it to hand.</td>
         <td><span class="marker" style="color:#2f6feb">🔵 INFO</span> the figure, from your own notes, repo or
         tickets, with where it came from.</td></tr>
@@ -125,28 +76,26 @@
   <figure class="shot wide">
     <img src="media/call-share.png" width="1440" height="900" loading="lazy"
          alt="The call with a shared screen: an August calendar with the 13th to 17th marked as a freeze and the 15th marked promised, and beside it the panel flagging that the promised date sits inside the freeze." />
-    <figcaption>The fourth row, as it actually looks: someone shares the calendar, the 15th goes in, and the
+    <figcaption>The fourth row on screen: someone shares the calendar, the 15th goes in, and the
     panel has already said why that is a problem.</figcaption>
   </figure>
   <figure class="shot tall">
     <img src="media/panel-full.png" width="840" height="2000" loading="lazy"
          alt="The full side panel: status pills, suggestions with RISK, SAY and INFO markers, a decisions and action items board with a draft-note button, the live transcript, and the in-panel chat." />
     <figcaption>The same call seen whole: advice at the top, the decision board under it, transcript and chat
-    below. Fictional participants, real interface.</figcaption>
+    below.</figcaption>
   </figure>
 </section>
-
 <section>
   <h2>It does not wait for you to ask</h2>
   <p>You could type all of this to an agent in a terminal yourself. You would also stop listening while you
   did it, and in a live call that costs more than the answer is worth. So it reads along, decides on its own
-  when it has something worth your attention, and puts it in the panel before you had thought to ask. Your
-  half of the work is listening to the room, which is the half that cannot be delegated.</p>
-  <p><strong>It checks what the room is asserting.</strong> "Filters took about two weeks" is the kind of
-  sentence that gets repeated until it becomes a plan. If your tracker says 31 days, you get 31 days and the
-  ticket it came from, while the sizing is still open rather than after it has shipped.</p>
-  <p><strong>And with one toggle it stops suggesting and starts doing.</strong> Turn on 🤖 Auto-create and the
-  moment someone says "raise a ticket for that", the ticket exists, with the link already dropped in the
+  when it has something worth your attention, and puts it in the panel before you had thought to ask.</p>
+  <p>It checks what the room is asserting. "Filters took about two weeks" is the kind of sentence that gets
+  repeated until it becomes a plan. <strong>If your tracker says 31 days, you get 31 days and the ticket it
+  came from</strong>, before the sizing closes.</p>
+  <p>One toggle turns suggesting into doing. Turn on 🤖 Auto-create and the moment someone says "raise a ticket
+  for that", <strong>the ticket exists</strong>, with the link already dropped in the
   meeting chat if you also turned that on. Same for a planning note or a summary. You authorize once, in the
   panel, not once per item, and both toggles are off until you flip them.</p>
   <figure class="shot wide">
@@ -156,7 +105,7 @@
       <img src="media/planning-live.gif" alt="A sprint planning call: the assistant corrects a sizing claim against the tracker, records the decision, then files a ticket and drafts the planning note without being asked." />
     </video>
     <figcaption>Sprint planning, 15 seconds. Nobody typed anything into the panel: the correction, the
-    decision, the ticket and the note all arrive while the meeting carries on.</figcaption>
+    decision, the ticket and the note all arrive unprompted.</figcaption>
   </figure>
   <figure class="shot tall">
     <img src="media/panel-planning.png" width="840" height="2000" loading="lazy"
@@ -169,7 +118,6 @@
   through the tools your own session already has, so a team on Linear, Asana, Notion or nothing in particular
   is not a special case here.</p>
 </section>
-
 <section>
   <h2>What this asks of you</h2>
   <p><strong>You need an AI coding agent that speaks MCP.</strong>
@@ -177,26 +125,20 @@
   the eyes, ears and hands - capture, panel, local bridge - but not the brain; that is an agent session on your
   own machine, reading the call through MCP tools. Without one you get a working transcript recorder and an
   empty advice pane, which is not what the rest of this page shows.</p>
-  <p>Nothing in the adapter is vendor-specific - it is plain JSON-RPC over stdio, and a client calling itself
-  <code>not-claude</code> drives it fine. The catch is not the vendor, it is that MCP is <em>client-pull</em>:
+  <p>The adapter is plain JSON-RPC over stdio, so other MCP clients can drive it. MCP is client-pull, though:
   nothing on the server can start your assistant's turn, so the client has to hold a persistent background
-  loop. That part is only verified in Claude Code, and
+  loop, and only Claude Code is verified to do that.
   <a href="https://github.com/krystiangw/meet-live-assist-extension/blob/main/MCP-CLIENTS.md">MCP-CLIENTS.md</a>
-  says so plainly rather than printing a row of logos.</p>
+  says what to check in yours, rather than printing a row of logos.</p>
   <p><strong>The meeting is other people's conversation too.</strong> Turning on captions is invisible to
   everyone else, unlike recording, which Meet badges. So by default this posts one line into the meeting chat
   when capture starts, saying an assistant is transcribing locally. You can edit that line or switch it off.
-  Some places require everyone's agreement before a conversation may be recorded or transcribed - that is a
+  Some places require everyone's agreement before a conversation may be recorded or transcribed. That is a
   call only you can make, and the <a href="https://github.com/krystiangw/meet-live-assist-extension/blob/main/PRIVACY.md">privacy
-  policy</a> says so rather than burying it.</p>
-  <p class="note"><strong>Not for a job interview or an exam, where the other side is assessing you.</strong>
-  Preparation, and your own working meetings, yes. This is our line, not a rule we are quoting: Anthropic's
-  <a href="https://www.anthropic.com/legal/aup">usage policy</a> asks you not to "submit AI-assisted work
-  without proper permission or attribution", and its clauses about hiring and testing are aimed at employers
-  and testing companies rather than at candidates. So the boundary here is a choice we are making, and we would
-  rather say it out loud than let you discover where we stand from a news story.</p>
+  policy</a> states it up front.</p>
+  <p class="more">Where we draw the line on interviews and exams, and what happens to a
+  recording you did not ask for: <a href="faq.html">the questions page</a>.</p>
 </section>
-
 <section>
   <h2>Which meeting is yours</h2>
   <p>Same product, same install. This only decides which meetings the assistant knows about and what it leads
@@ -204,11 +146,11 @@
   <div class="grid">
     <div class="card" id="second-language"><div class="ico">🌍</div><h4>The meeting is not in your first language</h4>
       <p><em>You already know the answer; it just is not in English yet.</em> By the time the sentence is ready
-      the conversation has moved on. This puts it on your screen while the topic is still open, and explains
-      the idiom nobody defined.<br><code>MLA_PROFILE=second-language</code></p></div>
+      the conversation has moved on. This puts it on your screen in time to say it, and explains the idiom
+      nobody defined.<br><code>MLA_PROFILE=second-language</code></p></div>
     <div class="card"><div class="ico">💻</div><h4>The meeting is about software you are building</h4>
       <p>Standups, incident triage, refinement, design review. It knows your tickets and your repo, flags scope
-      creep, and captures decisions you would otherwise reconstruct from memory.
+      creep, and writes decisions down as they are made.
       <br><code>MLA_PROFILE=engineering</code></p></div>
     <div class="card"><div class="ico">🔬</div><h4>The meeting is you interviewing someone</h4>
       <p>Moderate the conversation instead of taking notes. It stays quiet, flags a leading question the moment
@@ -218,29 +160,20 @@
   <p>Anything else: <code>generic</code>, or write your own profile as a file - they are about a dozen lines
   each.</p>
 </section>
-
 <section>
   <h2>Where your words actually go</h2>
-  <p>Three lines, because a product that asks to listen to your meetings owes you this before it owes you a
-  feature list.</p>
   <table>
     <tr><th>What</th><th>Where it goes</th></tr>
     <tr><td>The transcript, the screenshots, your chat with the assistant, the summary</td>
         <td><strong>Your disk. Nowhere else.</strong> Owner-only files in one folder, served by a process bound
-        to <code>127.0.0.1</code>. No account, no telemetry, no server of ours - there is no server of ours.</td></tr>
+        to <code>127.0.0.1</code>. No account, no telemetry. There is no server of ours to send anything to.</td></tr>
     <tr><td>The parts of the call you route to the assistant, and the questions you ask it</td>
         <td><strong>Anthropic, through your own Claude Code session</strong> - the same path as every other
-        thing you do in Claude Code, billed to your account, under your terms. That is the trade: this
-        borrows a brain you already pay for instead of running a weaker one locally.</td></tr>
+        thing you do in Claude Code, billed to your account, under your terms. It borrows the brain you
+        already pay for instead of running a weaker one locally.</td></tr>
     <tr><td>Anything else</td><td>Nothing. There is no third party in this product.</td></tr>
   </table>
-  <p class="note">On Claude's Free, Pro and Max plans, whether your sessions are used to improve the model is
-  a setting <em>you</em> control, and it changes how long they are kept -
-  <a href="https://www.anthropic.com/news/updates-to-our-consumer-terms">Anthropic's consumer terms</a> spell
-  it out, and it explicitly covers Claude Code. Worth two minutes of your attention before you point this at
-  a meeting that is not yours to share. Work and API accounts are on different terms.</p>
 </section>
-
 <section>
   <h2>Install it</h2>
   <p>Three steps, and only the first two need a terminal. Requires Node 20+ and Chrome 116+.</p>
@@ -268,153 +201,22 @@ curl -s http://127.0.0.1:8848/health   # → {"ok":true,...}</code></pre>
       pairs itself with the server. Then open Claude Code and ask it to assist your meeting - it loads the
       <code>meet-live-assist</code> skill, attaches to the live call, and starts answering in the panel.</p>
       <p class="note">Pairing window expired? Run the same <code>--pair</code> command again; against an
-      already-running server it just re-opens the window. Or paste the token by hand from
+      already-running server it re-opens the window. Or paste the token by hand from
       <code>&lt;data dir&gt;/.mla-token</code> into the extension's Options - that path still works.</p>
     </li>
-    <li>
-      <h3>(Optional) Autostart the server</h3>
-      <p>On macOS, <code>./server/install-server.sh</code> installs a launchd job so step 2 stops being a
-      step. It works out your node binary and paths itself.</p>
-    </li>
-    <li>
-      <h3>(Optional) Enable "speak into the call"</h3>
-      <p>TTS needs a virtual audio device so synthesized speech reaches Meet as your microphone:</p>
-      <pre><code>brew install blackhole-2ch</code></pre>
-      <p>Then in <strong>Audio MIDI Setup</strong> create an <strong>Aggregate Device</strong> combining your real microphone + <strong>BlackHole 2ch</strong> (drift-correct BlackHole), and set it as your macOS default input. Tick <strong>🎙 into call</strong> in the panel and press 🔊 on a suggestion.</p>
-    </li>
-    <li>
-      <h3>(Optional) Local speech-to-text</h3>
-      <p>To transcribe the call's audio instead of scraping captions, install whisper.cpp and a model, then
-      start it with <strong>⌘⇧U</strong> while the Meet tab is focused (a keyboard command is required so Chrome
-      grants tab-capture access; the panel's 🎧 checkbox reflects the state):</p>
-      <pre><code>brew install whisper-cpp
-mkdir -p ~/.local/share/whisper
-curl -L -o ~/.local/share/whisper/ggml-base.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin</code></pre>
-    </li>
   </ol>
+  <p class="more">Autostart the server, speak into the call, or transcribe without captions: <a href="reference.html#optional">the optional steps</a>.</p>
 </section>
-
-<section>
-  <h2>What it does</h2>
-  <div class="grid">
-    <div class="card"><div class="ico">📝</div><h4>Live transcript</h4><p>Captures the Meet call transcript in real time into a side panel - from captions or local speech-to-text.</p></div>
-    <div class="card"><div class="ico">🎧</div><h4>Local STT</h4><p>Optional caption-free transcription of the call audio via whisper.cpp - fully offline, no cloud, no subscription.</p></div>
-    <div class="card"><div class="ico">🟢</div><h4>Colour-coded advice</h4><p>Your assistant pushes what to say, facts, summaries, risks and actions - links & images included.</p></div>
-    <div class="card"><div class="ico">📷</div><h4>Smart snapshots</h4><p>Auto-captures the tab while someone shares their screen; on-demand otherwise - visual context for the assistant.</p></div>
-    <div class="card"><div class="ico">💬</div><h4>In-panel chat</h4><p>A two-way back-channel to ask the assistant things mid-call without speaking.</p></div>
-    <div class="card"><div class="ico">🔊</div><h4>Speak into the call</h4><p>Text-to-speech in the call's language that can be routed straight into the meeting.</p></div>
-    <div class="card"><div class="ico">✏️</div><h4>Live demo edits</h4><p>Ask the assistant to fix a typo or hide a broken element on your shared screen - presentation-only, revertable, never saved.</p></div>
-    <div class="card"><div class="ico">🎛️</div><h4>Meeting modes</h4><p>Listener, Lead, or Auto - tune how proactively the assistant suggests based on your role in the call.</p></div>
-    <div class="card"><div class="ico">📋</div><h4>Decisions & action items</h4><p>A live board of decisions and owner-tagged action items - one click drafts a Jira ticket.</p></div>
-    <div class="card"><div class="ico">⏮️</div><h4>Recap & alerts</h4><p>Ask "what did I miss?" anytime; get nudged when you're named, look muted, or a risk appears.</p></div>
-    <div class="card"><div class="ico">🎯</div><h4>Meeting-type aware</h4><p>Detects standup / 1:1 / incident / review and adapts what it surfaces; remembers recurring series.</p></div>
-    <div class="card"><div class="ico">🟦</div><h4>Meet & Zoom</h4><p>Works on Google Meet and the Zoom web client - same live transcript, advice and tools.</p></div>
-    <div class="card"><div class="ico">🧑‍💻</div><h4>Co-pilot mode</h4><p>No meeting needed: start a session, and the assistant watches your tab and listens to your mic while you debug or build.</p></div>
-    <div class="card"><div class="ico">🤖</div><h4>Action-item autopilot</h4><p>In grooming / mob sessions it captures action items and - once you opt in - creates the tickets and drops the links in the meeting chat.</p></div>
-    <div class="card"><div class="ico">🔒</div><h4>Your files, your account</h4><p>Transcripts and screenshots stay on your disk - no account, no telemetry, no server of ours. What you send the assistant goes to your own Claude account, on your terms.</p></div>
-  </div>
-</section>
-
-<section>
-  <h2>How it works</h2>
-  <p>Three pieces, all on your machine:</p>
-  <pre><code>Google Meet tab
-   │  (transcript, snapshots, mic control)
-   ▼
-Chrome extension  ──HTTP──►  Local bridge server (127.0.0.1:8848)
-   ▲  (advice, chat, TTS)          │
-   └───────────────────────────────┤  transcript file + advice/chat channels
-                                    ▼
-                          The "brain" - a Claude Code session with YOUR
-                          context (notes, docs, tools) reads the call over MCP
-                          and replies with advice / chat / TTS.</code></pre>
-  <p class="note">The extension only captures and displays. The intelligence is the brain - a local agent session that already knows your work. That is the differentiator: advice grounded in <em>your</em> real context, not a generic model.</p>
-</section>
-
-<section>
-  <h2>Advice markers</h2>
-  <table>
-    <tr><th>Marker</th><th>Meaning</th></tr>
-    <tr><td><span class="marker" style="color:#1a7f37">🟢 SAY</span></td><td>Exact words you can say right now (in the call's language). Press 🔊 to voice it.</td></tr>
-    <tr><td><span class="marker" style="color:#2f6feb">🔵 INFO</span></td><td>A fact, number, link or name from your context.</td></tr>
-    <tr><td><span class="marker" style="color:#b8860b">🟡 SUMMARY</span></td><td>Where the discussion is / what was just decided.</td></tr>
-    <tr><td><span class="marker" style="color:#8250df">🟣 EXPLAIN</span></td><td>A short explanation of a term or the <em>why</em> behind something.</td></tr>
-    <tr><td><span class="marker" style="color:#d1242f">🔴 RISK</span></td><td>A risk, a decision to recall, or a contradiction to flag.</td></tr>
-    <tr><td><span class="marker" style="color:#e36209">🟠 ACTION</span></td><td>Something you could do / were asked to do - the assistant can perform it on your confirmation.</td></tr>
-  </table>
-  <figure class="shot">
-    <video autoplay loop muted playsinline controls poster="media/panel-live-poster.jpg"
-           aria-label="Close-up of the panel: a risk card, then a suggested sentence, then the decision, arriving one after another during the call.">
-      <source src="media/panel-live.mp4" type="video/mp4" />
-      <img src="media/panel-live.gif" alt="Close-up of the panel: a risk card, then a suggested sentence, then the decision, arriving one after another during the call." />
-    </video>
-    <figcaption>Markers arriving in order, close up: the risk first, then the sentence, then the decision it
-    ended in.</figcaption>
-  </figure>
-</section>
-
-<section>
-  <h2>Server API</h2>
-  <table>
-    <tr><th>Endpoint</th><th>Purpose</th></tr>
-    <tr><td><code>POST /append</code></td><td>Transcript sink (from the extension).</td></tr>
-    <tr><td><code>POST /advice</code> · <code>GET /advice</code></td><td>Brain pushes advice; panel polls it. Supports rich text + <code>image</code>.</td></tr>
-    <tr><td><code>POST /chat</code> · <code>GET /chat</code></td><td>Two-way chat (<code>role: user|agent</code>).</td></tr>
-    <tr><td><code>POST /snapshot</code> · <code>POST /snapshot-request</code></td><td>Store a tab snapshot; brain requests one.</td></tr>
-    <tr><td><code>POST /speak</code> · <code>GET /voices</code></td><td>TTS (per-language voice, optional device routing).</td></tr>
-    <tr><td><code>POST /stt</code></td><td>Transcribe an audio chunk locally with whisper.cpp.</td></tr>
-    <tr><td><code>POST /items</code> · <code>GET /items</code></td><td>Decisions & action-items board.</td></tr>
-    <tr><td><code>POST /mode</code> · <code>GET /mode</code></td><td>Meeting mode (listener / lead / auto).</td></tr>
-    <tr><td><code>POST /summary</code> · <code>GET /summary</code></td><td>Post-call summary artifact (copy / download).</td></tr>
-    <tr><td><code>POST /brain-ping</code></td><td>Liveness heartbeat - the panel shows if a brain is attached.</td></tr>
-    <tr><td><code>POST /clear</code></td><td>Wipe one meeting (transcript, chat, summary, snapshots).</td></tr>
-    <tr><td><code>GET /health</code></td><td>Status + tool checks (ffmpeg / whisper / BlackHole). The only route that needs no token.</td></tr>
-  </table>
-  <p class="note">Every route except <code>/health</code> requires an <code>X-MLA-Token</code> header (the token from <code>.mla-token</code>).</p>
-</section>
-
-<section>
-  <h2>Is it safe to install?</h2>
-  <p>You are about to let something listen to your meetings, so here is what it actually does, stated
-  plainly enough that you can check every line against the source.</p>
-  <table>
-    <tr><th>Question</th><th>Answer</th></tr>
-    <tr><td>Where does my transcript go?</td><td>A folder on your disk. Files are owner-only
-      (<code>0600</code>), the folder is <code>0700</code>.</td></tr>
-    <tr><td>Does anything phone home?</td><td>No. No accounts, no analytics, no first-party server. The
-      extension talks only to <code>127.0.0.1</code>.</td></tr>
-    <tr><td>What about the AI?</td><td>The assistant is <em>your</em> Claude Code session. Whatever you route
-      to it is subject to your own provider's terms - that choice and that configuration are yours.</td></tr>
-    <tr><td>Can a website reach the server?</td><td>No. Every route but <code>/health</code> needs a token,
-      and the server accepts cross-origin requests only from the extension.</td></tr>
-    <tr><td>How long is it kept?</td><td>14 days by default, then purged automatically. 🗑 in the panel wipes
-      one meeting - transcript, chat, summary, snapshots, state - immediately.</td></tr>
-    <tr><td>How do I remove all of it?</td><td>Delete the data folder, delete
-      <code>~/.claude/skills/meet-live-assist</code>, run <code>claude mcp remove meet-live-assist</code>,
-      remove the extension.</td></tr>
-    <tr><td>Do the others in the call know?</td><td>Only if you tell them. By default it posts one line in
-      the meeting chat saying so, and tells you in the panel when that line could not be delivered.</td></tr>
-    <tr><td>Can I use it at work?</td><td>Yes. The licence
-      (<a href="https://polyformproject.org/licenses/internal-use/1.0.0">PolyForm Internal Use 1.0.0</a>)
-      permits the internal business operations of you and your company. You may not redistribute or sell it.
-      Source-available, not open source - free to use, and it stays owned.</td></tr>
-  </table>
-  <p class="note">Capturing a meeting is recording. Disclosure is not consent - where consent is required,
-  getting it is on you.</p>
-</section>
-
 <section>
   <h2>Tell us if it is any good</h2>
   <p>This is early and free, and the only thing that decides whether it grows is whether anyone finds it
   useful. If you try it - especially if it fails, or you gave up halfway through the install - say so in
   <a href="https://github.com/krystiangw/meet-live-assist-extension/discussions">GitHub Discussions</a>.
   A sentence about what you expected and what happened is worth more than a bug report template.</p>
-  <p class="note"><strong>One question worth answering even if nothing else:</strong> which profile did you
-  install, and was it the right one? There is no analytics here and there never will be, so that answer only
-  exists if you type it. It is the difference between guessing who this is for and knowing.</p>
+  <p class="note">One question worth answering even if nothing else: <strong>which profile did you install,
+  and was it the right one?</strong> There is no analytics here and there never will be, so that answer only
+  exists if you type it.</p>
 </section>
-
 <section>
   <h2>Who made this</h2>
   <p>Built by Krystian Gwizdała, for his own calls first. There is no company behind it and no roadmap
