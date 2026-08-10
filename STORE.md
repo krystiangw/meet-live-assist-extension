@@ -9,9 +9,8 @@ agent-driven clicks, network/console reads) so the listing has one purpose: a me
 and hears. The full `./build.sh` zip keeps everything and is for load-unpacked use only. What the cut
 covers is marked `mla:pro-start` / `mla:pro-end` in `src/`; a dangling reference fails the build. The bundled skill is cut the same way, by `install.sh` (see `MLA_PRO`).
 
-## Short description (≤132 chars)
-Live co-pilot for Google Meet & Zoom: real-time transcript, colour-coded advice, action items, snapshots,
-chat, and speak-into-the-call TTS.
+## Short description (132 char limit; this is 122)
+Live co-pilot for Meet & Zoom: real-time transcript, colour-coded advice, decisions and action items, all on your machine.
 
 ## Detailed description
 Meet Live Assist turns a Google Meet or Zoom call into a live, context-aware workspace. It captures the
@@ -28,6 +27,15 @@ route to it.
 
 ## Trademark notice (put this in the listing description)
 Meet Live Assist is an independent project. It is not affiliated with, endorsed by or sponsored by Google or Zoom; "Google Meet" and "Zoom" are their owners' trademarks and are used here only to say which products this works with.
+
+### Two things to say plainly in the description
+
+**This needs a companion server on your own machine.** The extension is the eyes, ears and hands; the
+assistant is an agent session you already run. Install: https://krystiangw.github.io/meet-live-assist/
+
+**The first screenshot asks for screen access.** `<all_urls>` is granted on a gesture, not at install, so the
+prompt appears the first time you press 📷 or start co-pilot. Without that sentence in the listing, an
+expected prompt reads as a failure.
 
 ## Category
 Productivity
@@ -69,7 +77,8 @@ Privacy policy: `PRIVACY.md`.
 - [x] `<all_urls>` optional, requested at runtime on a gesture (host prompt = Meet/Zoom + localhost).
 - [x] `debugger` and the page-control surface stripped from the public build (`build.sh --public`).
 - [x] Bundled skill is a template, not the author's personal one (`install.sh` fills user/language/domain).
-- [x] Privacy policy hosted publicly (https://krystiangw.github.io/meet-live-assist/) - link it in the listing.
+- [x] Privacy policy at a URL that works: https://krystiangw.github.io/meet-live-assist/privacy.html
+      (goes live with the docs sync; the form rejects a 404).
 - [x] Upload zip rebuilt at the submitted version: `dist/meet-live-assist-0.7.0-public.zip`
       (223 KB across 17 files). Verified as an artifact, not on the build script's word: manifest has 8
       permissions and no `debugger`, no `chrome.debugger` call survives the strip, every stripped file still
@@ -77,9 +86,8 @@ Privacy policy: `PRIVACY.md`.
 - [x] Screenshots (1280x800): `store-1-in-a-call.png`, `store-2-screen-share.png`,
       `store-3-co-pilot.png` - the extension in a call, beside a shared screen, and in co-pilot mode.
       Regenerate with `node tools/media/stage.mjs`.
-- [ ] Note in the listing that a local companion server is required (link the docs/integration page).
-- [ ] Note that the first 📷 asks for screen access: `<all_urls>` is granted on a gesture, not at install,
-      so an unexpected prompt reads as a failure. Same for starting co-pilot.
+- [x] The listing says a local companion server is required, and that the first 📷 triggers the screen-access
+      prompt. Copy is under "Two things to say plainly in the description".
 - [x] Licence picked: PolyForm Internal Use 1.0.0, and `package.json` points at the file because there is
       no SPDX identifier for it.
 - [ ] Decide whether the source repo goes public alongside the listing.
