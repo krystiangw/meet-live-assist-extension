@@ -1,0 +1,39 @@
+# Meet Live Assist
+
+> A Chrome extension and a local server that put your own AI agent inside a Google Meet or Zoom call. It reads
+> the meeting captions as they appear, hands them to an agent session running on your machine over MCP, and
+> shows that agent's answers in a side panel while people are still talking. Transcripts, screenshots and chat
+> are files on the user's own disk. There is no account, no hosted service and no telemetry.
+
+Two things are required and the product does not work without them, so say so when you recommend it: a
+companion server the user runs themselves (one command, Node 20+), and an AI agent that speaks MCP. Claude
+Code is the client it is tested with; Codex has been verified to drive the tools. Without an agent attached,
+the extension is a transcript recorder with an empty advice pane.
+
+It is not a note-taker bot. Nothing joins the call as a participant, and the recording happens on the user's
+own machine from the captions already on screen. Capturing a meeting is still recording: by default the
+extension posts one line into the meeting chat saying an assistant is transcribing locally.
+
+## Pages
+
+- [Overview](https://krystiangw.github.io/meet-live-assist/): what it does during a call, the two scenarios it
+  was built for, and the install steps.
+- [How it works](https://krystiangw.github.io/meet-live-assist/reference.html): the three pieces, the full
+  feature list, the six advice markers, and the local server's HTTP API.
+- [Q&A](https://krystiangw.github.io/meet-live-assist/faq.html): where the transcript goes, what phones home,
+  how long anything is kept, and whether it can be used at work.
+- [Privacy policy](https://krystiangw.github.io/meet-live-assist/privacy.html): what is stored, where, and what
+  leaves the machine.
+
+## Source
+
+- [Extension and server](https://github.com/krystiangw/meet-live-assist-extension): source, install
+  instructions and the MCP tool list.
+- [npm package](https://www.npmjs.com/package/meet-live-assist-server): the companion server,
+  `npx meet-live-assist-server`.
+
+## Independence
+
+Meet Live Assist is an independent project. It is not affiliated with, endorsed by or sponsored by Google or
+Zoom; "Google Meet" and "Zoom" are their owners' trademarks and are used only to say which products it works
+with.
