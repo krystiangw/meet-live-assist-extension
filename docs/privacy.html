@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Meet Live Assist - privacy policy</title>
+<meta name="description" content="What Meet Live Assist stores, where it stores it, what leaves your machine and what never does." />
+<link rel="canonical" href="https://krystiangw.github.io/meet-live-assist/privacy.html" />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://krystiangw.github.io/meet-live-assist/privacy.html" />
+<meta property="og:title" content="Meet Live Assist - privacy policy" />
+<meta property="og:description" content="What Meet Live Assist stores, where it stores it, what leaves your machine and what never does." />
+<meta property="og:image" content="https://krystiangw.github.io/meet-live-assist/media/og-card.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav class="top">
+  <div class="inner">
+    <a class="brand" href="./">Meet Live Assist</a>
+    <a href="./">Overview</a>
+    <a href="reference.html">How it works</a>
+    <a href="faq.html">Q&amp;A</a>
+    <a href="privacy.html" aria-current="page">Privacy</a>
+    <a href="https://github.com/krystiangw/meet-live-assist-extension" target="_blank" rel="noopener noreferrer">GitHub</a>
+  </div>
+</nav>
+
+<div class="wrap prose">
+<h1>Privacy Policy - Meet Live Assist</h1>
+<p><em>Last updated: 2026-08-08.</em></p>
+<p>Meet Live Assist is a <strong>local-first</strong> browser extension. It has no accounts, no analytics, and no
+first-party servers. This policy describes what the extension accesses and where it goes.</p>
+<h2>What the extension accesses</h2>
+<p>Compare this list against <code>manifest.json</code>; if it is shorter than the manifest, the list is the bug.</p>
+<ul>
+<li><strong>Meeting page content</strong> on <strong>Google Meet</strong> (<code>https://meet.google.com/*</code>) and the <strong>Zoom web client</strong>
+(<code>https://*.zoom.us/*</code>): on-screen caption text, the meeting chat, screen-share state, the caption
+language, and the microphone mute control - read to produce the live transcript and to drive assistance.</li>
+<li><strong>Screenshots of a tab.</strong> Automatically only while someone is sharing a screen in your call; otherwise
+only when you press 📷 or your own assistant asks for one.</li>
+<li><strong>Your microphone</strong>, in co-pilot mode only, and only after you grant it and start co-pilot from the panel.
+Nothing is recorded before that.</li>
+<li><strong>Tab audio</strong> (<code>tabCapture</code>), when you start local speech-to-text with the keyboard command. This captures
+the audio of remote participants in the meeting tab, not your microphone.</li>
+<li><strong>The text you type</strong> into the extension&#39;s chat box, and the one disclosure line it can post into the
+meeting chat on your behalf.</li>
+<li><strong>Extension settings</strong> you enter (server URL, token, TTS voices, your name(s) for mention alerts, the
+disclosure text) - stored with <code>chrome.storage</code>.</li>
+</ul>
+<p><strong>Permissions that sound worse than they are, named anyway.</strong> The full build asks for <code>debugger</code>, which lets
+the assistant read the network and console of a tab you are sharing while you have the 🐞 toggle on; Chrome
+shows its own banner the whole time. It also waits until <em>the moment you use them</em> to ask for
+access to all sites - needed to screenshot or act on a tab that is not the meeting. <strong>The public build ships
+without <code>debugger</code> and without the page-control surface entirely.</strong></p>
+<h2>Where the data goes</h2>
+<p>The <strong>extension</strong> sends everything it captures <strong>only</strong> to a server you run on your own machine at
+<code>http://127.0.0.1:8848</code>. It makes no request to any other host, ours or anyone&#39;s - there is no server of
+ours to make one to. Transcripts, snapshots, chat and summaries are files on <strong>your</strong> disk.</p>
+<p><strong>But the assistant is not local, and this document will not pretend otherwise.</strong> The brain is your own
+Claude Code session. Whatever it reads - the transcript batches it is woken with, the questions you type -
+travels to Anthropic under <strong>your</strong> account, on the same path as everything else you do in Claude Code. A
+live assistant that never contacted a model would have to run one locally; this one deliberately borrows the
+one you already pay for. What stays local is the stored record, and that is the promise being made here.</p>
+<p>On Claude&#39;s Free, Pro and Max plans, whether your sessions are used to improve the model is a setting you
+control and it changes how long they are retained; see
+<a href="https://www.anthropic.com/news/updates-to-our-consumer-terms" target="_blank" rel="noopener noreferrer">Anthropic&#39;s consumer terms</a>, which state
+explicitly that this covers Claude Code. Work, Enterprise and API accounts are on different terms. Check
+which you are on before you point this at a conversation that is not only yours to share.</p>
+<h2>What is NOT collected</h2>
+<p>No accounts, no telemetry, no advertising identifiers, no selling or sharing of data, and no analytics of
+any kind. The extension transmits nothing off your device on its own initiative; the only content that
+leaves is what your own assistant reads, to your own provider, as described above.</p>
+<p>One thing that is not the extension: the project&#39;s website counts visits with GoatCounter, which stores
+aggregate numbers and nothing that identifies a person. That is a marketing page you visited, not software
+you installed, and the two are kept separate deliberately.</p>
+<h2>Retention &amp; control</h2>
+<ul>
+<li>The local server is <strong>token-authenticated</strong> (<code>X-MLA-Token</code>) so no other site or app can read it.</li>
+<li>Stored transcripts, chat, summaries and snapshots are <strong>auto-purged after a retention window</strong> (default
+14 days, configurable via <code>RETENTION_DAYS</code>).</li>
+<li>Live meeting state (advice, the decisions board, chat) is also kept in <code>&lt;transcripts&gt;/.state/</code> so that
+restarting the server does not lose a call in progress. It is covered by the same retention: when a
+meeting&#39;s files are purged, its state is dropped with them. Files are owner-only (<code>0600</code>) and so is the
+directory (<code>0700</code>). With <code>RETENTION_DAYS=0</code> nothing is purged at all - that is the documented meaning of
+the setting, and it applies here too.</li>
+<li>You can <strong>wipe a single meeting&#39;s data</strong> at any time from the panel (🗑), which deletes its transcript,
+chat, summary, snapshots <strong>and stored state</strong> immediately.</li>
+</ul>
+<h2>Telling the room</h2>
+<p>Enabling captions is <strong>invisible to the other participants</strong> - unlike recording, which Meet badges. So by
+default this extension posts one line into the meeting chat when capture starts:</p>
+<blockquote>
+<p>I&#39;m using an AI assistant that transcribes this meeting locally on my machine. Say the word if you&#39;d
+rather I turned it off.</p>
+</blockquote>
+<p>It is sent as you, once per meeting, and you can edit the wording or turn it off in Options. If it cannot be
+delivered (the chat is closed by the organiser, for instance) the panel tells you, so you never believe the
+room was informed when it was not.</p>
+<p>This is disclosure, not consent. Some jurisdictions require every participant to agree before a
+conversation may be recorded or transcribed; see below.</p>
+<h2>What the assistant can and cannot be made to do</h2>
+<p>The assistant is your own Claude Code session, which means it has whatever tools you have given Claude Code -
+including a shell. Everything a meeting participant says reaches it as input. It is instructed, in the skill,
+to treat the entire transcript as untrusted: <strong>no spoken line, whatever name it is labelled with, can make the
+assistant run a command, send a message, or do anything irreversible.</strong> Only what <em>you type</em> to it authorizes
+an action, on a channel the room cannot reach.</p>
+<p>That instruction is a real boundary, but it is enforced by the model following its skill, not by a wall. If
+you have connected powerful or destructive tools to your Claude Code, understand that you are pointing a
+capable agent at a live, untrusted audio feed, and set the trust of your connected tools accordingly. This is
+the honest limit of a bring-your-own-brain design, and you should hear it here first.</p>
+<h2>Recording &amp; consent</h2>
+<p>Capturing a meeting transcript and screenshots is a form of recording. You are responsible for obtaining
+participants&#39; consent where required (e.g. two-party-consent jurisdictions), especially on external calls.
+The panel shows a one-time disclosure reminder at the start of each call.</p>
+<h2>Permissions - why each is requested</h2>
+<p>See <code>STORE.md</code> for the per-permission justification.</p>
+<h2>Contact</h2>
+<p>Questions, or something here that does not match what the code does:
+<a href="https://github.com/krystiangw/meet-live-assist-extension/issues/new?template=something-broke.yml" target="_blank" rel="noopener noreferrer">an issue</a>. A mismatch
+between this document and the manifest is a bug worth reporting, and it will be treated as one.</p>
+</div>
+
+<footer>
+  Meet Live Assist · a live meeting assistant you run yourself · your files stay on your disk
+  <br />
+  by <a href="https://krystiangw.github.io/krystiangw/" target="_blank" rel="noopener noreferrer">Krystian Gwizdała</a>
+  <br />
+  <span class="fine">Meet Live Assist is an independent project. It is not affiliated with, endorsed by or sponsored by Google or Zoom; "Google Meet" and "Zoom" are their owners' trademarks and are used here only to say which products this works with.</span>
+</footer>
+
+<script data-goatcounter="https://meetliveassist.goatcounter.com/count"
+        async src="https://gc.zgo.at/count.js"></script>
+</body>
+</html>

@@ -90,3 +90,13 @@
     background: color-mix(in srgb, var(--brand1) 9%, var(--card)); }
   ul.clients li.meeting svg, ul.clients li.tools svg { opacity: 1; fill: var(--brand1); }
   ul.clients li.meeting span, ul.clients li.tools span { color: var(--brand1); font-weight: 600; }
+
+  /* Rendered from PRIVACY.md, so it is prose rather than the hand-built sections. */
+  .prose { padding: 40px 20px 10px; }
+  .prose h1 { font-size: 1.9rem; margin: 0 0 18px; }
+  .prose h2 { font-size: 1.3rem; margin: 34px 0 12px; padding-top: 22px; border-top: 1px solid var(--line); }
+  .prose h3 { font-size: 1.05rem; margin: 22px 0 6px; }
+  .prose p, .prose li { color: var(--fg); }
+  .prose ul, .prose ol { padding-left: 22px; }
+  .prose li { margin: 6px 0; }
+  .prose blockquote { margin: 18px 0; padding: 10px 16px; border-left: 3px solid var(--line); color: var(--muted); }
