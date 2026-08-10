@@ -656,7 +656,7 @@ Levers, in order of leverage:
 
 ### Data fidelity - captions are lossy (validated on a real 60-min call)
 Captions drop/garble the highest-stakes tokens: **numbers** ("680/681" flipped from "let's go ahead with
-two" split across lines; "6:30"→"630") and **names** ("Ada"→"Russia", "__MLA_USER__"→"Chris/Kirsten"). Guard
+two" split across lines; "6:30"→"630") and **names** (a name heard as an unrelated word, "__MLA_USER__"→a near-homophone). Guard
 the record:
 - **Echo numbers before you write them.** Any estimate/SP/count/date destined for Jira or the board → first
   confirm in the **panel chat** ("zapisuję 680 = 2 SP - ok?"). Numbers are the costliest mistakes on lossy
@@ -665,7 +665,7 @@ the record:
   put it on the board **even if you were the one who proposed it**. Your advice (🟢 SAY) is not a record; a
   supported-then-accepted idea that never gets `mla_item`'d is a silent miss.
 - **Roster mapping at session start.** From the calendar invite / participants, note who's on the call and
-  their known caption-manglings (Ada→"Russia", __MLA_USER__→"Chris/Kirsten") so speaker attribution and action
+  their known caption-manglings (__MLA_USER__ included) so speaker attribution and action
   ownership stay correct despite garbled names.
 - **Post-meeting reconciliation** (wrap-up, step 4): the server already has the audio pipeline ready
   (`/health` → `ffmpeg/whisper/blackhole: true`). After the call, run whisper on the audio (or pull Gemini

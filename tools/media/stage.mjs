@@ -1,8 +1,8 @@
 // The two stills that put the panel back where it lives: docked beside a call, and beside a shared screen.
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';
-import { fillPanel, PANEL_URL, OUT, RELEASE_REVIEW } from './panel.mjs';
-import { W, H, PANEL_W, BAR_H, shell, gridStage, shareStage } from './call-shell.mjs';
+import { fillPanel, PANEL_URL, OUT, RELEASE_REVIEW, COPILOT } from './panel.mjs';
+import { W, H, PANEL_W, BAR_H, shell, gridStage, shareStage, workStage } from './call-shell.mjs';
 
 // Playwright is not a dependency of this project - install it where you run this, or point
 // MLA_PLAYWRIGHT at an existing checkout: MLA_PLAYWRIGHT=/path/to/playwright/index.mjs node stage.mjs
@@ -42,7 +42,11 @@ await shoot('call-share.png', shareStage('Marc T.'), DOCKED);
 const STORE = { w: 1280, h: 800, scale: 1 };
 // 44px less dock height clips the chat composer, so the shorter tile carries a shorter transcript.
 const DOCKED_SHORT = { ...RELEASE_REVIEW, transcript: RELEASE_REVIEW.transcript.slice(0, 2), chat: RELEASE_REVIEW.chat.slice(0, 1) };
-await shoot('store-3-in-a-call.png', gridStage('Marc T.'), DOCKED_SHORT, STORE);
-await shoot('store-4-screen-share.png', shareStage('Marc T.'), DOCKED_SHORT, STORE);
+await shoot('store-1-in-a-call.png', gridStage('Marc T.'), DOCKED_SHORT, STORE);
+await shoot('store-2-screen-share.png', shareStage('Marc T.'), DOCKED_SHORT, STORE);
+const COPILOT_SHORT = { ...COPILOT, transcript: COPILOT.transcript.slice(0, 1), chat: COPILOT.chat.slice(0, 2) };
+const COPILOT_TAB = { title: 'migrate.ts', url: 'localhost:5173/admin/migrations' };
+await shoot('store-3-co-pilot.png', workStage(), COPILOT_SHORT, { ...STORE, ...COPILOT_TAB });
+await shoot('copilot.png', workStage(), COPILOT, COPILOT_TAB);
 
 await browser.close();

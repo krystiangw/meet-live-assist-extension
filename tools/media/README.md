@@ -9,12 +9,9 @@ advertising a UI that no longer exists.
 
 ```sh
 npm i -D playwright && npx playwright install chromium   # not a project dependency
-node tools/media/still.mjs     # docs/media/panel-{full,planning}.png - the panel on its own
-node tools/media/clip.mjs      # docs/media/panel-live.{mp4,gif} + poster  (needs ffmpeg)
-node tools/media/stage.mjs     # docs/media/call-share.png + the two in-a-call store tiles
-node tools/media/call-clip.mjs # docs/media/{call,planning}-live.{mp4,gif} + posters - both scenes in motion
-node tools/media/store.mjs     # docs/media/store-{1,2}-*.png - the caption store tiles
-node tools/media/og-card.mjs   # docs/media/og-card.png  (reads panel-full.png, run it last)
+node tools/media/stage.mjs     # docs/media/call-share.png, copilot.png + the three store tiles
+node tools/media/call-clip.mjs # docs/media/{call,planning}-live.{mp4,gif} + posters  (needs ffmpeg)
+node tools/media/og-card.mjs   # docs/media/og-card.png  (reads call-share.png, run it last)
 ```
 
 `panel.mjs` holds the shared writers and the three scripted sessions (a release review, a sprint
@@ -22,12 +19,16 @@ planning call with autopilot on, a co-pilot debug);
 `call-shell.mjs` holds the browser window, the participant tiles and the shared screen. A wording change in
 either lands in every image at once.
 
+**Never the panel on its own.** A screenshot of the side panel with nothing around it shows a list of
+coloured cards reacting to nothing. Every image here keeps the thing it is reacting to in frame: the call, the
+shared screen, or the tab in co-pilot mode.
+
 **No invented people.** The participant tiles are camera-off tiles - the initial-in-a-circle every call app
 falls back to, which is what most working calls look like anyway. There is no stock photography, no
 generated face and no Google or Meet branding; only the address bar names the product. Set
 `MLA_FACE=/path/to/photo.jpg` to drop a real photo into the "You" tile.
 
-Already have Playwright somewhere else: `MLA_PLAYWRIGHT=/path/to/playwright/index.mjs node tools/media/still.mjs`.
+Already have Playwright somewhere else: `MLA_PLAYWRIGHT=/path/to/playwright/index.mjs node tools/media/stage.mjs`.
 
 The two scenes are chosen, not decorative. The release review is the shortest scene in which catching
 something *before* it becomes a promise is visible. The planning call is the only way to show the half that

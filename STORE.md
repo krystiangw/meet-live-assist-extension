@@ -65,9 +65,9 @@ Privacy policy: `PRIVACY.md`.
 - [x] Bundled skill is a template, not the author's personal one (`install.sh` fills user/language/domain).
 - [x] Privacy policy hosted publicly (https://krystiangw.github.io/meet-live-assist/) - link it in the listing.
 - [ ] Rebuild the upload zip at the version you are submitting (`npm run build:public`).
-- [x] Screenshots (1280x800), four to choose from:
-      `store-3-in-a-call.png` and `store-4-screen-share.png` are the extension in a call (`tools/media/stage.mjs`);
-      `store-1-advice.png` and `store-2-co-pilot.png` are caption tiles (`tools/media/store.mjs`).
+- [x] Screenshots (1280x800): `store-1-in-a-call.png`, `store-2-screen-share.png`,
+      `store-3-co-pilot.png` - the extension in a call, beside a shared screen, and in co-pilot mode.
+      Regenerate with `node tools/media/stage.mjs`.
 - [ ] Note in the listing that a local companion server is required (link the docs/integration page).
 - [ ] Note that the first 📷 asks for screen access: `<all_urls>` is granted on a gesture, not at install,
       so an unexpected prompt reads as a failure. Same for starting co-pilot.

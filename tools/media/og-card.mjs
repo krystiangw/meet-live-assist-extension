@@ -1,27 +1,29 @@
-// Social card: the brand block on the left, the real panel screenshot leaning in from the right.
+// Social card: the brand block on the left, the panel-in-a-call render bleeding off the right edge.
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 
 import { fileURLToPath } from 'node:url';
 
 // Playwright is not a dependency of this project - install it where you run this, or point
-// MLA_PLAYWRIGHT at an existing checkout: MLA_PLAYWRIGHT=/path/to/playwright/index.mjs node still.mjs
+// MLA_PLAYWRIGHT at an existing checkout: MLA_PLAYWRIGHT=/path/to/playwright/index.mjs node stage.mjs
 const { chromium } = await import(process.env.MLA_PLAYWRIGHT || 'playwright');
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const shot = readFileSync(`${ROOT}/docs/media/panel-full.png`).toString('base64');
+const shot = readFileSync(`${ROOT}/docs/media/call-share.png`).toString('base64');
 
 const html = `<!doctype html><meta charset="utf-8"><style>
   * { box-sizing: border-box; margin: 0; }
   body { width: 1200px; height: 630px; display: flex; align-items: center; overflow: hidden;
     font: 16px/1.5 -apple-system, system-ui, sans-serif; color: #14162a;
     background: radial-gradient(900px 500px at 78% 10%, #d9deff, transparent), linear-gradient(135deg, #fbfbff, #eef0ff); }
-  .left { width: 660px; padding: 0 0 0 72px; }
+  .left { width: 600px; padding: 0 0 0 72px; }
   .logo { width: 64px; height: 64px; border-radius: 16px; }
   h1 { font-size: 58px; letter-spacing: -0.03em; margin: 22px 0 14px; }
   .claim { font-size: 27px; font-weight: 600; line-height: 1.3; color: #2b2f52; }
   .sub { font-size: 19px; margin-top: 18px; color: #5b5f80; }
   .right { flex: 1; height: 630px; position: relative; }
-  .right img { position: absolute; top: 46px; left: 22px; width: 400px; border-radius: 18px;
+  /* The panel is the product, so the whole window has to fit - a crop that shows only the shared screen
+     advertises the wrong half. */
+  .right img { position: absolute; top: 158px; left: -12px; width: 636px; border-radius: 12px;
     border: 1px solid #dfe2f2; box-shadow: 0 30px 70px rgba(80, 70, 200, .28); transform: rotate(-2.2deg); }
 </style>
 <div class="left">

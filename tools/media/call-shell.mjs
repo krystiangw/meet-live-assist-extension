@@ -54,6 +54,13 @@ export const shell = (stage, panel, { w = W, h = H, title = 'Release review', ur
   .strip { flex: 0 0 128px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
   .strip .tile .av { width: 54px; height: 54px; font-size: 21px; }
   .strip .tile .who { font-size: 12px; left: 12px; bottom: 10px; }
+  .work { flex: 1; border-radius: 16px; background: #14161d; overflow: hidden; display: flex; flex-direction: column;
+    border: 1px solid #2a2d38; font: 15px/1.75 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .work .head { padding: 12px 20px; font-size: 13px; color: #8b90a8; background: #1c1f28;
+    font-family: -apple-system, system-ui, sans-serif; }
+  .work .out { padding: 20px 26px; color: #c6cadb; }
+  .work .out .dim { color: #6c7285; }
+  .work .out .err { color: #ff7b7b; }
   .cal { flex: 1; padding: 30px 44px; display: flex; flex-direction: column; justify-content: center; }
   .cal h3 { font-size: 28px; margin-bottom: 6px; }
   .cal p { color: #6a6f8c; font-size: 16px; margin-bottom: 30px; }
@@ -105,4 +112,20 @@ export const shareStage = (speakerName) => `
   </div>
 </div>
 <div class="strip">${PEOPLE.map((p) => tile(p, p.name === speakerName)).join('')}</div>`;
+
+// Co-pilot mode has no meeting at all: the assistant watches the tab you are working in. So the stage is that
+// tab, not a call - showing a participant grid here would be a lie about what the mode is.
+export const workStage = () => `<div class="work">
+  <div class="head">Terminal - migrate.ts</div>
+  <div class="out">
+    <div class="dim">$ node scripts/migrate.ts --batch 2</div>
+    <div>reading billing_events ...</div>
+    <div class="dim">batch 1/4  ok      41,208 rows   3.1s</div>
+    <div class="err">batch 2/4  timeout after 120s</div>
+    <div class="dim">  at readBatch (migrate.ts:88)</div>
+    <div class="dim">  at main (migrate.ts:214)</div>
+    <div>&nbsp;</div>
+    <div class="dim">$ </div>
+  </div>
+</div>`;
 
