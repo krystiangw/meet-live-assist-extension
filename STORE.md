@@ -80,9 +80,11 @@ Privacy policy: `PRIVACY.md`.
 - [x] Privacy policy at a URL that works: https://krystiangw.github.io/meet-live-assist/privacy.html
       (goes live with the docs sync; the form rejects a 404).
 - [x] Upload zip rebuilt at the submitted version: `dist/meet-live-assist-0.7.2-public.zip`
-      (225 KB across 17 files). Verified as an artifact, not on the build script's word: manifest has 8
-      permissions and no `debugger`, no `chrome.debugger` call survives the strip, every stripped file still
-      parses, and every path the manifest and the shipped HTML reference exists inside the zip.
+      (226 KB across 17 files). Verified as an artifact at THIS version, not on the build script's word:
+      manifest says 0.7.2, has 8 permissions and no `debugger`, host permissions are only Meet, Zoom and
+      loopback, no `chrome.debugger` call survives the strip, every stripped file still parses, every path
+      the manifest references exists inside the zip, and the caption fix is in the shipped source. Re-run
+      this at every version: a check that describes the previous build is worse than no check.
 - [x] Screenshots (1280x800): `store-1-in-a-call.png`, `store-2-screen-share.png`,
       `store-3-co-pilot.png` - the extension in a call, beside a shared screen, and in co-pilot mode.
       Regenerate with `node tools/media/stage.mjs`.
@@ -90,7 +92,7 @@ Privacy policy: `PRIVACY.md`.
       prompt. Copy is under "Two things to say plainly in the description".
 - [x] Licence picked: PolyForm Internal Use 1.0.0, and `package.json` points at the file because there is
       no SPDX identifier for it.
-- [ ] Decide whether the source repo goes public alongside the listing.
+- [x] Source repo is public: https://github.com/krystiangw/meet-live-assist-extension
 - [ ] Submit unlisted first; go public once the review comes back clean.
 
 ## Disclosure to other participants
