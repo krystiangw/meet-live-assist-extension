@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Meet Live Assist",
   "version": "0.7.2",
-  "description": "Live meeting co-pilot for Google Meet & Zoom - transcript, colour-coded advice, action items, snapshots, chat and TTS, all via your own local assistant.",
+  "description": "Live co-pilot for Meet & Zoom: real-time transcript, colour-coded advice, decisions and action items, all on your machine.",
   "minimum_chrome_version": "116",
   "homepage_url": "https://meet-live-assist.github.io/",
   "icons": {

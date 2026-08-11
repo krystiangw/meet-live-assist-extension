@@ -74,6 +74,10 @@ reach it), stored data is **time-purged** (default 14 days) and wipeable per mee
 Privacy policy: `PRIVACY.md`.
 
 ## Pre-publish checklist
+- [x] `manifest.json` `description` is 132 characters or fewer. The store rejects the upload over this and
+      nothing local complains, so `build.sh` now fails the build instead of the dashboard failing the person
+      holding the zip. The listing copy lives in `STORE-LISTING.txt`; the manifest reuses its short
+      description word for word rather than keeping a second string that drifts.
 - [x] `<all_urls>` optional, requested at runtime on a gesture (host prompt = Meet/Zoom + localhost).
 - [x] `debugger` and the page-control surface stripped from the public build (`build.sh --public`).
 - [x] Bundled skill is a template, not the author's personal one (`install.sh` fills user/language/domain).

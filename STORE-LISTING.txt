@@ -1,0 +1,134 @@
+================================================================
+SHORT DESCRIPTION            (paste as-is, 122 of 132 characters)
+================================================================
+Live co-pilot for Meet & Zoom: real-time transcript, colour-coded advice, decisions and action items, all on your machine.
+
+
+================================================================
+DETAILED DESCRIPTION                          (paste as-is)
+================================================================
+Meet Live Assist turns a Google Meet or Zoom call into a live workspace. It captures the transcript as
+the call happens and hands it to an assistant running on your own computer, which answers in a side
+panel while people are still talking: the sentence to say next, a fact from your own notes, the
+decision that was just made, the risk you are about to agree to.
+
+It also keeps a live board of decisions and owner-tagged action items, answers you in an in-panel chat
+so you can ask without speaking, and takes snapshots while someone shares their screen so the
+assistant can see what everyone else is looking at. A co-pilot mode needs no meeting at all: it
+watches the tab you are working in and listens while you think out loud.
+
+BEFORE YOU INSTALL: THIS NEEDS TWO THINGS FROM YOU
+
+1. A companion server on your own machine. It is one command and has no dependencies.
+2. An AI agent that speaks MCP. Claude Code is the one this is tested with; Codex has been verified
+   to drive the tools.
+
+This extension is the eyes, ears and hands. The brain is an agent session you already run. Without one
+you get a working transcript recorder and an empty advice pane, which is not what the screenshots
+show. Both steps are on the install page: https://meet-live-assist.github.io/
+
+WHAT TO EXPECT THE FIRST TIME
+
+The first time you take a snapshot or start co-pilot mode, Chrome will ask for access to the page you
+are on. That prompt is expected: the permission is requested when you use the feature, not at install,
+so the install prompt stays limited to Meet, Zoom and your own localhost.
+
+WHERE YOUR MEETING GOES
+
+The extension talks to one place: the server on your own machine. Transcripts, screenshots and chat
+are files on your disk, owner-only, purged after 14 days by default and wipeable per meeting from the
+panel. There are no accounts, no analytics and no servers of ours.
+
+What your assistant then does with the parts you route to it is your configuration: if it uses a cloud
+model, that provider sees what you send, on your own account and terms. The privacy policy says this
+plainly: https://meet-live-assist.github.io/privacy.html
+
+Capturing a meeting is recording. By default the extension posts one line into the meeting chat saying
+an assistant is transcribing locally, and tells you when that line could not be delivered. You can edit
+it or turn it off. Where consent is required, getting it is on you.
+
+Source code: https://github.com/krystiangw/meet-live-assist-extension
+
+Meet Live Assist is an independent project. It is not affiliated with, endorsed by or sponsored by
+Google or Zoom; "Google Meet" and "Zoom" are their owners' trademarks and are used here only to say
+which products this works with.
+
+
+================================================================
+FIELDS
+================================================================
+Category            Productivity
+Language            English
+Privacy policy URL  https://meet-live-assist.github.io/privacy.html
+Homepage URL        https://meet-live-assist.github.io/
+Support URL         https://github.com/krystiangw/meet-live-assist-extension/issues
+Visibility          Unlisted
+
+
+================================================================
+SINGLE PURPOSE               (Privacy practices tab)
+================================================================
+A live assistant for the user's own video calls: it reads the meeting transcript and shows the user's
+own AI assistant's answers in a side panel during the call.
+
+
+================================================================
+PERMISSION JUSTIFICATIONS    (one field per permission)
+================================================================
+sidePanel
+  The entire user interface lives in the side panel: transcript, advice, chat.
+
+storage
+  Stores the user's settings: the local server address, the chosen text-to-speech voices, the
+  disclosure line, and the names to alert on.
+
+alarms
+  A periodic heartbeat that keeps the service worker alive through a long call, so capture does not
+  stop mid-meeting.
+
+tabCapture
+  Captures the meeting tab's audio for optional local speech-to-text, used only when the user starts
+  it with a keyboard command.
+
+offscreen
+  The only MV3 surface that can consume a captured audio stream. Used to run the optional local
+  speech-to-text.
+
+scripting
+  Injects the caption reader into the meeting tab so the transcript can be read.
+
+clipboardWrite
+  Copies one line of advice so the user can paste it into the meeting chat.
+
+notifications
+  Fires a system alert on a risk item when the side panel is hidden mid-call.
+
+host permission: https://meet.google.com/*, https://*.zoom.us/*
+  Reads on-screen captions and call state and injects the assistant UI. These are the two products the
+  extension works with.
+
+host permission: http://127.0.0.1:8848/*
+  Talks to the companion server on the user's own machine. This is the only destination the extension
+  sends anything to.
+
+optional host permission: <all_urls>
+  Needed to screenshot a shared slide or app, and by co-pilot mode, which watches the tab the user is
+  working in. Requested at the moment the user takes a snapshot outside the meeting tab or starts
+  co-pilot, on a user gesture, so it never appears in the install prompt.
+
+
+================================================================
+DATA DISCLOSURE
+================================================================
+Tick: "Personally identifiable information" is NOT collected.
+Tick: the extension collects "Web history" NO, "User activity" NO, "Website content" YES
+      (meeting transcript text and tab screenshots).
+
+Then certify all three:
+  - I do not sell or transfer user data to third parties, outside of approved use cases
+  - I do not use or transfer user data for purposes unrelated to my item's single purpose
+  - I do not use or transfer user data to determine creditworthiness or for lending purposes
+
+Rationale to keep at hand if a reviewer asks: the collected content is transmitted only to a server
+running on the user's own machine, authenticated with a token generated locally. Nothing is sent to
+the developer.

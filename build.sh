@@ -18,6 +18,16 @@ PUBLIC=0
 [ "${1:-}" = "--public" ] && PUBLIC=1
 
 VER=$(python3 -c "import json;print(json.load(open('manifest.json'))['version'])")
+
+# The store rejects the upload itself over this, after the zip is built and mailed to someone. Cheaper to
+# fail here. The limit is the store's, not the manifest format's, so nothing local ever complains.
+python3 - <<'PY'
+import json, sys
+d = json.load(open('manifest.json')).get('description', '')
+if len(d) > 132:
+    sys.exit(f"❌ manifest description is {len(d)} characters; the Chrome Web Store limit is 132")
+PY
+
 mkdir -p dist
 
 if [ "$PUBLIC" = 0 ]; then
