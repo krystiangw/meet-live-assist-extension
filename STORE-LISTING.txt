@@ -73,22 +73,24 @@ own AI assistant's answers in a side panel during the call.
 
 
 ================================================================
-PERMISSION JUSTIFICATIONS    (one field per permission)
+PERMISSION JUSTIFICATIONS    (one field each, in the order the form lists them)
 ================================================================
-sidePanel
-  The entire user interface lives in the side panel: transcript, advice, chat.
-
-storage
-  Stores the user's settings: the local server address, the chosen text-to-speech voices, the
-  disclosure line, and the names to alert on.
-
 alarms
-  A periodic heartbeat that keeps the service worker alive through a long call, so capture does not
-  stop mid-meeting.
+  A periodic heartbeat that keeps the service worker alive through a long call, so capture does not stop
+  mid-meeting.
 
-tabCapture
-  Captures the meeting tab's audio for optional local speech-to-text, used only when the user starts
-  it with a keyboard command.
+clipboardWrite
+  Copies one line of advice so the user can paste it into the meeting chat.
+
+host permission
+  Reads on-screen captions and call state on Google Meet and Zoom and injects the assistant UI there, and
+  talks to the companion server on the user's own machine at 127.0.0.1:8848, which is the only destination
+  anything is sent to. The optional <all_urls> permission is requested at runtime on a user gesture, when
+  the user snapshots a shared slide outside the meeting tab or starts co-pilot mode, so it never appears in
+  the install prompt.
+
+notifications
+  Fires a system alert on a risk item when the side panel is hidden mid-call.
 
 offscreen
   The only MV3 surface that can consume a captured audio stream. Used to run the optional local
@@ -97,24 +99,16 @@ offscreen
 scripting
   Injects the caption reader into the meeting tab so the transcript can be read.
 
-clipboardWrite
-  Copies one line of advice so the user can paste it into the meeting chat.
+sidePanel
+  The entire user interface lives in the side panel: transcript, advice, chat.
 
-notifications
-  Fires a system alert on a risk item when the side panel is hidden mid-call.
+storage
+  Stores the user's settings: the local server address, the chosen text-to-speech voices, the disclosure
+  line, and the names to alert on.
 
-host permission: https://meet.google.com/*, https://*.zoom.us/*
-  Reads on-screen captions and call state and injects the assistant UI. These are the two products the
-  extension works with.
-
-host permission: http://127.0.0.1:8848/*
-  Talks to the companion server on the user's own machine. This is the only destination the extension
-  sends anything to.
-
-optional host permission: <all_urls>
-  Needed to screenshot a shared slide or app, and by co-pilot mode, which watches the tab the user is
-  working in. Requested at the moment the user takes a snapshot outside the meeting tab or starts
-  co-pilot, on a user gesture, so it never appears in the install prompt.
+tabCapture
+  Captures the meeting tab's audio for optional local speech-to-text, used only when the user starts it
+  with a keyboard command.
 
 
 ================================================================
