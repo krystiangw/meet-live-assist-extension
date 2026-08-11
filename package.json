@@ -4,7 +4,7 @@
   "private": true,
   "description": "Live meeting co-pilot for Google Meet and Zoom: transcript capture, colour-coded advice, action items, snapshots, chat and TTS, driven by your own local assistant.",
   "license": "SEE LICENSE IN LICENSE.md",
-  "homepage": "https://krystiangw.github.io/meet-live-assist/",
+  "homepage": "https://meet-live-assist.github.io/",
   "engines": {
     "node": ">=20"
   },

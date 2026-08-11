@@ -16,13 +16,13 @@ extension posts one line into the meeting chat saying an assistant is transcribi
 
 ## Pages
 
-- [Overview](https://krystiangw.github.io/meet-live-assist/): what it does during a call, the two scenarios it
+- [Overview](https://meet-live-assist.github.io/): what it does during a call, the two scenarios it
   was built for, and the install steps.
-- [How it works](https://krystiangw.github.io/meet-live-assist/reference.html): the three pieces, the full
+- [How it works](https://meet-live-assist.github.io/reference.html): the three pieces, the full
   feature list, the six advice markers, and the local server's HTTP API.
-- [Q&A](https://krystiangw.github.io/meet-live-assist/faq.html): where the transcript goes, what phones home,
+- [Q&A](https://meet-live-assist.github.io/faq.html): where the transcript goes, what phones home,
   how long anything is kept, and whether it can be used at work.
-- [Privacy policy](https://krystiangw.github.io/meet-live-assist/privacy.html): what is stored, where, and what
+- [Privacy policy](https://meet-live-assist.github.io/privacy.html): what is stored, where, and what
   leaves the machine.
 
 ## Source

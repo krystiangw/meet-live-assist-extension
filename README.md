@@ -146,7 +146,7 @@ any name, can make it act - but that is the model following its skill, not a wal
 destructive tools to Claude Code, set their trust accordingly. `PRIVACY.md` says this plainly too.
 
 **Landing page:** [`docs/index.html`](docs/index.html), also hosted at
-**https://krystiangw.github.io/meet-live-assist/**.
+**https://meet-live-assist.github.io/**.
 
 Built by [Krystian Gwizdała](https://krystiangw.github.io/krystiangw/).
 

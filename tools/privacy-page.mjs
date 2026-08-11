@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const BASE = 'https://krystiangw.github.io/meet-live-assist/';
+const BASE = 'https://meet-live-assist.github.io/';
 
 const md = readFileSync(`${ROOT}/PRIVACY.md`, 'utf8');
 let body = execFileSync('npx', ['--yes', 'marked', '--gfm'], { input: md, encoding: 'utf8', maxBuffer: 1 << 24 });
@@ -35,6 +35,7 @@ const html = `<!doctype html>
 <meta name="description" content="What Meet Live Assist stores, where it stores it, what leaves your machine and what never does." />
 <link rel="canonical" href="${BASE}privacy.html" />
 <meta property="og:type" content="website" />
+<meta property="og:site_name" content="Meet Live Assist" />
 <meta property="og:url" content="${BASE}privacy.html" />
 <meta property="og:title" content="Meet Live Assist - privacy policy" />
 <meta property="og:description" content="What Meet Live Assist stores, where it stores it, what leaves your machine and what never does." />

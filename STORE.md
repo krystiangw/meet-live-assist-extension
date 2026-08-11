@@ -31,7 +31,7 @@ Meet Live Assist is an independent project. It is not affiliated with, endorsed 
 ### Two things to say plainly in the description
 
 **This needs a companion server on your own machine.** The extension is the eyes, ears and hands; the
-assistant is an agent session you already run. Install: https://krystiangw.github.io/meet-live-assist/
+assistant is an agent session you already run. Install: https://meet-live-assist.github.io/
 
 **The first screenshot asks for screen access.** `<all_urls>` is granted on a gesture, not at install, so the
 prompt appears the first time you press 📷 or start co-pilot. Without that sentence in the listing, an
@@ -77,7 +77,7 @@ Privacy policy: `PRIVACY.md`.
 - [x] `<all_urls>` optional, requested at runtime on a gesture (host prompt = Meet/Zoom + localhost).
 - [x] `debugger` and the page-control surface stripped from the public build (`build.sh --public`).
 - [x] Bundled skill is a template, not the author's personal one (`install.sh` fills user/language/domain).
-- [x] Privacy policy at a URL that works: https://krystiangw.github.io/meet-live-assist/privacy.html
+- [x] Privacy policy at a URL that works: https://meet-live-assist.github.io/privacy.html
       (goes live with the docs sync; the form rejects a 404).
 - [x] Upload zip rebuilt at the submitted version: `dist/meet-live-assist-0.7.2-public.zip`
       (226 KB across 17 files). Verified as an artifact at THIS version, not on the build script's word:

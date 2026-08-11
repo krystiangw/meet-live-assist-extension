@@ -1,6 +1,6 @@
 # meet-live-assist-server
 
-Local bridge server for the [Meet Live Assist](https://krystiangw.github.io/meet-live-assist/) browser
+Local bridge server for the [Meet Live Assist](https://meet-live-assist.github.io/) browser
 extension. The extension captures a Google Meet or Zoom call; this server is what it talks to, and what your
 own assistant reads.
 
