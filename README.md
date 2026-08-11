@@ -148,7 +148,7 @@ destructive tools to Claude Code, set their trust accordingly. `PRIVACY.md` says
 **Landing page:** [`docs/index.html`](docs/index.html), also hosted at
 **https://meet-live-assist.github.io/**.
 
-Built by [Krystian Gwizdała](https://krystiangw.github.io/krystiangw/).
+Built by [Krystian Gwizdała](https://krystian-gwizdala.github.io/).
 
 *Meet Live Assist is an independent project. It is not affiliated with, endorsed by or sponsored by Google or Zoom; "Google Meet" and "Zoom" are their owners' trademarks and are used here only to say which products this works with.*
 

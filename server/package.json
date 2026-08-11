@@ -20,7 +20,7 @@
   "bugs": {
     "url": "https://github.com/krystiangw/meet-live-assist-extension/issues"
   },
-  "author": "Krystian Gwizdala (https://krystiangw.github.io/krystiangw/)",
+  "author": "Krystian Gwizdala (https://krystian-gwizdala.github.io/)",
   "bin": {
     "meet-live-assist-server": "transcript-server.js",
     "meet-live-assist-mcp": "mcp-server.js"
