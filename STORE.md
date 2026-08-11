@@ -88,6 +88,8 @@ Privacy policy: `PRIVACY.md`.
 - [x] Screenshots (1280x800): `store-1-in-a-call.png`, `store-2-screen-share.png`,
       `store-3-co-pilot.png` - the extension in a call, beside a shared screen, and in co-pilot mode.
       Regenerate with `node tools/media/stage.mjs`.
+- [x] Small promotional tile (440x280): `store-promo-440x280.png`. The store treats this as mandatory and
+      the form blocks without it. Regenerate with `node tools/media/promo-tile.mjs`.
 - [x] The listing says a local companion server is required, and that the first 📷 triggers the screen-access
       prompt. Copy is under "Two things to say plainly in the description".
 - [x] Licence picked: PolyForm Internal Use 1.0.0, and `package.json` points at the file because there is

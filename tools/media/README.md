@@ -12,6 +12,7 @@ npm i -D playwright && npx playwright install chromium   # not a project depende
 node tools/media/stage.mjs     # docs/media/call-share.png, copilot.png + the three store tiles
 node tools/media/call-clip.mjs # docs/media/{call,planning}-live.{mp4,gif} + posters  (needs ffmpeg)
 node tools/media/og-card.mjs   # docs/media/og-card.png  (reads call-share.png, run it last)
+node tools/media/promo-tile.mjs # docs/media/store-promo-440x280.png  (the store will not accept a submission without it)
 ```
 
 `panel.mjs` holds the shared writers and the three scripted sessions (a release review, a sprint
