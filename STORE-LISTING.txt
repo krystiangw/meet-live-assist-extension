@@ -118,6 +118,25 @@ optional host permission: <all_urls>
 
 
 ================================================================
+REMOTE CODE                  (Privacy practices tab)
+================================================================
+Answer: "No, I am not using remote code."
+
+Verified against the uploaded package, not from memory: no external <script> or <link> in any extension
+page, no eval() and no new Function(), no remote import(), and the manifest's CSP is
+  script-src 'self'; object-src 'self'
+Requests to 127.0.0.1 carry data, never code, and that CSP would refuse to execute anything that did not
+ship inside the zip.
+
+
+================================================================
+PUBLISHER SETTINGS           (Settings page, not the item)
+================================================================
+A contact email is required and must be verified by clicking the link Google emails. Publishing is blocked
+until both are done, and neither lives on the item's own pages, which is why it is easy to miss.
+
+
+================================================================
 DATA DISCLOSURE
 ================================================================
 Tick: "Personally identifiable information" is NOT collected.
