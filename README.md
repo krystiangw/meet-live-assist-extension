@@ -248,6 +248,11 @@ From a clone it is:
 node server/transcript-server.js --pair
 ```
 
+The MCP half is listed in the [MCP Server Registry](https://registry.modelcontextprotocol.io/) as
+`io.github.krystiangw/meet-live-assist`, so a registry-aware client can add it without being told the
+command. Clients that still want it spelled out: `npx -p meet-live-assist-server meet-live-assist-mcp`
+(the package ships two binaries, and `npx meet-live-assist-server` starts the bridge, not the adapter).
+
 It writes to
 `~/meet-live-assist/transcripts` unless `TRANSCRIPTS_DIR` says otherwise. **Node 20+ is the only hard
 requirement**; `ffmpeg` and `whisper-cli` are optional and only local STT depends on them. Binary paths
