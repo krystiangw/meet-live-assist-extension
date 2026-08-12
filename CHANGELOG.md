@@ -4,6 +4,15 @@ Notable changes only. Earlier history is in `git log` (91 commits from 2026-07-1
 point the project was prepared for a public release, because that is where a version number began to mean
 something to anyone other than the author.
 
+## unreleased
+
+- **A server that cannot bind now exits instead of reporting itself alive.** The catch-all handler existed so
+  an unknown throw would not stop a meeting halfway through, and that is still right once there is a socket
+  to serve on. A throw out of `listen()` is the opposite case: nothing is being held, nobody is being served,
+  and the process printed a line saying it was staying up so the meeting kept recording. Under launchd that
+  is a service reported healthy for as long as nobody looks. Found while smoke-testing the published npm
+  package with a malformed `PORT`.
+
 ## server 0.7.3 - 2026-08-12
 
 npm only. The extension stays at 0.7.2, which is the version under review in the store, and there is no

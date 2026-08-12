@@ -2217,8 +2217,17 @@ const server = http.createServer((req, res) => {
 // only evidence is a gap in the transcript nobody can explain later. Log it loudly and keep serving - a
 // server answering wrongly on one route beats a server answering nothing on all of them, when the thing it
 // is holding is the only copy of a conversation in progress.
+// Staying up is only the right answer once there is something to stay up FOR. A throw out of listen() means
+// there is no socket, so the process is holding nothing, serving nobody, and printing a line that says the
+// opposite. Under launchd that is a service reported healthy for as long as nobody looks.
+let listening = false;
 for (const [event, label] of [['uncaughtException', 'uncaught exception'], ['unhandledRejection', 'unhandled rejection']]) {
   process.on(event, (err) => {
+    if (!listening) {
+      console.error(`[transcript] ${label} before the server was listening - nothing to keep alive:`,
+        (err && err.stack) || err);
+      process.exit(1);
+    }
     console.error(`[transcript] ${label} - staying up so the meeting keeps recording:`, (err && err.stack) || err);
   });
 }
@@ -2238,6 +2247,7 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
 const WANT_PAIR = process.argv.includes('--pair');
 
 server.listen(PORT, '127.0.0.1', () => {
+  listening = true;
   console.log(`[transcript] listening on http://127.0.0.1:${PORT}`);
   console.log(`[transcript] writing to ${TRANSCRIPTS_DIR}`);
   console.log(`[transcript] retention: ${RETENTION_DAYS > 0 ? RETENTION_DAYS + ' days' : 'forever'}`);
