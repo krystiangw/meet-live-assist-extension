@@ -1,0 +1,61 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.krystiangw/meet-live-assist",
+  "description": "Your own agent inside a live Google Meet or Zoom call. Local-first, no hosted service.",
+  "repository": {
+    "url": "https://github.com/krystiangw/meet-live-assist-extension",
+    "source": "github"
+  },
+  "version": "0.7.3",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "meet-live-assist-server",
+      "version": "0.7.3",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "-p",
+          "value": "meet-live-assist-server",
+          "isRequired": true,
+          "description": "The package ships two binaries; -p picks the MCP one rather than the bridge server."
+        },
+        {
+          "type": "positional",
+          "value": "meet-live-assist-mcp",
+          "isRequired": true,
+          "valueHint": "meet-live-assist-mcp",
+          "description": "The stdio MCP adapter."
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "MLA_URL",
+          "description": "Base URL of the bridge server on this machine. Defaults to http://127.0.0.1:8848, which is right unless you moved the port.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string",
+          "default": "http://127.0.0.1:8848"
+        },
+        {
+          "name": "TRANSCRIPTS_DIR",
+          "description": "Where the bridge server writes. The adapter reads the access token from <dir>/.mla-token, and asks the running server for this path when it can, so it is normally unnecessary.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "MLA_TOKEN",
+          "description": "Access token for the bridge server. Only needed when the token file cannot be read; the adapter finds it by itself in the normal case.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

@@ -4,6 +4,16 @@ Notable changes only. Earlier history is in `git log` (91 commits from 2026-07-1
 point the project was prepared for a public release, because that is where a version number began to mean
 something to anyone other than the author.
 
+## server 0.7.3 - 2026-08-12
+
+npm only. The extension stays at 0.7.2, which is the version under review in the store, and there is no
+reason to move it for a metadata change.
+
+- **Listed in the MCP Server Registry** (`io.github.krystiangw/meet-live-assist`), which is where the
+  official server list moved to: the README list in `modelcontextprotocol/servers` has been retired in
+  favour of the registry. `server.json` describes how a client should launch the stdio adapter, and
+  `mcpName` in the package is what proves the listing belongs to this package.
+
 ## 0.7.2 - 2026-08-10
 
 The duplicate lines 0.7.1 claimed to fix were still there on the next call. The fix was right about where
