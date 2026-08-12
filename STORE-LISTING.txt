@@ -112,6 +112,21 @@ tabCapture
 
 
 ================================================================
+TEST INSTRUCTIONS            (Access tab, hard limit 500 characters)
+================================================================
+495 characters. Paste as-is; every sentence earns its place. Without it a reviewer installs the extension,
+sees an empty advice pane and can fairly call it broken - the one rejection this product invites.
+
+Needs a companion server on your machine. Without it the panel loads but stays empty - that is expected, not a defect.
+
+1. Run: npx meet-live-assist-server  (Node 20+, installs nothing globally)
+2. Run the pairing command it prints, or paste the token from the Options page. The pill turns green.
+3. Join any Meet call, turn captions on, speak. TRANSCRIPT fills live; the same lines are written to local files.
+
+Advice needs your own MCP agent, optional here: https://meet-live-assist.github.io/
+
+
+================================================================
 REMOTE CODE                  (Privacy practices tab)
 ================================================================
 Answer: "No, I am not using remote code."
