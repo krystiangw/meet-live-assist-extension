@@ -84,11 +84,13 @@ if (!token) {
   const since = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
   const hits = await getJSON(`https://${GC}.goatcounter.com/api/v0/stats/hits?start=${since}`, h);
   const total = await getJSON(`https://${GC}.goatcounter.com/api/v0/stats/total?start=${since}`, h);
+  // Pageviews, not people. This GoatCounter reports no unique-visitor count through the API - no
+  // `total_unique`, no `count_unique` per path - and calling a pageview count "visitors" would flatter the
+  // number by however many pages each person reads.
   out.site = hits
     ? {
-        visitors7d: total?.total_unique ?? null,
         pageviews7d: total?.total ?? null,
-        pages: (hits.hits || []).slice(0, 6).map((p) => ({ path: p.path, visitors: p.count_unique ?? p.count })),
+        pages: (hits.hits || []).slice(0, 6).map((p) => ({ path: p.path, views: p.count })),
       }
     : { error: 'token present but the API refused - check it is still valid' };
 }
@@ -114,8 +116,8 @@ if (g.paths.length) console.log(`           pages  ${g.paths.map((p) => `${p.pat
 console.log(`\n  npm      ${n(out.npm.lastDay)} downloads yesterday, ${n(out.npm.lastWeek)} over 7 days`);
 if (out.site.error) console.log(`\n  Site     ${out.site.error}`);
 else {
-  console.log(`\n  Site     ${n(out.site.visitors7d)} visitors / ${n(out.site.pageviews7d)} pageviews over 7 days`);
-  for (const p of out.site.pages) console.log(`           ${String(p.visitors).padStart(4)}  ${p.path}`);
+  console.log(`\n  Site     ${n(out.site.pageviews7d)} pageviews over 7 days (this GoatCounter reports no visitor count)`);
+  for (const p of out.site.pages) console.log(`           ${String(p.views).padStart(4)}  ${p.path}`);
 }
 console.log(`\n  Listings MCP registry: ${out.listings.mcpRegistry} · awesome-mcp PR #12002: ${out.listings.awesomeMcpPr}`);
 console.log('\n  Not measurable: source-zip downloads from the release page, and Chrome Web Store installs');
