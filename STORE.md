@@ -99,7 +99,12 @@ Privacy policy: `PRIVACY.md`.
 - [x] Licence picked: PolyForm Internal Use 1.0.0, and `package.json` points at the file because there is
       no SPDX identifier for it.
 - [x] Source repo is public: https://github.com/krystiangw/meet-live-assist-extension
-- [ ] Submit unlisted first; go public once the review comes back clean.
+- [x] Submitted 2026-08-12, version 0.7.2, visibility **unlisted**.
+      Item ID `elhddnpchalnmgcgdicegfggifojbadk`; the listing lives at
+      https://chromewebstore.google.com/detail/elhddnpchalnmgcgdicegfggifojbadk once the review passes.
+      The console warned this needs an in-depth review because `<all_urls>` is an optional host permission,
+      so expect days rather than hours.
+- [ ] Go public once the review comes back clean and one stranger has installed it.
 
 ## Disclosure to other participants
 
