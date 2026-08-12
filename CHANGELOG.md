@@ -6,6 +6,12 @@ something to anyone other than the author.
 
 ## unreleased
 
+- **A `Dockerfile` for registry listing checks.** Glama, which gates the awesome-mcp-servers listing, starts
+  the server in a container and asks it for its tools. Verified that the adapter answers `initialize` and
+  `tools/list` with no bridge server, no token and an empty `HOME`, which is exactly the state the check runs
+  in, and that its only requires are Node built-ins so the image needs no install step. The file says plainly
+  that this is not how to run the product: from a container the tools cannot reach the host's loopback.
+
 - **A server that cannot bind now exits instead of reporting itself alive.** The catch-all handler existed so
   an unknown throw would not stop a meeting halfway through, and that is still right once there is a socket
   to serve on. A throw out of `listen()` is the opposite case: nothing is being held, nobody is being served,
