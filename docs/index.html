@@ -262,7 +262,7 @@
 
 <section>
   <h2>Install it</h2>
-  <p>Three steps, and only the first two need a terminal. Requires Node 20+ and Chrome 116+.</p>
+  <p>Three steps, and only the first two need a terminal. Requires Node 20+ and Chrome 116+. The extension is one click from the Chrome Web Store, but the server and the skill it talks to are yours to run, so steps 1 and 2 do not go away.</p>
   <ol class="steps">
     <li>
       <h3>Clone and run the installer</h3>
@@ -285,14 +285,19 @@ cd meet-live-assist-extension
 curl -s http://127.0.0.1:8848/health   # → {"ok":true,...}</code></pre>
     </li>
     <li>
-      <h3>Load the extension, then ask your assistant</h3>
-      <p><code>chrome://extensions</code> → enable <strong>Developer mode</strong> →
-      <strong>Load unpacked</strong> → pick the folder you just cloned. Pin it and click the icon; the panel
-      pairs itself with the server. Then open Claude Code and ask it to assist your meeting - it loads the
-      <code>meet-live-assist</code> skill, attaches to the live call, and starts answering in the panel.</p>
-      <p class="note">Loaded this way the extension <strong>never updates itself</strong>, so a new version
-      means downloading it again, and Chrome will offer to disable developer-mode extensions at every
-      startup. Both are Chrome's rules for unpacked extensions, not something this one does.</p>
+      <h3>Install the extension, then ask your assistant</h3>
+      <p><a href="https://chromewebstore.google.com/detail/meet-live-assist/elhddnpchalnmgcgdicegfggifojbadk" target="_blank" rel="noopener noreferrer">Install from the Chrome Web Store</a>.
+      Pin it and click the icon; the panel pairs itself with the server. Then open Claude Code and ask it to
+      assist your meeting - it loads the <code>meet-live-assist</code> skill, attaches to the live call, and
+      starts answering in the panel.</p>
+      <p>Prefer to run code you can read? <code>chrome://extensions</code> → enable
+      <strong>Developer mode</strong> → <strong>Load unpacked</strong> → pick the folder from step 1. Same
+      extension, built from the same source.</p>
+      <p class="note">Loaded unpacked it <strong>never updates itself</strong>, so a new version means
+      downloading it again, and Chrome will offer to disable developer-mode extensions at every startup.
+      Both are Chrome's rules for unpacked extensions, not something this one does. Do not run both copies at
+      once either: Chrome gives them different extension IDs, so you would get two panels and two of every
+      caption.</p>
       <p class="note">Pairing window expired? Run the same <code>--pair</code> command again; against an
       already-running server it re-opens the window. Or paste the token by hand from
       <code>&lt;data dir&gt;/.mla-token</code> into the extension's Options - that path still works.</p>

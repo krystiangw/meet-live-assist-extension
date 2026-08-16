@@ -25,6 +25,13 @@ extension posts one line into the meeting chat saying an assistant is transcribi
 - [Privacy policy](https://meet-live-assist.github.io/privacy.html): what is stored, where, and what
   leaves the machine.
 
+## Install
+
+- [Chrome Web Store](https://chromewebstore.google.com/detail/meet-live-assist/elhddnpchalnmgcgdicegfggifojbadk): one click, updates itself. Unlisted, so the link works but store search does
+  not find it. The extension alone is not the product - the server and an MCP agent are still required.
+- [Latest release](https://github.com/krystiangw/meet-live-assist-extension/releases/latest): the same
+  extension plus the server and the skill, for anyone who would rather run code they can read.
+
 ## Source
 
 - [Extension and server](https://github.com/krystiangw/meet-live-assist-extension): source, install

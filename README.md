@@ -248,6 +248,11 @@ From a clone it is:
 node server/transcript-server.js --pair
 ```
 
+The extension is on the [Chrome Web Store](https://chromewebstore.google.com/detail/meet-live-assist/elhddnpchalnmgcgdicegfggifojbadk), unlisted: the link installs it in one click and it
+updates itself, but store search will not surface it, because it is useless to anyone who has not also run
+the server and attached an agent. Loading the repo unpacked works exactly the same and never auto-updates -
+run one or the other, not both, since Chrome gives them different extension IDs.
+
 The MCP half is listed in the [MCP Server Registry](https://registry.modelcontextprotocol.io/) as
 `io.github.krystiangw/meet-live-assist`, so a registry-aware client can add it without being told the
 command. Clients that still want it spelled out: `npx -p meet-live-assist-server meet-live-assist-mcp`

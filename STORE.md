@@ -104,7 +104,12 @@ Privacy policy: `PRIVACY.md`.
       https://chromewebstore.google.com/detail/elhddnpchalnmgcgdicegfggifojbadk once the review passes.
       The console warned this needs an in-depth review because `<all_urls>` is an optional host permission,
       so expect days rather than hours.
-- [ ] Go public once the review comes back clean and one stranger has installed it.
+- [x] **Published 2026-08-15**, version 0.7.2, unlisted. In-depth review (triggered by the optional
+      `<all_urls>`) took four days. Live at https://chromewebstore.google.com/detail/meet-live-assist/elhddnpchalnmgcgdicegfggifojbadk and confirmed against Chrome's own update service, which
+      serves `..._0_7_2_0.crx` for this ID - the dashboard shows no submission history, so "the review
+      finished" looks exactly like "the submission disappeared".
+- [ ] Go public once one stranger has installed it and the first-run path is confirmed on someone else's
+      machine. Ratings are public and permanent; the unlisted link is not.
 
 ## Disclosure to other participants
 

@@ -56,11 +56,14 @@
       Registry</a> as <code>io.github.krystiangw/meet-live-assist</code>. Spelled out, the command is
       <code>npx -p meet-live-assist-server meet-live-assist-mcp</code>: the package ships two binaries and the
       bare name starts the bridge server, not the adapter.</td></tr>
-    <tr><td>Is it on the Chrome Web Store?</td><td>Submitted, under review. Until that clears - and after
-      it, if you would rather run the code you can read -
+    <tr><td>Is it on the Chrome Web Store?</td><td>Yes -
+      <a href="https://chromewebstore.google.com/detail/meet-live-assist/elhddnpchalnmgcgdicegfggifojbadk" target="_blank" rel="noopener noreferrer">here</a>. It is
+      <strong>unlisted</strong>, so the link works but store search will not find it. That is deliberate: it
+      needs a local server and an MCP agent, and someone who installs it expecting a standalone notetaker
+      would rightly rate it one star. If you would rather run code you can read,
       <a href="https://github.com/krystiangw/meet-live-assist-extension/releases/latest" target="_blank" rel="noopener noreferrer">download
-      the latest release</a>, unzip it and load it unpacked. Same folder, same steps. It will not update
-      itself, so you download it again when a version lands.</td></tr>
+      the latest release</a> and load it unpacked instead - same source, but it will not update itself. Do
+      not run both: Chrome gives them different IDs and you would get two panels.</td></tr>
     <tr><td>Does anything phone home?</td><td>No. The extension talks only to <code>127.0.0.1</code>.</td></tr>
     <tr><td>Does this website track me?</td><td>It counts visits with
       <a href="https://www.goatcounter.com">GoatCounter</a>: aggregate numbers only, no cookies, nothing that
