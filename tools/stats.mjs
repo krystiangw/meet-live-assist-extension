@@ -68,6 +68,35 @@ out.github = {
   paths: paths.slice(0, 5).map((p) => ({ path: p.path.replace(`/${REPO}`, '') || '/', unique: p.uniques })),
 };
 
+// Issues and outside pull requests are the highest-signal events this project can receive, and nothing was
+// watching them. `issues` returns PRs too, hence the split.
+const issues = JSON.parse(gh(`repos/${REPO}/issues?state=open&per_page=100`) || '[]');
+const mine = (x) => x?.user?.login === REPO.split('/')[0];
+const openIssues = issues.filter((i) => !i.pull_request);
+out.github.openIssues = openIssues.length;
+out.github.issuesFromOthers = openIssues.filter((i) => !mine(i)).length;
+out.github.prsFromOthers = issues.filter((i) => i.pull_request && !mine(i)).length;
+out.github.newestIssue = openIssues[0]
+  ? { n: openIssues[0].number, by: openIssues[0].user.login, title: openIssues[0].title.slice(0, 70) }
+  : null;
+
+// ---- Chrome Web Store ----------------------------------------------------
+// The listing page is a JS app, but Chrome's own update service answers for any extension ID and is the
+// authority the browser itself trusts. It is also how a takedown would first become visible.
+const EXT = 'elhddnpchalnmgcgdicegfggifojbadk';
+try {
+  const r = await fetch('https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=140'
+    + `&acceptformat=crx3&x=id%3D${EXT}%26uc`, { signal: AbortSignal.timeout(20000) });
+  const xml = await r.text();
+  const ver = xml.match(new RegExp(`${EXT.toUpperCase()}_(\\d+_\\d+_\\d+)`, 'i'));
+  out.store = {
+    status: /status="ok"/.test(xml) ? 'ok' : 'NOT OK',
+    version: ver ? ver[1].replace(/_/g, '.') : null,
+  };
+} catch (_) {
+  out.store = { status: null, version: null };
+}
+
 // ---- npm ----------------------------------------------------------------
 const [day, week] = await Promise.all([
   getJSON(`https://api.npmjs.org/downloads/point/last-day/${PKG}`),
@@ -119,6 +148,10 @@ else {
   console.log(`\n  Site     ${n(out.site.pageviews7d)} pageviews over 7 days (this GoatCounter reports no visitor count)`);
   for (const p of out.site.pages) console.log(`           ${String(p.views).padStart(4)}  ${p.path}`);
 }
+console.log(`\n  GitHub   ${n(g.openIssues)} open issues (${n(g.issuesFromOthers)} from other people), `
+  + `${n(g.prsFromOthers)} outside PRs`);
+if (g.newestIssue) console.log(`           newest: #${g.newestIssue.n} by ${g.newestIssue.by} - ${g.newestIssue.title}`);
+console.log(`  Store    ${n(out.store.status)}, serving ${n(out.store.version)}`);
 console.log(`\n  Listings MCP registry: ${out.listings.mcpRegistry} · awesome-mcp PR #12002: ${out.listings.awesomeMcpPr}`);
 console.log('\n  Not measurable: source-zip downloads from the release page, and Chrome Web Store installs');
-console.log('  while the item is unlisted and under review. Neither is zero; both are unknown.\n');
+console.log('  while the item is unlisted - the dashboard has them, no public API does. Neither is zero.\n');

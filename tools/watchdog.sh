@@ -1,6 +1,4 @@
 #!/bin/zsh
-# Installed copy lives at ~/.local/bin/mla-watchdog and runs from cron: 7 9 * * *
-# This copy is here so it is version-controlled and reviewable; edit here, then copy across.
 # Daily watchdog: take a snapshot, then say something ONLY when it matters.
 #
 # The point is not another number every morning. It is that the two things worth knowing - somebody real
@@ -34,6 +32,9 @@ const broken = [];
 if (g(now, 'github', 'views14d') == null) broken.push('GitHub traffic');
 if (g(now, 'site', 'pageviews7d') == null) broken.push('GoatCounter');
 if (g(now, 'npm', 'lastWeek') == null) broken.push('npm');
+if (g(now, 'store', 'status') == null) broken.push('Chrome Web Store update service');
+const problems = [];
+if (g(now, 'store', 'status') === 'NOT OK') problems.push('store listing is NOT serving - possible takedown');
 
 const watch = [
   ['stars', ['github', 'stars'], true],
@@ -43,6 +44,11 @@ const watch = [
   ['npm downloads (24h)', ['npm', 'lastDay'], true],
   ['site pageviews (7d)', ['site', 'pageviews7d'], false],
   ['clones (14d)', ['github', 'clones14d', 'unique'], false],
+  ['issues from other people', ['github', 'issuesFromOthers'], true],
+  ['outside pull requests', ['github', 'prsFromOthers'], true],
+  ['open issues', ['github', 'openIssues'], false],
+  ['store status', ['store', 'status'], true],
+  ['store version', ['store', 'version'], true],
   ['MCP registry', ['listings', 'mcpRegistry'], true],
   ['awesome-mcp PR', ['listings', 'awesomeMcpPr'], true],
 ];
@@ -56,12 +62,20 @@ for (const [label, keys, notify] of watch) {
   if (notify) loud.push(line);
 }
 
-if (changes.length || broken.length) {
+// The number and the author of a new issue say more than a count going up, so it is detected before the log
+// is written rather than after.
+const ni = g(now, 'github', 'newestIssue');
+const freshIssue = ni && g(prev, 'github', 'newestIssue')?.n !== ni.n && ni.by !== 'krystiangw'
+  ? `issue #${ni.n} from ${ni.by}: ${ni.title}` : null;
+if (freshIssue) { changes.unshift(freshIssue); loud.unshift(freshIssue); }
+
+if (changes.length || broken.length || problems.length) {
   const stamp = now.at;
   const body = [
     `== ${stamp}`,
     ...changes.map((c) => `   ${c}`),
     ...broken.map((b) => `   MEASUREMENT BROKEN: ${b} returned nothing`),
+    ...problems.map((p) => `   PROBLEM: ${p}`),
   ].join('\n');
   fs.appendFileSync(path.join(dir, 'changes.log'), body + '\n');
 }
@@ -80,12 +94,13 @@ const filtered = loud.filter((l) => {
   return n === null || n > 0;
 });
 
-const alert = [...filtered, ...broken.map((b) => `${b} returned nothing`)];
+const alert = [...problems, ...filtered, ...broken.map((b) => `${b} returned nothing`)];
 if (alert.length) {
   const msg = alert.join(' · ').replace(/"/g, "'").slice(0, 200);
   require('child_process').spawnSync('osascript', ['-e',
     `display notification "${msg}" with title "Meet Live Assist" sound name "Submarine"`]);
 }
-console.log(changes.length || broken.length ? `zmiany:\n${changes.map((c) => '  ' + c).join('\n')}` : 'bez zmian');
+console.log(changes.length || broken.length || problems.length ? `zmiany:\n${changes.map((c) => '  ' + c).join('\n')}` : 'bez zmian');
 if (broken.length) console.log('  POMIAR ZEPSUTY:', broken.join(', '));
+if (problems.length) console.log('  PROBLEM:', problems.join(', '));
 EOF
