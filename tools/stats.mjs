@@ -32,11 +32,17 @@ const gh = (p, jq) => {
     return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   } catch (_) { return null; }
 };
+// One retry, because a single blip gets recorded as "this source returned nothing", which reads in the log
+// exactly like a day with no visitors. GoatCounter has refused twice now and answered fine seconds later.
 const getJSON = async (url, headers) => {
-  try {
-    const r = await fetch(url, { headers, signal: AbortSignal.timeout(20000) });
-    return r.ok ? await r.json() : null;
-  } catch (_) { return null; }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await fetch(url, { headers, signal: AbortSignal.timeout(20000) });
+      if (r.ok) return await r.json();
+    } catch (_) { /* fall through to the retry */ }
+    if (attempt === 0) await new Promise((r) => setTimeout(r, 2000));
+  }
+  return null;
 };
 
 function goatToken() {
