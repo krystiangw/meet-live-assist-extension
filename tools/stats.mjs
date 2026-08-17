@@ -124,6 +124,13 @@ if (!token) {
     : { error: 'token present but the API refused - check it is still valid' };
 }
 
+// Glama gates the awesome-mcp-servers listing: the bot there wants a quality score, and the score only
+// appears once their own build has introspected the server. Both were zero for days while nothing watched.
+const glama = await getJSON('https://glama.ai/api/mcp/v1/servers/krystiangw/meet-live-assist-extension');
+out.glama = glama
+  ? { tools: (glama.tools || []).length, score: glama.qualityScore ?? glama.score ?? null }
+  : { tools: null, score: null };
+
 // ---- listings -----------------------------------------------------------
 const reg = await getJSON(`https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.krystiangw/meet-live-assist`);
 const pr = gh('repos/punkpeye/awesome-mcp-servers/pulls/12002', '.state + " " + (.merged_at // "")');
@@ -152,6 +159,7 @@ console.log(`\n  GitHub   ${n(g.openIssues)} open issues (${n(g.issuesFromOthers
   + `${n(g.prsFromOthers)} outside PRs`);
 if (g.newestIssue) console.log(`           newest: #${g.newestIssue.n} by ${g.newestIssue.by} - ${g.newestIssue.title}`);
 console.log(`  Store    ${n(out.store.status)}, serving ${n(out.store.version)}`);
+console.log(`  Glama    ${n(out.glama.tools)} tools indexed, score ${n(out.glama.score)}`);
 console.log(`\n  Listings MCP registry: ${out.listings.mcpRegistry} · awesome-mcp PR #12002: ${out.listings.awesomeMcpPr}`);
 console.log('\n  Not measurable: source-zip downloads from the release page, and Chrome Web Store installs');
 console.log('  while the item is unlisted - the dashboard has them, no public API does. Neither is zero.\n');

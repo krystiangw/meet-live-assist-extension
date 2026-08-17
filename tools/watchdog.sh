@@ -49,6 +49,8 @@ const watch = [
   ['open issues', ['github', 'openIssues'], false],
   ['store status', ['store', 'status'], true],
   ['store version', ['store', 'version'], true],
+  ['Glama tools indexed', ['glama', 'tools'], true],
+  ['Glama score', ['glama', 'score'], true],
   ['MCP registry', ['listings', 'mcpRegistry'], true],
   ['awesome-mcp PR', ['listings', 'awesomeMcpPr'], true],
 ];
