@@ -12,6 +12,13 @@ agreed to, and the sentence to say next, in the meeting's language.
   cameras are off, as they are on most working calls. The interface is the shipping one.</em>
 </p>
 
+**[Install from the Chrome Web Store](https://chromewebstore.google.com/detail/meet-live-assist/elhddnpchalnmgcgdicegfggifojbadk)** · **[the site](https://meet-live-assist.github.io/)** ·
+one command for the server: `npx meet-live-assist-server`
+
+The store link is one click and updates itself; the repo works loaded unpacked and never does. Either way
+the server and the skill below are still yours to run, and without an agent attached the advice pane stays
+empty by design.
+
 During a Google Meet or Zoom call this captures the transcript, shows it in a side panel, and hands it to
 an assistant running on your own computer. The assistant answers back in the panel while the call is still
 going: what to say, what was decided, who owns what, what you just agreed to that you should not have.
