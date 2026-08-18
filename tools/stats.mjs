@@ -103,6 +103,20 @@ try {
   out.store = { status: null, version: null };
 }
 
+// The listing page carries three things the update service does not: the rating, the version the store
+// displays, and the date it says it was updated. It is scraped, so class names will change under us one day.
+// Every field is therefore optional and a parse failure reads as null - "unknown" - never as zero, because a
+// rating that silently reads 0 is indistinguishable from nobody having rated it yet.
+try {
+  const r = await fetch(`https://chromewebstore.google.com/detail/meet-live-assist/${EXT}`,
+    { signal: AbortSignal.timeout(25000) });
+  const html = await r.text();
+  const pick = (re) => (html.match(re) || [])[1] || null;
+  out.store.listedVersion = pick(/Version<\/div><div[^>]*>([^<]{1,20})</);
+  out.store.updated = pick(/Updated<\/div><div[^>]*>([^<]{1,30})</);
+  out.store.rating = pick(/([\d.]+) out of 5 stars/);
+} catch (_) { /* leave the fields absent rather than guessing */ }
+
 // ---- npm ----------------------------------------------------------------
 const [day, week] = await Promise.all([
   getJSON(`https://api.npmjs.org/downloads/point/last-day/${PKG}`),
@@ -164,7 +178,8 @@ else {
 console.log(`\n  GitHub   ${n(g.openIssues)} open issues (${n(g.issuesFromOthers)} from other people), `
   + `${n(g.prsFromOthers)} outside PRs`);
 if (g.newestIssue) console.log(`           newest: #${g.newestIssue.n} by ${g.newestIssue.by} - ${g.newestIssue.title}`);
-console.log(`  Store    ${n(out.store.status)}, serving ${n(out.store.version)}`);
+console.log(`  Store    ${n(out.store.status)}, serving ${n(out.store.version)}`
+  + `, listed ${n(out.store.listedVersion)} (updated ${n(out.store.updated)}), rating ${n(out.store.rating)}/5`);
 console.log(`  Glama    ${n(out.glama.tools)} tools indexed, score ${n(out.glama.score)}`);
 console.log(`\n  Listings MCP registry: ${out.listings.mcpRegistry} · awesome-mcp PR #12002: ${out.listings.awesomeMcpPr}`);
 console.log('\n  Not measurable: source-zip downloads from the release page, and Chrome Web Store installs');
