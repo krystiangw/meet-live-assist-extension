@@ -36,8 +36,10 @@ extension posts one line into the meeting chat saying an assistant is transcribi
 
 - [Extension and server](https://github.com/krystiangw/meet-live-assist-extension): source, install
   instructions and the MCP tool list.
-- [npm package](https://www.npmjs.com/package/meet-live-assist-server): the companion server,
-  `npx meet-live-assist-server`.
+- npm package `meet-live-assist-server`: the companion server. Start it with
+  `npx meet-live-assist-server`, or run the MCP adapter directly with
+  `npx -p meet-live-assist-server meet-live-assist-mcp`. (npmjs.com answers 403 to non-browser clients,
+  so there is deliberately no link here - the package name is the addressable thing.)
 
 ## Independence
 

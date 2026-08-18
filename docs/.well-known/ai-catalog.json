@@ -1,0 +1,28 @@
+{
+  "specVersion": "1.0",
+  "host": {
+    "displayName": "Meet Live Assist",
+    "identifier": "meet-live-assist.github.io",
+    "documentationUrl": "https://meet-live-assist.github.io/reference.html"
+  },
+  "entries": [
+    {
+      "identifier": "urn:air:meet-live-assist.github.io:tools:mcp",
+      "displayName": "Meet Live Assist MCP server",
+      "description": "Puts the agent you already run inside a live Google Meet or Zoom call: it reads the on-screen captions and answers in a side panel while people are still talking.",
+      "type": "application/mcp-server-card+json",
+      "url": "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.krystiangw/meet-live-assist",
+      "tags": ["meetings", "google-meet", "zoom", "transcription", "local-first", "mcp"],
+      "capabilities": ["read-live-transcript", "post-advice-to-side-panel", "track-decisions-and-action-items", "post-to-meeting-chat", "screenshot-a-shared-screen"],
+      "representativeQueries": [
+        "how do I get my AI agent to help me during a live meeting",
+        "MCP server that reads a Google Meet or Zoom transcript in real time",
+        "meeting assistant that runs locally and does not join the call as a bot",
+        "AI notetaker alternative that uses my own Claude Code session instead of a hosted model",
+        "how do I let an agent see what is being said in a call without sending it to a vendor"
+      ],
+      "version": "0.7.3",
+      "updatedAt": "2026-08-18T00:00:00Z"
+    }
+  ]
+}

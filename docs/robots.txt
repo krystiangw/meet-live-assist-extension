@@ -2,3 +2,5 @@ User-agent: *
 Allow: /
 
 Sitemap: https://meet-live-assist.github.io/sitemap.xml
+
+AI-Catalog: https://meet-live-assist.github.io/.well-known/ai-catalog.json
